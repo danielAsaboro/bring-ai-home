@@ -9,7 +9,8 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test test/**/*.test.ts"
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "ep01": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/01-first-model.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.16.0",
