@@ -1,3 +1,3 @@
 [submodule "script"]
 	path = script
-	url = git@github.com:danielAsaboro/bring-ai-home-scripts.git
+	url = https://github.com/danielAsaboro/bring-ai-home-scripts.git
