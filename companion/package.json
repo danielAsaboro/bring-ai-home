@@ -10,9 +10,13 @@
   "scripts": {
     "check": "tsc --noEmit",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "fixture:audio": "tsx scripts/make-audio-fixture.ts",
     "ep01": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/01-first-model.ts",
     "ep03": "tsx src/episodes/03-model-anatomy.ts",
-    "ep04": "QVAC_WORKER_PATH=qvac/worker.memory.mjs tsx src/episodes/04-memory.ts"
+    "ep04": "QVAC_WORKER_PATH=qvac/worker.memory.mjs tsx src/episodes/04-memory.ts",
+    "ep05": "npm run ep05:transcribe && npm run ep05:index",
+    "ep05:transcribe": "QVAC_WORKER_PATH=qvac/worker.speech.mjs tsx src/episodes/05-senses.ts",
+    "ep05:index": "QVAC_WORKER_PATH=qvac/worker.memory.mjs tsx src/episodes/05-index-transcript.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.16.0",
