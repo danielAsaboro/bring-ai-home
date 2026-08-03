@@ -17,6 +17,7 @@
     "ep05": "npm run ep05:transcribe && npm run ep05:index",
     "ep05:transcribe": "QVAC_WORKER_PATH=qvac/worker.speech.mjs tsx src/episodes/05-senses.ts",
     "ep05:index": "QVAC_WORKER_PATH=qvac/worker.memory.mjs tsx src/episodes/05-index-transcript.ts"
+    ,"ep06": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/06-agent.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.16.0",
