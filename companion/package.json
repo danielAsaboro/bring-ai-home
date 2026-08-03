@@ -19,7 +19,10 @@
     "ep05:index": "QVAC_WORKER_PATH=qvac/worker.memory.mjs tsx src/episodes/05-index-transcript.ts",
     "ep06": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/06-agent.ts",
     "ep07:provider": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/07-provider.ts",
-    "ep07:consumer": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/07-consumer.ts"
+    "ep07:consumer": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/07-consumer.ts",
+    "ep08": "npm run ep08:retrieve && npm run ep08:answer",
+    "ep08:retrieve": "QVAC_WORKER_PATH=qvac/worker.memory.mjs tsx src/episodes/08-retrieve.ts",
+    "ep08:answer": "QVAC_WORKER_PATH=qvac/worker.entry.mjs tsx src/episodes/08-assistant.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.16.0",
