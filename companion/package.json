@@ -8,7 +8,8 @@
     "npm": "11.12.1"
   },
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test test/**/*.test.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.16.0",
