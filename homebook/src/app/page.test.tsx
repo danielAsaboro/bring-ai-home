@@ -12,4 +12,3 @@ describe("Homebook home", () => {
     ).toBeInTheDocument();
   });
 });
-

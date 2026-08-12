@@ -12,4 +12,3 @@ describe("Circle home", () => {
     ).toBeInTheDocument();
   });
 });
-

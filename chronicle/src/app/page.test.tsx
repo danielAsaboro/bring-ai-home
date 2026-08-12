@@ -12,4 +12,3 @@ describe("Chronicle home", () => {
     ).toBeInTheDocument();
   });
 });
-

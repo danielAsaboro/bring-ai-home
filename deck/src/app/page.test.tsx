@@ -12,4 +12,3 @@ describe("Deck home", () => {
     ).toBeInTheDocument();
   });
 });
-

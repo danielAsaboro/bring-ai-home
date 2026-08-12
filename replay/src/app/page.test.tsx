@@ -12,4 +12,3 @@ describe("Replay home", () => {
     ).toBeInTheDocument();
   });
 });
-

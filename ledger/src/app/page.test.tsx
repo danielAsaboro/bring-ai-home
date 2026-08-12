@@ -12,4 +12,3 @@ describe("Ledger home", () => {
     ).toBeInTheDocument();
   });
 });
-

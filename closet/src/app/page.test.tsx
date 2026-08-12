@@ -12,4 +12,3 @@ describe("Closet home", () => {
     ).toBeInTheDocument();
   });
 });
-

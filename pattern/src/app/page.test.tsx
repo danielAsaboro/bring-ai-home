@@ -12,4 +12,3 @@ describe("Pattern home", () => {
     ).toBeInTheDocument();
   });
 });
-
