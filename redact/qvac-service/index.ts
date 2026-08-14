@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { createQvacOcrAnalyzer } from "./qvac-analyzer";
 import { resolveLocalQvacPaths } from "./local-config";
+import { createDecisionReasoner } from "./reasoning";
 import { createQvacService } from "./server";
 
 const port = Number.parseInt(process.env.REDACT_QVAC_PORT ?? "4317", 10);
@@ -21,6 +22,14 @@ async function main() {
   process.env.SNAP_USER_COMMON = runtimeHome;
 
   const qvac = await import("@qvac/sdk");
+  const reasoner = createDecisionReasoner({
+    runtime: {
+      loadModel: (options) => qvac.loadModel(options as never),
+      decide: (options) => qvac.decide(options as never) as never,
+      unloadModel: (options) => qvac.unloadModel(options),
+    },
+    modelSource: qvac.LAYA_421M_Q8_0,
+  });
   const analyzer = createQvacOcrAnalyzer({
     runtime: {
       loadModel: (options) => qvac.loadModel(options as never),
@@ -29,6 +38,7 @@ async function main() {
       close: () => qvac.close(),
     },
     modelSource: qvac.OCR_LATIN,
+    reasoner,
   });
   const server = createQvacService({ analyzer });
   server.listen(port, "127.0.0.1", () => {
