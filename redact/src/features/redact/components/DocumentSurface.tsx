@@ -1,4 +1,4 @@
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { RasterPage, RedactionMark } from "../workflow-domain";
 
 export type RedactionGeometry = Pick<
@@ -28,11 +28,8 @@ export function DocumentSurface({
   onCreate?(geometry: RedactionGeometry): void;
   onChange?(id: string, geometry: RedactionGeometry): void;
 }) {
-  const [source] = useState(() =>
-    URL.createObjectURL(new Blob([page.pngBytes], { type: "image/png" })),
-  );
+  const source = useMemo(() => `data:image/png;base64,${pngBase64(page.pngBytes)}`, [page.pngBytes]);
   const [interaction, setInteraction] = useState<Interaction | null>(null);
-  useEffect(() => () => URL.revokeObjectURL(source), [source]);
   const interactive = mode === "original" && Boolean(onCreate || onChange);
 
   function pointFromEvent(event: ReactPointerEvent<HTMLElement>): Point {
@@ -189,4 +186,13 @@ function clamp(value: number, minimum: number, maximum: number) {
 
 function round(value: number) {
   return Math.round(value * 10_000) / 10_000;
+}
+
+function pngBase64(bytes: ArrayBuffer): string {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  for (let offset = 0; offset < view.length; offset += 0x8000) {
+    binary += String.fromCharCode(...view.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
 }
