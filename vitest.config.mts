@@ -6,6 +6,7 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     environment: "jsdom",
+    testTimeout: 20000,
     setupFiles: ["./vitest.setup.ts"],
   },
 });

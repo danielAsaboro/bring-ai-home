@@ -1,7 +1,5 @@
+import { ReplayApp } from "@/features/replay/replay-app";
+
 export default function Home() {
-  return (
-    <main>
-      <h1>Replay</h1>
-    </main>
-  );
+  return <ReplayApp />;
 }

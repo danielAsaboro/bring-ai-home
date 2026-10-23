@@ -79,4 +79,4 @@ npm test
 npm run build
 ```
 
-The complete starter will expose a visible **Reset demo data** action. Until its product wave is implemented, this directory contains the independently verified Next.js and test foundation.
+The header has a visible **Reset demo data** action that restores the fictional sample tapes. Library state lives in `localStorage` behind one adapter, `src/features/replay/library-store.ts`. Replay never performs a step for you; a run records what you say happened.
