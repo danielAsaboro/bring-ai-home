@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "qvac:ocr-smoke": "node qvac-service/ocr-smoke.mjs"
+    "qvac:ocr-smoke": "node qvac-service/ocr-smoke.mjs",
+    "qvac:service": "node qvac-service/main.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",
