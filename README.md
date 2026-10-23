@@ -1,25 +1,39 @@
-# Bring AI Home docs
+# Bring AI Home
 
-Mintlify documentation source for Bring AI Home.
+Ten small apps that move everyday AI work onto your own machine with [QVAC](https://docs.qvac.tether.io). The lessons live at [bringaihome.xyz](https://bringaihome.xyz).
 
-## Preview
+`main` is the site. Each app lives on its own branch, one commit per lesson.
+
+| App | Branch |
+|---|---|
+| Chronicle | `course/chronicle-qvac` |
+| Circle | `course/circle-qvac` |
+| Closet | `course/closet-qvac` |
+| Deck | `course/deck-qvac` |
+| Homebook | `course/homebook-qvac` |
+| Ledger | `course/ledger-qvac` |
+| Lookout | `course/lookout-qvac` |
+| Pattern | `course/pattern-qvac` |
+| Redact | `course/redact-qvac` |
+| Replay | `course/replay-qvac` |
+
+## Follow along
 
 ```bash
-cd /Users/MAC/development/bring-ai-home/blog
-mint dev --port 3333
+git clone https://github.com/danielAsaboro/bring-ai-home
+cd bring-ai-home
+git checkout <hash from the lesson>
+npm ci
+npm run dev
 ```
 
-Install the CLI if needed: `npm install -g mint`.
+Check out the branch instead of a hash to get the finished app. Redact's lessons use the starter zip and patches in `downloads/redact/`.
 
-## Verify
+## Run the site
 
 ```bash
-mint validate
-mint broken-links
+npm install -g mint
+mint dev
 ```
 
-Edit branding and navigation in `docs.json`. Add content as `.mdx` pages.
-
-## Hosting
-
-Local setup does not create a hosted Mintlify site. Connect a repository through the Mintlify dashboard and select `blog` as the documentation directory when using the parent repository. No publishing is performed by this setup.
+Mintlify connects to this repository at its root; `docs.json` is the config.

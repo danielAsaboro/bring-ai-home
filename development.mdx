@@ -11,10 +11,9 @@ Install a current Node.js release and the Mintlify CLI if they are not already a
 npm install -g mint
 ```
 
-Run the preview from this directory:
+Run the preview from the repository root:
 
 ```bash
-cd /Users/MAC/development/bring-ai-home/blog
 mint dev --port 3333
 ```
 
@@ -22,7 +21,7 @@ Open `http://localhost:3333`. The preview reloads when you save a page.
 
 ## Add a page
 
-1. Create an `.mdx` file inside this directory.
+1. Create an `.mdx` file in the repository.
 2. Add a title and description in YAML frontmatter.
 3. Write the page body below the frontmatter.
 4. Add the file's path, without `.mdx`, to a group in `docs.json`.
@@ -31,7 +30,7 @@ For example, `articles/first-post.mdx` is registered as `articles/first-post`.
 
 ## Validate changes
 
-Run these commands from the `blog` directory:
+Run these commands from the repository root:
 
 ```bash
 mint validate
@@ -40,6 +39,6 @@ mint broken-links
 
 ## Publish with Mintlify
 
-Connect the documentation repository in your Mintlify dashboard. If the repository contains the whole Bring AI Home project, configure `docs` as its documentation directory. Confirm the branch and deployment settings before publishing.
+Connect the documentation repository in your Mintlify dashboard. The site lives at the repository root, so no documentation directory is needed. Confirm the branch and deployment settings before publishing.
 
 See the [Mintlify quickstart](https://mintlify.com/docs/quickstart) for the hosted setup.
