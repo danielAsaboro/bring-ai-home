@@ -1,0 +1,18 @@
+FICTIONAL SAMPLE DOCUMENT. Aquaterra is an invented brand for the Homebook course.
+=== page 1 ===
+Aquaterra AT-50G gas water heater. Owner's manual. Keep this manual near the heater.
+Model AT-50G holds 50 US gallons. Read every safety notice before lighting the pilot.
+=== page 4 ===
+Lighting the pilot. Turn the gas control knob to OFF and wait five minutes for gas to clear.
+Turn the knob to PILOT, press and hold it, and press the igniter button until the pilot lights.
+Keep holding the knob for 60 seconds after the pilot lights, then turn it to ON.
+If the pilot will not stay lit after three attempts, close the gas supply and call a qualified technician.
+=== page 7 ===
+Flushing sediment. Flush the tank once every 12 months.
+Turn the gas control to VACATION, close the cold water supply valve, attach a hose to the drain valve,
+and drain about four gallons until the water runs clear. Refill the tank completely before returning to ON.
+=== page 9 ===
+Anode rod. Inspect the anode rod every 24 months. Replace it when more than six inches of core wire is exposed.
+=== page 12 ===
+Warranty. The tank is covered for six years from installation. Parts are covered for one year.
+Keep the dated receipt. The warranty does not cover damage from sediment when the tank was never flushed.

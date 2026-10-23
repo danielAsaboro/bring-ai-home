@@ -1,6 +1,6 @@
 # Homebook
 
-> **Status:** Non-AI starter foundation. The QVAC capabilities below are planned course work, not features currently present in the app.
+> **Status:** The non-AI binder works on `main`. Branch `course/homebook-qvac` adds local QVAC features one lesson per commit.
 
 ## 1. Product thesis
 
@@ -79,4 +79,4 @@ npm test
 npm run build
 ```
 
-The complete starter will expose a visible **Reset demo data** action. Until its product wave is implemented, this directory contains the independently verified Next.js and test foundation.
+The binder saves to `localStorage` through one adapter (`src/features/homebook/storage.ts`). The header has a visible **Reset demo data** action. Every home, brand, serial number, and manual in `src/features/homebook/binder.ts` and `public/test-files/homebook/` is fictional.

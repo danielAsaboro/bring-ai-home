@@ -1,0 +1,11 @@
+FICTIONAL SAMPLE DOCUMENT. Brightwash is an invented brand for the Homebook course.
+=== page 2 ===
+Brightwash BW-300 dishwasher. Use and care guide.
+=== page 6 ===
+Cleaning the filter. Clean the filter once a month. Twist the cylindrical filter counter-clockwise and lift it out.
+Rinse it under warm running water. Do not use a wire brush. Refit the filter and twist clockwise until it locks.
+=== page 8 ===
+Error code E4 means water has collected in the base. Turn off the dishwasher and the water supply.
+Do not run the dishwasher again until the leak is found.
+=== page 11 ===
+Warranty. Parts and labour are covered for two years from the date of purchase shown on the receipt.
