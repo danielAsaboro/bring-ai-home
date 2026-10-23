@@ -36,7 +36,7 @@ async function tryLoad(label, options) {
 
 // Listen first. Each capability switches on when its model has loaded, so the
 // deck gets a clear 503 instead of a hanging request while models download.
-const capabilities = { retrieve: null };
+const capabilities = { retrieve: null, propose: null };
 const server = createDeckServer(capabilities);
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Deck QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
@@ -58,6 +58,29 @@ if (index && embedId) {
     model: "GTE_LARGE_FP16",
   });
   process.stderr.write("Note retrieval ready\n");
+}
+
+const llmId = await tryLoad("Text model", { modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" });
+async function completeJson(history, name, schema) {
+  const run = sdk.completion({
+    modelId: llmId,
+    history,
+    stream: true,
+    responseFormat: { type: "json_schema", json_schema: { name, schema } },
+  });
+  return (await run.final).contentText;
+}
+if (index && embedId && llmId) {
+  const { searchNotes } = await import("../src/features/deck/notes-index.ts");
+  const { buildProposalHistory, PROPOSAL_JSON_SCHEMA } = await import("../src/features/deck/claim-proposals.ts");
+  capabilities.propose = async (request) => {
+    const passages = searchNotes(index, await embedOne(request.topic), { limit: 4, minScore: 0.3 });
+    // No retrieved sections means nothing to cite, so the model is not asked.
+    if (passages.length === 0) return { text: "", passages, model: "LLAMA_3_2_1B_INST_Q4_0" };
+    const text = await completeJson(buildProposalHistory(request, passages), "claim_cards", PROPOSAL_JSON_SCHEMA);
+    return { text, passages, model: "LLAMA_3_2_1B_INST_Q4_0 + GTE_LARGE_FP16" };
+  };
+  process.stderr.write("Card proposals ready\n");
 }
 
 async function shutdown() {

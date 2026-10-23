@@ -1,5 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import {
+  parseClaimProposals,
+  parseProposeRequest,
+  type ProposeRequest,
+} from "../src/features/deck/claim-proposals.ts";
 import type { ScoredChunk } from "../src/features/deck/notes-index.ts";
 
 export const SERVICE_PORT = 4321;
@@ -7,8 +12,12 @@ const MAX_BODY_BYTES = 256 * 1024;
 
 export type NotesRetriever = (query: string) => Promise<{ passages: ScoredChunk[]; model: string }>;
 
+// Retrieves sections, then asks the LLM. Returns raw model text for the app to validate.
+export type ClaimProposer = (request: ProposeRequest) => Promise<{ text: string; passages: ScoredChunk[]; model: string }>;
+
 export type Capabilities = {
   retrieve: NotesRetriever | null;
+  propose: ClaimProposer | null;
 };
 
 export class Unavailable extends Error {}
@@ -66,6 +75,18 @@ export function createDeckServer(capabilities: Capabilities) {
       const query = parseQuery(body);
       if (!capabilities.retrieve) throw new Unavailable("Note retrieval is not available");
       return { query, ...(await capabilities.retrieve(query)) };
+    },
+    "/propose": async (body) => {
+      let request: ProposeRequest;
+      try {
+        request = parseProposeRequest(body);
+      } catch (error) {
+        throw new BadRequest((error as Error).message);
+      }
+      if (!capabilities.propose) throw new Unavailable("Card proposals are not available");
+      const { text, passages, model } = await capabilities.propose(request);
+      if (passages.length === 0) return { model, passages, proposals: [], dropped: [] };
+      return { model, passages, ...parseClaimProposals(text, passages) };
     },
   };
 

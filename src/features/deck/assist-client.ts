@@ -1,3 +1,4 @@
+import type { ClaimProposal } from "./claim-proposals";
 import type { ScoredChunk } from "./notes-index";
 
 export const SERVICE_URL = "http://127.0.0.1:4321";
@@ -15,8 +16,16 @@ export class AssistError extends Error {
 
 export type RetrieveResult = { query: string; model: string; passages: ScoredChunk[] };
 
+export type ProposeResult = {
+  model: string;
+  passages: ScoredChunk[];
+  proposals: ClaimProposal[];
+  dropped: { title: string; reason: string }[];
+};
+
 export type AssistClient = {
   retrieve(query: string): Promise<RetrieveResult>;
+  propose(topic: string, audience: string): Promise<ProposeResult>;
 };
 
 // Every failure becomes one of four kinds, so the UI can say what went wrong
@@ -42,5 +51,6 @@ export function createAssistClient(baseUrl = SERVICE_URL, fetchImpl: typeof fetc
 
   return {
     retrieve: (query) => post<RetrieveResult>("/retrieve", { query }),
+    propose: (topic, audience) => post<ProposeResult>("/propose", { topic, audience }),
   };
 }

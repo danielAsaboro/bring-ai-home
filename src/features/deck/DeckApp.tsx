@@ -22,6 +22,7 @@ import {
 } from "./deck";
 import { createAssistClient, type AssistClient } from "./assist-client";
 import { NotesPanel } from "./NotesPanel";
+import { ProposalPanel } from "./ProposalPanel";
 import { createLocalStore, type LibraryStore } from "./storage";
 
 const noopSubscribe = () => () => undefined;
@@ -91,6 +92,12 @@ function DeckView({ store, client }: { store: LibraryStore; client: AssistClient
 
         <PacingView deck={deck} />
         <NotesPanel client={client} />
+        <ProposalPanel
+          key={deck.id}
+          deck={deck}
+          client={client}
+          onAccept={(card) => commit(addCard(library, deck.id, { kind: "claim", treatment: "headline", seconds: 40, ...card }))}
+        />
 
         <div className="grid gap-3 lg:grid-cols-3">
           {deck.rounds.map((round, i) => (
