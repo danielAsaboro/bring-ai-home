@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { ModelState } from "../src/features/replay/service-contract.ts";
-import type { Transcriber } from "./server.ts";
+import type { Transcriber, Viewer } from "./server.ts";
 
 type Sdk = typeof import("@qvac/sdk");
 
@@ -72,6 +72,28 @@ export function createQvacTranscriber(): Transcriber & { close(): Promise<void> 
       const modelId = await model.ensure();
       const segments = await (await sdk()).transcribe({ modelId, audioChunk: wavPath, metadata: true });
       return segments.map((s) => ({ text: s.text, startMs: s.startMs, endMs: s.endMs }));
+    },
+    close: model.close,
+  };
+}
+
+export function createQvacViewer(): Viewer & { close(): Promise<void> } {
+  const model = lazyModel("multimodal", "SMOLVLM2_500M_MULTIMODAL_Q8_0", (q) =>
+    q.loadModel({
+      modelSrc: q.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+      modelConfig: { ctx_size: 1024, projectionModelSrc: q.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+    }),
+  );
+  return {
+    modelState: model.modelState,
+    async describe(imagePath, prompt) {
+      const modelId = await model.ensure();
+      const run = (await sdk()).completion({
+        modelId,
+        history: [{ role: "user", content: prompt, attachments: [{ path: imagePath }] }],
+        stream: true,
+      });
+      return (await run.final).contentText;
     },
     close: model.close,
   };

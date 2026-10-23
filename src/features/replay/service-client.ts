@@ -1,8 +1,10 @@
 import {
+  parseReadScreenshotResponse,
   parseServiceError,
   parseTranscribeResponse,
   SERVICE_URL,
   type Parsed,
+  type ReadScreenshotResponse,
   type TranscribeResponse,
 } from "./service-contract.ts";
 
@@ -58,4 +60,12 @@ export async function transcribeRecording(
 ): Promise<ClientResult<TranscribeResponse>> {
   const audioBase64 = await fileToBase64(file);
   return postJson("/v1/transcribe", { fileName: file.name, audioBase64 }, parseTranscribeResponse, fetchImpl);
+}
+
+export async function readScreenshot(
+  file: File,
+  fetchImpl?: typeof fetch,
+): Promise<ClientResult<ReadScreenshotResponse>> {
+  const imageBase64 = await fileToBase64(file);
+  return postJson("/v1/read-screenshot", { fileName: file.name, imageBase64 }, parseReadScreenshotResponse, fetchImpl);
 }

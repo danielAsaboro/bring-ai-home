@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { toNarration, type NarrationSegment } from "../src/features/replay/narration.ts";
-import { parseTranscribeRequest, type ModelState } from "../src/features/replay/service-contract.ts";
+import { parseScreenNote, SCREEN_NOTE_PROMPT } from "../src/features/replay/screen-notes.ts";
+import {
+  parseReadScreenshotRequest,
+  parseTranscribeRequest,
+  type ModelState,
+} from "../src/features/replay/service-contract.ts";
 
 // Each model sits behind its own small door. Tests inject fakes; main.ts injects QVAC.
 export type Transcriber = {
@@ -13,7 +18,25 @@ export type Transcriber = {
   transcribe(wavPath: string): Promise<NarrationSegment[]>;
 };
 
-export type ServiceModels = { transcriber?: Transcriber };
+// A multimodal model that looks at one image file and answers in plain text.
+export type Viewer = {
+  modelState(): ModelState;
+  describe(imagePath: string, prompt: string): Promise<string>;
+};
+
+export type ServiceModels = { transcriber?: Transcriber; viewer?: Viewer };
+
+// Write request bytes to a private temp file for the length of one model call.
+async function withTempFile<T>(name: string, bytes: Buffer, run: (filePath: string) => Promise<T>) {
+  const directory = await mkdtemp(path.join(tmpdir(), "replay-"));
+  try {
+    const filePath = path.join(directory, name);
+    await writeFile(filePath, bytes);
+    return await run(filePath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
 const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
@@ -66,10 +89,7 @@ export function createReplayServer(models: ServiceModels) {
       const audio = Buffer.from(parsed.value.audioBase64, "base64");
       const sourceDigest = createHash("sha256").update(audio).digest("hex");
       // The recording lives on disk only for the length of this request.
-      const directory = await mkdtemp(path.join(tmpdir(), "replay-"));
-      try {
-        const wavPath = path.join(directory, "narration.wav");
-        await writeFile(wavPath, audio);
+      return withTempFile("narration.wav", audio, async (wavPath) => {
         const started = Date.now();
         const segments = await transcriber.transcribe(wavPath);
         let narration;
@@ -79,8 +99,23 @@ export function createReplayServer(models: ServiceModels) {
           throw new RequestError(422, "no_speech", (cause as Error).message);
         }
         return { sourceDigest, model: transcriber.modelState().id, transcribeMs: Date.now() - started, narration };
-      } finally {
-        await rm(directory, { recursive: true, force: true });
+      });
+    });
+  }
+
+  if (models.viewer) {
+    const viewer = models.viewer;
+    routes.set("/v1/read-screenshot", async (req) => {
+      const parsed = parseReadScreenshotRequest(await readJson(req, 25_000_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const image = Buffer.from(parsed.value.imageBase64, "base64");
+      const sourceDigest = createHash("sha256").update(image).digest("hex");
+      const ext = parsed.value.fileName.toLowerCase().split(".").pop();
+      const raw = await withTempFile(`screen.${ext}`, image, (p) => viewer.describe(p, SCREEN_NOTE_PROMPT));
+      try {
+        return { sourceDigest, model: viewer.modelState().id, note: parseScreenNote(raw) };
+      } catch (cause) {
+        throw new RequestError(422, "empty_note", (cause as Error).message);
       }
     });
   }

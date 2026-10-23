@@ -1,14 +1,15 @@
 import { fileURLToPath } from "node:url";
 
 import { SERVICE_PORT } from "../src/features/replay/service-contract.ts";
-import { createQvacTranscriber, closeSdk, prepareQvacConfig } from "./qvac-models.ts";
+import { closeSdk, createQvacTranscriber, createQvacViewer, prepareQvacConfig } from "./qvac-models.ts";
 import { createReplayServer } from "./server.ts";
 
 prepareQvacConfig(fileURLToPath(new URL("../", import.meta.url)));
 
 const transcriber = createQvacTranscriber();
-const closers = [transcriber];
-const server = createReplayServer({ transcriber });
+const viewer = createQvacViewer();
+const closers = [transcriber, viewer];
+const server = createReplayServer({ transcriber, viewer });
 
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stdout.write(`Replay QVAC service listening on http://127.0.0.1:${SERVICE_PORT}\n`);

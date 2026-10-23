@@ -3,8 +3,8 @@
 import { useState } from "react";
 
 import { formatTimestamp } from "./narration";
-import { transcribeRecording } from "./service-client";
-import type { TranscribeResponse } from "./service-contract";
+import { readScreenshot, transcribeRecording } from "./service-client";
+import type { ReadScreenshotResponse, TranscribeResponse } from "./service-contract";
 
 type Status = { kind: "idle" } | { kind: "working"; label: string } | { kind: "error"; code: string; message: string };
 
@@ -13,6 +13,8 @@ export function DemonstrationPanel() {
   const [recording, setRecording] = useState<File | null>(null);
   const [narration, setNarration] = useState<TranscribeResponse | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [notes, setNotes] = useState<(ReadScreenshotResponse & { fileName: string })[]>([]);
   const btn = "rounded border border-stone-700 px-3 py-1 text-sm disabled:opacity-40";
 
   async function transcribe() {
@@ -21,6 +23,18 @@ export function DemonstrationPanel() {
     const result = await transcribeRecording(recording);
     if (result.ok) {
       setNarration(result.value);
+      setStatus({ kind: "idle" });
+    } else {
+      setStatus({ kind: "error", code: result.code, message: result.message });
+    }
+  }
+
+  async function readScreen() {
+    if (!screenshot) return;
+    setStatus({ kind: "working", label: "Reading the screenshot on this machine…" });
+    const result = await readScreenshot(screenshot);
+    if (result.ok) {
+      setNotes((n) => [...n, { ...result.value, fileName: screenshot.name }]);
       setStatus({ kind: "idle" });
     } else {
       setStatus({ kind: "error", code: result.code, message: result.message });
@@ -47,11 +61,37 @@ export function DemonstrationPanel() {
           Transcribe locally
         </button>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-sm">
+          Screenshot (.png, .jpg)
+          <input
+            type="file"
+            accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+            className="ml-2 text-sm"
+            onChange={(e) => setScreenshot(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        <button type="button" className={btn} disabled={!screenshot || status.kind === "working"} onClick={readScreen}>
+          Read screenshot locally
+        </button>
+      </div>
       {status.kind === "working" && <p role="status">{status.label}</p>}
       {status.kind === "error" && (
         <p role="alert" className="text-sm text-red-300">
           {status.message} <span className="font-mono text-xs">({status.code})</span>
         </p>
+      )}
+      {notes.length > 0 && (
+        <ul aria-label="Screen notes" className="space-y-1 text-sm">
+          {notes.map((n) => (
+            <li key={n.sourceDigest}>
+              <span className="mr-2 text-xs text-stone-400">
+                {n.fileName} · {n.model} · proposed description
+              </span>
+              {n.note.text}
+            </li>
+          ))}
+        </ul>
       )}
       {narration && (
         <div>
