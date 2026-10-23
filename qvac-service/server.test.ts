@@ -82,6 +82,20 @@ describe("Closet local service", () => {
     });
   });
 
+  it("bounds embedding requests", async () => {
+    // Fixture vectors, hand-written.
+    const base = await start({ embed: async (texts) => ({ embeddings: texts.map(() => [1, 0]), model: "fixture" }) });
+    expect((await post(`${base}/embed`, { texts: [] })).status).toBe(400);
+    expect((await post(`${base}/embed`, { texts: ["a", 3] })).status).toBe(400);
+    expect(await (await post(`${base}/embed`, { texts: ["a", "b"] })).json()).toEqual({
+      embeddings: [
+        [1, 0],
+        [1, 0],
+      ],
+      model: "fixture",
+    });
+  });
+
   it("refuses foreign origins", async () => {
     const base = await start({});
     expect((await post(`${base}/describe`, pngRequest, { origin: "https://example.com" })).status).toBe(403);

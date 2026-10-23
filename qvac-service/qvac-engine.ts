@@ -40,6 +40,9 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
   const LLM_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
   const llm = () => model(LLM_MODEL, () => sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }));
 
+  const EMBED_MODEL = "GTE_LARGE_FP16";
+  const embedder = () => model(EMBED_MODEL, () => sdk.loadModel({ modelSrc: sdk.GTE_LARGE_FP16, modelType: "embeddings" }));
+
   // QVAC ships a small bundled classifier (food/report/other). A wardrobe
   // classifier is a custom GGUF you point at with CLOSET_CLASSIFIER_GGUF.
   const customClassifier = process.env.CLOSET_CLASSIFIER_GGUF;
@@ -92,6 +95,11 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
       });
       const final = await run.final;
       return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async embed(texts) {
+      const modelId = await embedder();
+      const { embedding } = await sdk.embed({ modelId, text: texts });
+      return { embeddings: embedding as number[][], model: EMBED_MODEL };
     },
     async classify(image) {
       const modelId = await classifier();

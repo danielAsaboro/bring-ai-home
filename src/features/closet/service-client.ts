@@ -104,3 +104,24 @@ export function classifyGarment(image: { name: string; dataUrl: string }, fetchF
     fetchFn,
   );
 }
+
+export function embedTexts(texts: string[], fetchFn?: Fetch) {
+  return callService(
+    "/embed",
+    { texts },
+    (json) => {
+      const v = json as { embeddings?: unknown; model?: unknown };
+      const vectors = v.embeddings;
+      if (
+        typeof v.model !== "string" ||
+        !Array.isArray(vectors) ||
+        vectors.length !== texts.length ||
+        !vectors.every((e) => Array.isArray(e) && e.length > 0 && e.length === vectors[0].length && e.every(Number.isFinite))
+      ) {
+        throw new Error("Expected one finite vector of equal length per text");
+      }
+      return { embeddings: vectors as number[][], model: v.model };
+    },
+    fetchFn,
+  );
+}

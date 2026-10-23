@@ -17,6 +17,7 @@ import {
   type Closet,
   type Garment,
 } from "./model";
+import { LookSearch } from "./LookSearch";
 import { PhotoReview } from "./PhotoReview";
 import { sampleCloset } from "./sample-closet";
 
@@ -135,6 +136,7 @@ function Thumb({ garment, size = 64 }: { garment: Garment; size?: number }) {
 function Feed({ closet, byId }: { closet: Closet; byId: Map<string, Garment> }) {
   return (
     <section aria-label="Feed">
+      <LookSearch closet={closet} />
       <ul aria-label="Stories" className="mb-4 flex gap-3 overflow-x-auto pb-2">
         {(["worn", "washing", "repair"] as const).map((state) => {
           const count = closet.garments.filter((g) => g.state === state).length;

@@ -12,6 +12,7 @@ export type ClosetEngine = {
   // Returns the model's raw JSON text. The browser validates it.
   details?: (description: string) => Promise<{ raw: string; model: string }>;
   // Returns every label and confidence. The browser decides whether one is usable.
+  embed?: (texts: string[]) => Promise<{ embeddings: number[][]; model: string }>;
   classify?: (image: GarmentImage) => Promise<{ results: { label: string; confidence: number }[]; model: string }>;
 };
 
@@ -82,6 +83,17 @@ const ROUTES: Record<string, Route> = {
   "/details": (body, engine) => {
     if (!engine.details) return null;
     return engine.details(requireText(body, "description"));
+  },
+  "/embed": (body, engine) => {
+    if (!engine.embed) return null;
+    const texts = (body as { texts?: unknown } | null)?.texts;
+    if (!Array.isArray(texts) || texts.length === 0 || texts.length > 64) {
+      throw new Error("Request must contain 1 to 64 texts");
+    }
+    if (!texts.every((t) => typeof t === "string" && t.trim() && t.length <= 1000)) {
+      throw new Error("Each text must be a non-empty string under 1000 characters");
+    }
+    return engine.embed(texts as string[]);
   },
   "/classify": (body, engine) => {
     if (!engine.classify) return null;
