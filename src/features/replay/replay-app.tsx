@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { mergeConditions } from "./conditions";
 import { DemonstrationPanel } from "./demonstration-panel";
 import { filterByWords } from "./search";
+import { tapeToSkill } from "./skill-export";
 import { findTape } from "./service-client";
 import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
 import {
@@ -295,6 +296,7 @@ function TapeEditor({
           Add frame
         </button>
       </form>
+      <SkillExport tape={tape} />
       <div className="grid gap-3 md:grid-cols-3">
         <ListField
           label="Parameters (name = example)"
@@ -326,6 +328,44 @@ function TapeEditor({
         />
       </div>
     </section>
+  );
+}
+
+function SkillExport({ tape }: { tape: Tape }) {
+  const [preview, setPreview] = useState<{ fileName: string; content: string } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  function exportSkill() {
+    try {
+      const skill = tapeToSkill(tape);
+      setProblem(null);
+      setPreview(skill);
+      const url = URL.createObjectURL(new Blob([skill.content], { type: "text/markdown" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "SKILL.md";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setProblem(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <button type="button" onClick={exportSkill} className="rounded border border-stone-700 px-3 py-1 text-sm">
+        Export as agent skill
+      </button>
+      {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
+      {preview && (
+        <figure>
+          <figcaption className="text-xs text-stone-400">{preview.fileName} · written by Replay, not by a model</figcaption>
+          <pre aria-label="Skill preview" className="max-h-64 overflow-auto rounded bg-stone-900 p-2 text-xs">
+            {preview.content}
+          </pre>
+        </figure>
+      )}
+    </div>
   );
 }
 

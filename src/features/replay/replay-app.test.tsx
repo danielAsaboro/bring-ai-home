@@ -71,4 +71,16 @@ describe("ReplayApp", () => {
     await user.click(screen.getByRole("button", { name: "Find tape" }));
     expect(await within(shelf).findByText(/Showing word matches instead/)).toBeInTheDocument();
   });
+
+  it("exports the selected tape as SKILL.md without calling any service", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    URL.createObjectURL = vi.fn(() => "blob:skill");
+    URL.revokeObjectURL = vi.fn();
+    const user = userEvent.setup();
+    render(<ReplayApp store={memoryStore()} />);
+    await user.click(screen.getByRole("button", { name: "Export as agent skill" }));
+    expect(screen.getByLabelText("Skill preview")).toHaveTextContent("name: publish-the-weekly-report");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
