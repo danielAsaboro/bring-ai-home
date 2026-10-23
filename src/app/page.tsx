@@ -1,7 +1,9 @@
+import { ControlRoom } from "@/features/lookout/ControlRoom";
+
 export default function Home() {
   return (
     <main>
-      <h1>Lookout</h1>
+      <ControlRoom />
     </main>
   );
 }
