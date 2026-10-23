@@ -2,9 +2,12 @@ import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { buildProposalHistory, parseProposal } from "../src/features/ledger/categories.ts";
+import { entryText, SAMPLE_BOOK } from "../src/features/ledger/sample-book.ts";
+import { rankSimilar, type IndexedEntry } from "../src/features/ledger/similar.ts";
 import {
   parseProposeRequest,
   parseReadReceiptRequest,
+  parseSimilarRequest,
   type ModelState,
   type OcrBlock,
 } from "../src/features/ledger/receipt-contract.ts";
@@ -23,7 +26,13 @@ export type Proposer = {
   complete(history: { role: string; content: string }[]): Promise<string>;
 };
 
-export type ServiceModels = { proposer?: Proposer };
+// Embeddings behind their own door. Vectors only; ranking is plain code.
+export type Embedder = {
+  modelState(): ModelState;
+  embed(texts: string[]): Promise<number[][]>;
+};
+
+export type ServiceModels = { proposer?: Proposer; embedder?: Embedder };
 
 export const unavailableReader: ReceiptReader = {
   modelState: () => ({ kind: "ocr", id: "not-configured", state: "not_loaded" }),
@@ -60,6 +69,18 @@ async function readBody(req: IncomingMessage, limit: number): Promise<string> {
 }
 
 export function createReceiptServer(reader: ReceiptReader, models: ServiceModels = {}) {
+  let bookIndex: Promise<IndexedEntry[]> | undefined;
+  function indexBook(embedder: Embedder) {
+    bookIndex ??= embedder
+      .embed(SAMPLE_BOOK.map(entryText))
+      .then((vectors) => SAMPLE_BOOK.map((entry, i) => ({ entryId: entry.id, vector: vectors[i] })))
+      .catch((cause: unknown) => {
+        bookIndex = undefined;
+        throw cause;
+      });
+    return bookIndex;
+  }
+
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (origin !== undefined && !LOOPBACK_ORIGIN.test(origin)) {
@@ -78,6 +99,7 @@ export function createReceiptServer(reader: ReceiptReader, models: ServiceModels
     if (req.method === "GET" && req.url === "/health") {
       const states = [reader.modelState()];
       if (models.proposer) states.push(models.proposer.modelState());
+      if (models.embedder) states.push(models.embedder.modelState());
       send(res, 200, { service: "ready", models: states }, origin);
       return;
     }
@@ -144,6 +166,30 @@ export function createReceiptServer(reader: ReceiptReader, models: ServiceModels
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         send(res, 500, error("llm_failed", message), origin);
+      }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/similar" && models.embedder) {
+      let json: unknown;
+      try {
+        json = JSON.parse(await readBody(req, 10_000));
+      } catch {
+        send(res, 400, error("invalid_json", "Body must be JSON"), origin);
+        return;
+      }
+      const parsed = parseSimilarRequest(json);
+      if (!parsed.ok) {
+        send(res, 400, error("invalid_request", parsed.message), origin);
+        return;
+      }
+      try {
+        const index = await indexBook(models.embedder);
+        const [query] = await models.embedder.embed([parsed.value.text]);
+        const matches = rankSimilar(index, query, { limit: 3, minScore: 0.5 });
+        send(res, 200, { model: models.embedder.modelState().id, matches }, origin);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        send(res, 500, error("embeddings_failed", message), origin);
       }
       return;
     }

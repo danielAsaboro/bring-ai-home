@@ -151,3 +151,22 @@ export function parseProposeResponse(value: unknown): Result<ProposeResponse> {
   }
   return { ok: true, value: value as ProposeResponse };
 }
+
+export type SimilarResponse = { model: string; matches: { entryId: string; score: number }[] };
+
+export function parseSimilarRequest(value: unknown): Result<{ text: string }> {
+  if (!isRecord(value) || !isNonEmptyString(value.text) || value.text.length > 500) {
+    return { ok: false, message: "text must be a non-empty string under 500 characters" };
+  }
+  return { ok: true, value: { text: value.text } };
+}
+
+export function parseSimilarResponse(value: unknown): Result<SimilarResponse> {
+  if (!isRecord(value) || !isNonEmptyString(value.model) || !Array.isArray(value.matches)) {
+    return { ok: false, message: "Invalid similarity response" };
+  }
+  const ok = value.matches.every(
+    (m) => isRecord(m) && isNonEmptyString(m.entryId) && typeof m.score === "number",
+  );
+  return ok ? { ok: true, value: value as SimilarResponse } : { ok: false, message: "Invalid match" };
+}

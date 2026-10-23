@@ -10,8 +10,9 @@ import { ReceiptInbox } from "./receipt-inbox";
 function fakeClient(
   read: ReceiptClient["readReceipt"],
   propose: ReceiptClient["propose"] = vi.fn(),
+  similar: ReceiptClient["similar"] = vi.fn(),
 ): ReceiptClient {
-  return { health: vi.fn(), readReceipt: read, propose };
+  return { health: vi.fn(), readReceipt: read, propose, similar };
 }
 
 const readFixture: ReceiptClient["readReceipt"] = async (input) => ({
@@ -94,5 +95,20 @@ describe("receipt pocket", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Propose merchant and category" }));
 
     expect(await screen.findByText(/Proposal rejected/)).toHaveTextContent("not on the list");
+  });
+
+  it("lists similar past entries from the sample book (hand-written scores)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]))));
+    const similar = vi.fn(async () => ({
+      model: "GTE_LARGE_FP16",
+      matches: [{ entryId: "e4", score: 0.83 }],
+    }));
+    render(<ReceiptInbox client={fakeClient(readFixture, vi.fn(), similar)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Read sample receipt" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Find similar past entries" }));
+
+    expect(similar).toHaveBeenCalledWith({ text: "CORNER CAFE" });
+    expect(await screen.findByText(/Bean There Coffee/)).toHaveTextContent("similarity 0.830");
   });
 });

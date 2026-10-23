@@ -1,6 +1,8 @@
 import {
   parseHealthResponse,
   parseProposeResponse,
+  parseSimilarResponse,
+  type SimilarResponse,
   type ProposeResponse,
   parseReadReceiptResponse,
   parseServiceError,
@@ -18,6 +20,7 @@ export type ReceiptClient = {
     input: { merchantText: string; lineDescriptions: string[] },
     signal?: AbortSignal,
   ): Promise<ProposeResponse>;
+  similar(input: { text: string }, signal?: AbortSignal): Promise<SimilarResponse>;
 };
 
 function bytesToBase64(bytes: ArrayBuffer): string {
@@ -87,6 +90,19 @@ export function createReceiptClient(
       });
       const parsed = parseProposeResponse(
         await readJson(response, "Local service returned an invalid proposal response"),
+      );
+      if (!parsed.ok) throw new Error(parsed.message);
+      return parsed.value;
+    },
+    async similar(input, signal) {
+      const response = await fetchImpl(`${baseUrl}/v1/similar`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+        signal,
+      });
+      const parsed = parseSimilarResponse(
+        await readJson(response, "Local service returned an invalid similarity response"),
       );
       if (!parsed.ok) throw new Error(parsed.message);
       return parsed.value;

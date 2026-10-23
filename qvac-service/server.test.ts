@@ -86,4 +86,24 @@ describe("local receipt service", () => {
     expect(body.result).toEqual({ ok: false, reason: 'Category "Coffee" is not on the list' });
     expect(JSON.stringify(complete.mock.calls[0])).not.toMatch(/\d+\.\d{2}/);
   });
+
+  it("embeds the book once and ranks matches in code (hand-made vectors)", async () => {
+    const embed = vi.fn(async (texts: string[]) =>
+      texts.map((t) => (t.includes("Coffee") || t.includes("Bakery") || t.includes("Cafe") ? [1, 0] : [0, 1])),
+    );
+    const url = await start(unavailableReader, {
+      embedder: { modelState: () => ({ kind: "embeddings", id: "GTE_LARGE_FP16", state: "ready" }), embed },
+    });
+    const ask = () =>
+      fetch(`${url}/v1/similar`, { method: "POST", body: JSON.stringify({ text: "Corner Cafe (Eating out)" }) });
+
+    const body = await (await ask()).json();
+    await ask();
+
+    expect(body.matches).toEqual([
+      { entryId: "e1", score: 1 },
+      { entryId: "e4", score: 1 },
+    ]);
+    expect(embed).toHaveBeenCalledTimes(3); // book once, then one query per request
+  });
 });

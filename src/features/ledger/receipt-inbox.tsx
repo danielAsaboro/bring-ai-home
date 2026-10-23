@@ -5,7 +5,8 @@ import { useState } from "react";
 import { proposalInputFromDraft } from "./categories";
 import { draftFromOcr, formatCents, type DraftTransaction, type Evidence } from "./draft-transactions";
 import { createReceiptClient, type ReceiptClient } from "./receipt-client";
-import type { ProposeResponse } from "./receipt-contract";
+import type { ProposeResponse, SimilarResponse } from "./receipt-contract";
+import { SAMPLE_BOOK } from "./sample-book";
 
 const SAMPLE_URL = "/test-files/ledger/receipt-corner-cafe.png";
 
@@ -14,6 +15,12 @@ type ProposalStatus =
   | { kind: "working" }
   | { kind: "error"; message: string }
   | { kind: "done"; response: ProposeResponse };
+
+type SimilarStatus =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "error"; message: string }
+  | { kind: "done"; response: SimilarResponse };
 
 type Status =
   | { kind: "idle" }
@@ -34,7 +41,19 @@ function Source({ evidence }: { evidence: Evidence<unknown> | null }) {
 export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [proposal, setProposal] = useState<ProposalStatus>({ kind: "idle" });
+  const [similar, setSimilar] = useState<SimilarStatus>({ kind: "idle" });
   const api = () => client ?? createReceiptClient();
+
+  async function findSimilar(draft: DraftTransaction) {
+    const proposed = proposal.kind === "done" && proposal.response.result.ok ? proposal.response.result.proposal : null;
+    const text = proposed ? `${proposed.merchant} (${proposed.category})` : (draft.merchant?.value ?? "");
+    setSimilar({ kind: "working" });
+    try {
+      setSimilar({ kind: "done", response: await api().similar({ text }) });
+    } catch (error) {
+      setSimilar({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   async function propose(draft: DraftTransaction) {
     setProposal({ kind: "working" });
@@ -48,6 +67,7 @@ export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
   async function read(fileName: string, bytes: ArrayBuffer) {
     setStatus({ kind: "reading" });
     setProposal({ kind: "idle" });
+    setSimilar({ kind: "idle" });
     try {
       const receiptId = `${Date.now()}`;
       const result = await api().readReceipt({ receiptId, fileName, pngBytes: bytes });
@@ -162,6 +182,27 @@ export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
               <p role="alert">
                 Proposal rejected: {proposal.response.result.reason}. Raw output: <code>{proposal.response.raw}</code>
               </p>
+            )}
+          </section>
+          <section aria-label="Similar past entries">
+            <button type="button" onClick={() => findSimilar(status.draft)} disabled={similar.kind === "working"}>
+              Find similar past entries
+            </button>
+            {similar.kind === "working" && <p role="status">Comparing with your book…</p>}
+            {similar.kind === "error" && <p role="alert">Could not compare: {similar.message}</p>}
+            {similar.kind === "done" && similar.response.matches.length === 0 && <p>No close past entries.</p>}
+            {similar.kind === "done" && similar.response.matches.length > 0 && (
+              <ul>
+                {similar.response.matches.map((match) => {
+                  const entry = SAMPLE_BOOK.find((e) => e.id === match.entryId);
+                  return (
+                    <li key={match.entryId}>
+                      {entry ? `${entry.date} ${entry.merchant} · ${entry.category}` : match.entryId} · similarity{" "}
+                      {match.score.toFixed(3)}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </section>
         </article>
