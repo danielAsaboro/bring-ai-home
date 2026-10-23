@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { LabelFact, OcrBlock } from "../src/features/homebook/label-facts.ts";
 import { proposeLabelFacts } from "../src/features/homebook/label-facts.ts";
 import { parseAssetIdentity } from "../src/features/homebook/asset-identity.ts";
+import type { CitedAnswer } from "../src/features/homebook/cited-answer.ts";
 
 export const SERVICE_PORT = 4319;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
@@ -12,10 +13,22 @@ export type LabelReader = (image: Buffer) => Promise<{ blocks: OcrBlock[]; model
 
 export type PhotoDescriber = (image: Buffer, mimeType: string) => Promise<{ text: string; model: string }>;
 
+export type ManualAnswerer = (question: string, docIds?: string[]) => Promise<CitedAnswer & { model: string }>;
+
 export type Capabilities = {
   label: LabelReader | null;
   identify: PhotoDescriber | null;
+  ask: ManualAnswerer | null;
 };
+
+export function parseQuestion(value: unknown): { question: string; docIds?: string[] } {
+  const v = value as { question?: unknown; docIds?: unknown } | null;
+  if (!v || typeof v.question !== "string" || !v.question.trim() || v.question.length > 500) {
+    throw new Error("Request must contain a question of at most 500 characters");
+  }
+  const docIds = Array.isArray(v.docIds) && v.docIds.every((d) => typeof d === "string") ? (v.docIds as string[]) : undefined;
+  return { question: v.question.trim(), docIds };
+}
 
 export type ImageRequest = { fileName: string; mimeType: string; image: Buffer };
 
@@ -80,6 +93,11 @@ export function createHomebookServer(capabilities: Capabilities) {
       if (!capabilities.identify) throw new Unavailable("Photo identification is not available");
       const { text, model } = await capabilities.identify(request.image, request.mimeType);
       return { fileName: request.fileName, model, identity: parseAssetIdentity(text) };
+    },
+    "/ask": async (body) => {
+      const { question, docIds } = parseQuestion(body);
+      if (!capabilities.ask) throw new Unavailable("Manual answers are not available");
+      return { question, ...(await capabilities.ask(question, docIds)) };
     },
   };
 

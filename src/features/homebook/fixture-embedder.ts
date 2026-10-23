@@ -1,4 +1,4 @@
-import type { Embedder } from "./manual-index";
+import type { Embedder } from "./manual-index.ts";
 
 // A deterministic bag-of-words embedder for tests only. It is not a model and
 // its scores say nothing about how GTE_LARGE_FP16 would rank these pages.

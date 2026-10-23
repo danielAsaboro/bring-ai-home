@@ -40,7 +40,7 @@ describe("Homebook local service", () => {
   });
 
   it("turns OCR blocks into proposed label facts", async () => {
-    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
     const res = await post(`${base}/label`, png);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -49,19 +49,33 @@ describe("Homebook local service", () => {
   });
 
   it("validates a photo identification against Homebook's categories", async () => {
-    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
     const body = await (await post(`${base}/identify`, png)).json();
     expect(body.identity).toMatchObject({ kind: "proposed-identity", category: "water-heater", name: "Gas water heater" });
   });
 
+  it("passes a question to the answerer and returns its citations", async () => {
+    // Fixture answerer: a hand-written reply, not model output.
+    const ask: Capabilities["ask"] = async () => ({
+      status: "answered",
+      answer: "Wait five minutes before relighting [1].",
+      citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
+      model: "fixture-llm",
+    });
+    const base = await start({ label: null, identify: null, ask });
+    const body = await (await post(`${base}/ask`, { question: "How do I relight the pilot?" })).json();
+    expect(body.citations[0].page).toBe(4);
+    expect((await post(`${base}/ask`, { question: " " })).status).toBe(400);
+  });
+
   it("answers 503 when the model is not loaded, and 400 for a bad image", async () => {
-    const base = await start({ label: null, identify: null });
+    const base = await start({ label: null, identify: null, ask: null });
     expect((await post(`${base}/label`, png)).status).toBe(503);
     expect((await post(`${base}/label`, { ...png, mimeType: "image/gif" })).status).toBe(400);
   });
 
   it("refuses a foreign origin before reading the request", async () => {
-    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
     expect((await post(`${base}/label`, png, "https://example.com")).status).toBe(403);
   });
 });

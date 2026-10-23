@@ -31,6 +31,12 @@ function fixtureClient(overrides: Partial<AssistClient> = {}): AssistClient {
         rawText: "category: water heater; name: gas water heater",
       },
     }),
+    ask: async () => ({
+      status: "answered",
+      answer: "Turn the knob to OFF and wait five minutes before relighting [1].",
+      citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
+      model: "fixture-llm",
+    }),
     ...overrides,
   } as AssistClient;
 }
@@ -61,6 +67,17 @@ describe("label review", () => {
     expect(store.saved).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "Use category" }));
     expect(store.saved.at(-1)?.assets[0].category).toBe("water-heater");
+  });
+
+  it("shows an answer with a link to the cited manual page", async () => {
+    render(<Homebook store={memoryStore()} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.type(screen.getByLabelText("Ask this asset's manuals"), "How do I relight the pilot?");
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+    const answer = await screen.findByRole("group", { name: "Manual answer" });
+    expect(within(answer).getByRole("link", { name: "Aquaterra AT-50G owner's manual, page 4" })).toHaveAttribute(
+      "href",
+      "/test-files/homebook/aquaterra-at50g-manual.txt",
+    );
   });
 
   it("explains a stopped service and leaves the binder alone", async () => {

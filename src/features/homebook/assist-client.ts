@@ -1,4 +1,5 @@
 import type { AssetIdentity } from "./asset-identity";
+import type { CitedAnswer } from "./cited-answer";
 import type { LabelFact } from "./label-facts";
 
 export const SERVICE_URL = "http://127.0.0.1:4319";
@@ -43,6 +44,7 @@ export async function imageBody(file: File) {
 export type AssistClient = {
   readLabel(file: File): Promise<{ facts: LabelFact[]; model: string }>;
   identify(file: File): Promise<{ identity: AssetIdentity; model: string }>;
+  ask(question: string, docIds: string[]): Promise<CitedAnswer & { model: string }>;
 };
 
 export const serviceClient: AssistClient = {
@@ -51,5 +53,8 @@ export const serviceClient: AssistClient = {
   },
   async identify(file) {
     return postJson("/identify", await imageBody(file));
+  },
+  async ask(question, docIds) {
+    return postJson("/ask", { question, docIds });
   },
 };

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +37,7 @@ async function tryLoad(label, options) {
 
 // Listen first. Each capability switches on when its model has loaded, so the
 // binder gets a clear 503 instead of a hanging request while models download.
-const capabilities = { label: null, identify: null };
+const capabilities = { label: null, identify: null, ask: null };
 const server = createHomebookServer(capabilities);
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Homebook QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
@@ -82,6 +82,38 @@ if (vlmId) {
     }
   };
   process.stderr.write("Photo identification ready\n");
+}
+
+// Manual answers need the index from qvac:ingest-manuals, an embedder, and an LLM.
+const index = await readFile(path.join(qvacDirectory, "manual-index.json"), "utf8")
+  .then((text) => JSON.parse(text))
+  .catch(() => {
+    process.stderr.write("No manual index yet. Run npm run qvac:ingest-manuals first.\n");
+    return null;
+  });
+const embedId = index ? await tryLoad("Manual embeddings", { modelSrc: sdk?.GTE_LARGE_FP16, modelType: "embeddings" }) : null;
+const llmId = index ? await tryLoad("Answer model", { modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }) : null;
+if (index && embedId && llmId) {
+  const { searchManuals } = await import("../src/features/homebook/manual-index.ts");
+  const { answerFromManuals } = await import("../src/features/homebook/cited-answer.ts");
+  capabilities.ask = async (question, docIds) => {
+    const result = await answerFromManuals(
+      question,
+      {
+        embedQuery: async (text) => (await sdk.embed({ modelId: embedId, text })).embedding,
+        search: (vector, ids) => searchManuals(index, vector, { limit: 3, minScore: 0.3, docIds: ids }),
+        complete: async (history) => {
+          const run = sdk.completion({ modelId: llmId, history, stream: true });
+          let text = "";
+          for await (const token of run.tokenStream) text += token;
+          return text;
+        },
+      },
+      docIds,
+    );
+    return { ...result, model: "LLAMA_3_2_1B_INST_Q4_0 + GTE_LARGE_FP16" };
+  };
+  process.stderr.write("Manual answers ready\n");
 }
 
 async function shutdown() {

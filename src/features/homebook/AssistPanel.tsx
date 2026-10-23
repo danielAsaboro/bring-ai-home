@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import { AssistError, serviceClient, type AssistClient } from "./assist-client";
 import type { AssetIdentity } from "./asset-identity";
-import type { Asset, AssetCategory } from "./binder";
+import type { Asset, AssetCategory, FiledDocument } from "./binder";
+import type { CitedAnswer } from "./cited-answer";
 import type { LabelFact, LabelField } from "./label-facts";
 
 const FIELD_NAMES: Record<LabelField, string> = {
@@ -18,10 +19,12 @@ type Status = { state: "idle" } | { state: "working"; what: string } | { state: 
 
 export function AssistPanel({
   asset,
+  manuals = [],
   client = serviceClient,
   onAccept,
 }: {
   asset: Asset;
+  manuals?: FiledDocument[];
   client?: AssistClient;
   onAccept: (field: LabelField | "category" | "name", value: string) => void;
 }) {
@@ -43,6 +46,17 @@ export function AssistPanel({
 
   const [identity, setIdentity] = useState<{ assetId: string; model: string; value: AssetIdentity } | null>(null);
 
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<{ assetId: string; model: string; value: CitedAnswer } | null>(null);
+
+  async function onAsk(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!question.trim()) return;
+    const docIds = manuals.map((m) => m.id);
+    const result = await run("Searching your manuals locally…", () => client.ask(question, docIds));
+    if (result) setAnswer({ assetId: asset.id, model: result.model, value: result });
+  }
+
   async function onPhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -59,6 +73,7 @@ export function AssistPanel({
     if (result) setFacts({ assetId: asset.id, model: result.model, items: result.facts });
   }
 
+  const visibleAnswer = answer?.assetId === asset.id ? answer : null;
   const visibleIdentity = identity?.assetId === asset.id ? identity : null;
   const acceptCategory = (category: AssetCategory) => {
     onAccept("category", category);
@@ -99,6 +114,47 @@ export function AssistPanel({
               Dismiss
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {manuals.length > 0 ? (
+        <form onSubmit={onAsk} aria-label="Ask the manuals" className="space-y-1">
+          <label className="block font-medium" htmlFor="manual-question">Ask this asset&apos;s manuals</label>
+          <div className="flex gap-2">
+            <input
+              id="manual-question"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="How do I relight the pilot?"
+              className="flex-1 rounded border border-stone-400 bg-white px-2 py-1"
+            />
+            <button type="submit" className="rounded bg-emerald-800 px-3 py-1 text-white">Ask</button>
+          </div>
+        </form>
+      ) : (
+        <p className="text-xs text-stone-600">File a manual for this asset to ask questions about it.</p>
+      )}
+
+      {visibleAnswer ? (
+        <div aria-label="Manual answer" role="group" className="rounded border border-stone-300 bg-white p-2">
+          {visibleAnswer.value.status === "answered" ? (
+            <>
+              <p>{visibleAnswer.value.answer}</p>
+              <ol className="mt-1 text-xs">
+                {visibleAnswer.value.citations.map((c) => (
+                  <li key={c.n}>
+                    [{c.n}]{" "}
+                    <a className="underline" href={`/test-files/homebook/${c.file}`} target="_blank" rel="noreferrer">
+                      {c.title}, page {c.page}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-1 text-xs text-stone-600">Drafted by {visibleAnswer.model}. The manual page is the authority; check it before acting.</p>
+            </>
+          ) : (
+            <p>{visibleAnswer.value.message}</p>
+          )}
         </div>
       ) : null}
 

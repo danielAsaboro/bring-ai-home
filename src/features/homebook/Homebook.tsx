@@ -206,6 +206,7 @@ function BinderView({ store, today, client }: { store: BinderStore; today: strin
 
             <AssistPanel
               asset={selected}
+              manuals={binder.documents.filter((d) => d.assetId === selected.id && d.kind === "manual" && d.file)}
               client={client}
               onAccept={(field, value) => attempt(() => updateAsset(binder, { ...selected, [field]: value }))}
             />
