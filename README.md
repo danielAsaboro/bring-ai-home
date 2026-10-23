@@ -1,6 +1,6 @@
 # Circle
 
-> **Status:** Non-AI starter foundation. The QVAC capabilities below are planned course work, not features currently present in the app.
+> **Status:** Course complete on branch `course/circle-qvac`: a working non-AI phonebook (chapter 01) plus local transcription, structured extraction, human confirmation, retrieval, and optional drafts through a loopback QVAC service (chapters 02–08).
 
 ## 1. Product thesis
 
