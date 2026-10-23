@@ -9,7 +9,16 @@ export type GarmentImage = { name: string; bytes: Uint8Array; mime: "image/png" 
 // a missing one answers 503 and the app keeps its manual path.
 export type ClosetEngine = {
   describe?: (image: GarmentImage) => Promise<{ description: string; model: string }>;
+  // Returns the model's raw JSON text. The browser validates it.
+  details?: (description: string) => Promise<{ raw: string; model: string }>;
 };
+
+function requireText(body: unknown, key: string, max = 2000): string {
+  const value = (body as Record<string, unknown> | null)?.[key];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Request must contain ${key}`);
+  if (value.length > max) throw new Error(`${key} is too long`);
+  return value;
+}
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return true; // curl and other local tools send no Origin
@@ -67,6 +76,10 @@ const ROUTES: Record<string, Route> = {
     if (!engine.describe) return null;
     const image = parseGarmentImage(body);
     return engine.describe(image);
+  },
+  "/details": (body, engine) => {
+    if (!engine.details) return null;
+    return engine.details(requireText(body, "description"));
   },
 };
 

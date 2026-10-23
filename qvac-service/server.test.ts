@@ -63,6 +63,16 @@ describe("Closet local service", () => {
     expect(await res.json()).toEqual({ description: "fixture text", model: "fixture" });
   });
 
+  it("passes the model's raw details through for the browser to judge", async () => {
+    // Fixture engine output, hand-written.
+    const base = await start({ details: async () => ({ raw: '{"category":"jacket"}', model: "fixture" }) });
+    expect((await post(`${base}/details`, {})).status).toBe(400);
+    expect(await (await post(`${base}/details`, { description: "a coat" })).json()).toEqual({
+      raw: '{"category":"jacket"}',
+      model: "fixture",
+    });
+  });
+
   it("refuses foreign origins", async () => {
     const base = await start({});
     expect((await post(`${base}/describe`, pngRequest, { origin: "https://example.com" })).status).toBe(403);

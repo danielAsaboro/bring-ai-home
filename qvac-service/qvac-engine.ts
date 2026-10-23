@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildDetailsHistory, GARMENT_PROPOSAL_SCHEMA } from "../src/features/closet/garment-proposal.ts";
 import { DESCRIBE_GARMENT_PROMPT, resolveLocalQvacPaths, VISION_MODEL } from "./local-config.ts";
 import type { ClosetEngine, GarmentImage } from "./server.ts";
 
@@ -36,6 +37,9 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
       }),
     );
 
+  const LLM_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
+  const llm = () => model(LLM_MODEL, () => sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }));
+
   // The vision model reads attachments from disk, so stage the upload briefly.
   async function withTempImage<T>(image: GarmentImage, work: (file: string) => Promise<T>) {
     const dir = await mkdtemp(path.join(tmpdir(), "closet-"));
@@ -63,6 +67,20 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
         if (!description) throw new Error("The model returned an empty description");
         return { description, model: VISION_MODEL };
       });
+    },
+    async details(description) {
+      const modelId = await llm();
+      const run = sdk.completion({
+        modelId,
+        history: buildDetailsHistory(description),
+        stream: true,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: { name: "garment", schema: GARMENT_PROPOSAL_SCHEMA as unknown as Record<string, unknown> },
+        },
+      });
+      const final = await run.final;
+      return { raw: final.contentText, model: LLM_MODEL };
     },
     async close() {
       for (const pending of loaded.values()) {

@@ -74,3 +74,16 @@ export function describeGarment(image: { name: string; dataUrl: string }, fetchF
     fetchFn,
   );
 }
+
+export function proposeDetails(description: string, fetchFn?: Fetch) {
+  return callService(
+    "/details",
+    { description },
+    (json) => {
+      const v = json as { raw?: unknown; model?: unknown };
+      if (typeof v.raw !== "string" || typeof v.model !== "string") throw new Error("Malformed details");
+      return { raw: v.raw, model: v.model };
+    },
+    fetchFn,
+  );
+}

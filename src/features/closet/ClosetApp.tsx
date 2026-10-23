@@ -17,6 +17,7 @@ import {
   type Closet,
   type Garment,
 } from "./model";
+import { PhotoReview } from "./PhotoReview";
 import { sampleCloset } from "./sample-closet";
 
 type Tab = "feed" | "garments" | "assemble" | "packing";
@@ -162,7 +163,14 @@ function Feed({ closet, byId }: { closet: Closet; byId: Map<string, Garment> }) 
   );
 }
 
-const emptyDraft = { name: "", category: "top" as Category, colour: "", material: "", notes: "" };
+const emptyDraft = {
+  name: "",
+  category: "top" as Category,
+  colour: "",
+  material: "",
+  notes: "",
+  image: null as string | null,
+};
 
 function Garments({ closet, act }: { closet: Closet; act: (c: (c: Closet) => Closet) => void }) {
   const [draft, setDraft] = useState(emptyDraft);
@@ -170,12 +178,24 @@ function Garments({ closet, act }: { closet: Closet; act: (c: (c: Closet) => Clo
 
   return (
     <section aria-label="Garments">
+      <PhotoReview
+        onApply={(fields, image) =>
+          setDraft({
+            ...emptyDraft,
+            name: fields.name ?? "",
+            category: fields.category ?? emptyDraft.category,
+            colour: fields.colour ?? "",
+            material: fields.material ?? "",
+            image,
+          })
+        }
+      />
       <form
         aria-label="Add garment"
         className="mb-4 grid grid-cols-2 gap-2 rounded-lg bg-stone-50 p-3 text-sm"
         onSubmit={(e) => {
           e.preventDefault();
-          act((c) => addGarment(c, { ...draft, image: null }));
+          act((c) => addGarment(c, draft));
           setDraft(emptyDraft);
         }}
       >
@@ -204,7 +224,7 @@ function Garments({ closet, act }: { closet: Closet; act: (c: (c: Closet) => Clo
           <input value={draft.material} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className="rounded border px-2 py-1" />
         </label>
         <button type="submit" className="col-span-2 rounded bg-stone-900 px-3 py-1 text-white">
-          Add garment
+          {draft.image ? "Add garment with photo" : "Add garment"}
         </button>
       </form>
 
