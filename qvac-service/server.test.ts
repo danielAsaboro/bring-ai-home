@@ -69,3 +69,14 @@ describe("Lookout service boundary", () => {
     expect((await res.json()).raw).toBe('{"sourceId":"driveway"}');
   });
 });
+
+describe("placement", () => {
+  it("reports where vision runs", async () => {
+    const server = createLookoutServer({ checker: fixtureChecker, placement: "delegated to 192.168.1.20:50052" });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const health = await (await fetch(`${url}/health`)).json();
+    server.close();
+    expect(health.vision).toEqual({ model: "fixture-checker", state: "configured", placement: "delegated to 192.168.1.20:50052" });
+  });
+});

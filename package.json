@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "qvac:check-smoke": "node --no-warnings qvac-service/check-frame-smoke.mjs",
     "qvac:service": "node --no-warnings qvac-service/serve.mjs",
-    "qvac:measure": "node --no-warnings qvac-service/measure.mjs"
+    "qvac:measure": "node --no-warnings qvac-service/measure.mjs",
+    "qvac:rpc-host": "node --no-warnings qvac-service/rpc-host.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",

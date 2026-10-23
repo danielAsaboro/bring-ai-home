@@ -58,9 +58,11 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 export function createLookoutServer({
   checker,
   proposer = null,
+  placement = "this machine",
 }: {
   checker: FrameChecker | null;
   proposer?: WatcherProposer | null;
+  placement?: string;
 }) {
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
@@ -73,7 +75,7 @@ export function createLookoutServer({
         200,
         {
           service: "ready",
-          vision: checker ? { model: checker.model, state: "configured" } : { state: "not_configured" },
+          vision: checker ? { model: checker.model, state: "configured", placement } : { state: "not_configured" },
           language: proposer ? { model: proposer.model, state: "configured" } : { state: "not_configured" },
         },
         origin,
