@@ -10,7 +10,8 @@ export type Action =
   | { type: "remove-example"; patternId: string; exampleId: string }
   | { type: "save-revision"; patternId: string; id: string; savedAt: string; note: string }
   | { type: "restore-revision"; patternId: string; revisionId: string }
-  | { type: "replace-all"; patterns: Pattern[] };
+  | { type: "replace-all"; patterns: Pattern[] }
+  | { type: "apply-proposal"; patternId: string; rules: Rule[]; model: string; ids: [string, string]; savedAt: string };
 
 function edit(patterns: Pattern[], id: string, change: (p: Pattern) => Pattern): Pattern[] {
   return patterns.map((p) => (p.id === id ? change(p) : p));
@@ -54,6 +55,17 @@ export function reduce(patterns: Pattern[], action: Action): Pattern[] {
         revisions: [
           ...p.revisions,
           { id: action.id, savedAt: action.savedAt, note: action.note, rules: structuredClone(p.rules) },
+        ],
+      }));
+    case "apply-proposal":
+      // A person confirmed it. Keep the old weave first, so the change can be undone.
+      return edit(patterns, action.patternId, (p) => ({
+        ...p,
+        rules: structuredClone(action.rules),
+        revisions: [
+          ...p.revisions,
+          { id: action.ids[0], savedAt: action.savedAt, note: "Before proposal", rules: structuredClone(p.rules) },
+          { id: action.ids[1], savedAt: action.savedAt, note: `Applied proposal from ${action.model}`, rules: structuredClone(action.rules) },
         ],
       }));
     case "restore-revision":

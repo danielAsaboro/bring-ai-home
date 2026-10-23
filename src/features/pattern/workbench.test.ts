@@ -21,6 +21,22 @@ describe("pattern workbench state", () => {
     expect(patterns.find((p) => p.id === "p-invoices")!.rules).toHaveLength(2);
   });
 
+  it("applies a confirmed proposal as a reversible revision pair", () => {
+    let patterns = reduce(samplePatterns, {
+      type: "apply-proposal",
+      patternId: "p-vendors",
+      rules: [{ kind: "trim", collapse: true }, { kind: "case", to: "title" }],
+      model: "fixture",
+      ids: ["r-a", "r-b"],
+      savedAt: "2026-01-01T00:00:00Z",
+    });
+    const vendors = patterns.find((p) => p.id === "p-vendors")!;
+    expect(vendors.rules).toHaveLength(2);
+    expect(vendors.revisions.map((r) => r.note)).toEqual(["Before proposal", "Applied proposal from fixture"]);
+    patterns = reduce(patterns, { type: "restore-revision", patternId: "p-vendors", revisionId: "r-a" });
+    expect(patterns.find((p) => p.id === "p-vendors")!.rules).toEqual([]);
+  });
+
   it("moves rules within bounds only", () => {
     const moved = reduce(samplePatterns, { type: "move-rule", patternId: "p-contacts", index: 0, by: 1 });
     expect(moved[0].rules[0].kind).toBe("split");

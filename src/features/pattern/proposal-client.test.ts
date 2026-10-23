@@ -13,10 +13,24 @@ describe("proposal client", () => {
     let sent = "";
     const fetchImpl = (async (_url: string, init: RequestInit) => {
       sent = String(init.body);
-      return new Response(JSON.stringify({ raw: "[]", model: "fixture" }), { status: 200 });
+      return new Response(
+        JSON.stringify({ raw: "[]", model: "fixture", check: { ok: true, rules: [{ kind: "case", to: "upper" }] } }),
+        { status: 200 },
+      );
     }) as unknown as typeof fetch;
-    expect(await requestProposal(examples, fetchImpl)).toEqual({ status: "ok", raw: "[]", model: "fixture" });
+    expect(await requestProposal(examples, fetchImpl)).toEqual({
+      status: "ok",
+      raw: "[]",
+      model: "fixture",
+      check: { ok: true, rules: [{ kind: "case", to: "upper" }] },
+    });
     expect(sent).not.toContain("e-c1");
+  });
+
+  it("re-checks rules the service claims are valid (FIXTURE response)", async () => {
+    const lying = json(200, { raw: "", model: "fixture", check: { ok: true, rules: [{ kind: "eval", code: "x" }] } });
+    const result = await requestProposal(examples, lying);
+    expect(result.status === "ok" && result.check.ok).toBe(false);
   });
 
   it("separates a stopped service from a failed request", async () => {

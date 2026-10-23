@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import { checkProposal, type ProposalCheck } from "../src/features/pattern/rule-schema.ts";
+import { extractProposal } from "./proposal.ts";
+
 export const SERVICE_PORT = 4319;
 const MAX_BODY_BYTES = 32_768;
 const MAX_EXAMPLES = 12;
@@ -51,6 +54,14 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+export function gateReply(raw: string): ProposalCheck {
+  try {
+    return checkProposal(extractProposal(raw));
+  } catch (error) {
+    return { ok: false, reasons: [(error as Error).message] };
+  }
+}
+
 // The service proposes. It never stores patterns. The browser decides.
 export function createPatternServer(options: { proposer: Proposer | null }) {
   return createServer(async (req, res) => {
@@ -69,7 +80,8 @@ export function createPatternServer(options: { proposer: Proposer | null }) {
     }
     if (!options.proposer) return send(res, 503, { error: "Rule proposals are not available" }, origin);
     try {
-      return send(res, 200, await options.proposer(examples), origin);
+      const { raw, model } = await options.proposer(examples);
+      return send(res, 200, { raw, model, check: gateReply(raw) }, origin);
     } catch (error) {
       return send(res, 502, { error: (error as Error).message }, origin);
     }

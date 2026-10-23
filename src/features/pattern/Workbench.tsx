@@ -210,7 +210,19 @@ export function Workbench({ store }: { store?: PatternStore }) {
           </form>
         </section>
 
-        <ProposalPanel examples={pattern.examples} />
+        <ProposalPanel
+          examples={pattern.examples}
+          onApply={(rules, model) =>
+            dispatch({
+              type: "apply-proposal",
+              patternId: id,
+              rules,
+              model,
+              ids: [`r-${crypto.randomUUID()}`, `r-${crypto.randomUUID()}`],
+              savedAt: new Date().toISOString(),
+            })
+          }
+        />
 
         <section aria-label="Try a sample" className="space-y-2">
           <h3 className="font-semibold">Try a sample</h3>
