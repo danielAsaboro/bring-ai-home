@@ -1,12 +1,12 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createPatternServer, isAllowedOrigin, parseExamples, type Proposer } from "./server";
+import { createPatternServer, isAllowedOrigin, parseExamples, type Embedder, type Proposer } from "./server";
 
 const servers: ReturnType<typeof createPatternServer>[] = [];
 
-async function start(proposer: Proposer | null) {
-  const server = createPatternServer({ proposer });
+async function start(proposer: Proposer | null, embedder: Embedder | null = null) {
+  const server = createPatternServer({ proposer, embedder });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -46,6 +46,13 @@ describe("pattern service boundary", () => {
     const base = await start(async () => ({ raw: 'Use [{"kind":"regex","pattern":"x+"}]', model: "fixture" }));
     const res = await fetch(`${base}/propose`, { method: "POST", body: JSON.stringify({ examples }) });
     expect((await res.json()).check).toEqual({ ok: false, reasons: ['Rule 1 has unknown kind "regex"'] });
+  });
+
+  it("embeds texts through the embedder (FIXTURE vectors)", async () => {
+    const url = await start(null, async (texts) => ({ vectors: texts.map(() => [1, 0]), model: "fixture" }));
+    const res = await fetch(`${url}/embed`, { method: "POST", body: JSON.stringify({ texts: ["a", "b"] }) });
+    expect(await res.json()).toEqual({ vectors: [[1, 0], [1, 0]], model: "fixture" });
+    expect((await fetch(`${url}/embed`, { method: "POST", body: JSON.stringify({ texts: [] }) })).status).toBe(400);
   });
 
   it("answers 503 without a model and 403 for a foreign origin", async () => {

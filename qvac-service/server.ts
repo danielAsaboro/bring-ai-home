@@ -8,6 +8,7 @@ const MAX_BODY_BYTES = 32_768;
 const MAX_EXAMPLES = 12;
 
 export type ExamplePair = { before: string; after: string };
+export type Embedder = (texts: string[]) => Promise<{ vectors: number[][]; model: string }>;
 export type Proposer = (examples: ExamplePair[]) => Promise<{ raw: string; model: string }>;
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
@@ -63,13 +64,37 @@ export function gateReply(raw: string): ProposalCheck {
 }
 
 // The service proposes. It never stores patterns. The browser decides.
-export function createPatternServer(options: { proposer: Proposer | null }) {
+export function parseTexts(value: unknown): string[] {
+  const texts = (value as { texts?: unknown } | null)?.texts;
+  if (!Array.isArray(texts) || texts.length === 0 || texts.length > 64 || !texts.every((t) => typeof t === "string" && t.length > 0)) {
+    throw new Error("Request must contain 1 to 64 non-empty texts");
+  }
+  return texts as string[];
+}
+
+export function createPatternServer(options: { proposer: Proposer | null; embedder?: Embedder | null }) {
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
     if (req.method === "OPTIONS") return send(res, 204, null, origin);
     if (req.method === "GET" && req.url === "/health") {
-      return send(res, 200, { ok: true, proposing: options.proposer !== null }, origin);
+      return send(res, 200, { ok: true, proposing: options.proposer !== null, embedding: Boolean(options.embedder) }, origin);
+    }
+    if (req.method === "POST" && req.url === "/embed") {
+      let texts: string[];
+      try {
+        texts = parseTexts(await readJson(req));
+      } catch (error) {
+        return send(res, 400, { error: (error as Error).message }, origin);
+      }
+      if (!options.embedder) return send(res, 503, { error: "Similarity search is not available" }, origin);
+      try {
+        const { vectors, model } = await options.embedder(texts);
+        if (vectors.length !== texts.length) throw new Error("Embedding count does not match text count");
+        return send(res, 200, { vectors, model }, origin);
+      } catch (error) {
+        return send(res, 502, { error: (error as Error).message }, origin);
+      }
     }
     if (req.method !== "POST" || req.url !== "/propose") return send(res, 404, { error: "Not found" }, origin);
     let examples: ExamplePair[];

@@ -33,6 +33,17 @@ export async function loadProposalModel(sdk: Sdk, onProgress?: (percentage: numb
   });
 }
 
+export const EMBEDDING_MODEL = "GTE_LARGE_FP16";
+
+export async function loadEmbeddingModel(sdk: Sdk) {
+  return sdk.loadModel({ modelSrc: sdk.GTE_LARGE_FP16, modelType: "embeddings" });
+}
+
+export async function embedTexts(sdk: Sdk, modelId: string, texts: string[]): Promise<number[][]> {
+  const { embedding } = await sdk.embed({ modelId, text: texts });
+  return embedding;
+}
+
 export async function completeText(sdk: Sdk, modelId: string, history: ChatMessage[]): Promise<string> {
   const run = sdk.completion({ modelId, history, stream: true });
   let raw = "";

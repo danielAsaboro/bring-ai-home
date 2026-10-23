@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { ProposalPanel } from "./ProposalPanel";
+import { SimilarPanel } from "./SimilarPanel";
 import { checkExamples, replayGate, samplePatterns, type Pattern } from "./patterns";
 import { defaultRule, describeRule, RULE_KINDS, runWeave, type Rule, type RuleKind } from "./rules";
 import { createLocalStore, type PatternStore } from "./store";
@@ -237,6 +238,8 @@ export function Workbench({ store }: { store?: PatternStore }) {
             })
           }
         />
+
+        <SimilarPanel patterns={patterns} targetId={id} onOpen={setSelectedId} />
 
         <section aria-label="Try a sample" className="space-y-2">
           <h3 className="font-semibold">Try a sample</h3>

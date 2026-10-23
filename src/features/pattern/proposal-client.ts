@@ -40,3 +40,31 @@ export async function requestProposal(
       : { ok: false, reasons: Array.isArray(body.check?.reasons) ? body.check.reasons.map(String) : ["Proposal was not checked"] };
   return { status: "ok", raw: body.raw, model: body.model, check };
 }
+
+export type EmbedResponse = { status: "ok"; vectors: number[][]; model: string } | { status: "unavailable" | "error"; message: string };
+
+export async function requestEmbeddings(texts: string[], fetchImpl: typeof fetch = fetch): Promise<EmbedResponse> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`${SERVICE_URL}/embed`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ texts }),
+    });
+  } catch {
+    return { status: "unavailable", message: "The local QVAC service is not running." };
+  }
+  const body = (await res.json().catch(() => ({}))) as { vectors?: unknown; model?: unknown; error?: unknown };
+  if (res.status === 503) return { status: "unavailable", message: String(body.error ?? "Similarity is not available") };
+  const vectors = body.vectors;
+  if (
+    !res.ok ||
+    typeof body.model !== "string" ||
+    !Array.isArray(vectors) ||
+    vectors.length !== texts.length ||
+    !vectors.every((v) => Array.isArray(v) && v.every((n) => typeof n === "number" && Number.isFinite(n)))
+  ) {
+    return { status: "error", message: String(body.error ?? `Service answered ${res.status}`) };
+  }
+  return { status: "ok", vectors: vectors as number[][], model: body.model };
+}

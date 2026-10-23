@@ -8,6 +8,8 @@ const { buildProposalHistory } = await import("./proposal.ts");
 let sdk;
 let modelId;
 let proposer = null;
+let embedModelId;
+let embedder = null;
 try {
   await runtime.configureLocalQvac(appDirectory);
   sdk = await import("@qvac/sdk");
@@ -23,13 +25,25 @@ try {
   );
 }
 
-const server = createPatternServer({ proposer });
+try {
+  sdk ??= await import("@qvac/sdk");
+  embedModelId = await runtime.loadEmbeddingModel(sdk);
+  embedder = async (texts) => ({
+    vectors: await runtime.embedTexts(sdk, embedModelId, texts),
+    model: runtime.EMBEDDING_MODEL,
+  });
+} catch (error) {
+  process.stderr.write(`Embedding model unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+}
+
+const server = createPatternServer({ proposer, embedder });
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Pattern QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
 });
 
 async function shutdown() {
   server.close();
+  if (sdk && embedModelId) await sdk.unloadModel({ modelId: embedModelId, clearStorage: false }).catch(() => undefined);
   if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
   if (sdk) await sdk.close().catch(() => undefined);
   process.exit(0);
