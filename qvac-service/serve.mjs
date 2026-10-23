@@ -13,10 +13,13 @@ let embedder = null;
 try {
   await runtime.configureLocalQvac(appDirectory);
   sdk = await import("@qvac/sdk");
-  modelId = await runtime.loadProposalModel(sdk);
+  // Set PATTERN_LORA_ADAPTER to an adapter written by qvac:finetune to use the tuned model.
+  const adapterPath = process.env.PATTERN_LORA_ADAPTER || null;
+  modelId = await runtime.loadProposalModel(sdk, undefined, adapterPath);
+  const model = runtime.proposalModelLabel(adapterPath);
   proposer = async (examples) => ({
     raw: await runtime.completeText(sdk, modelId, buildProposalHistory(examples)),
-    model: runtime.PROPOSAL_MODEL,
+    model,
   });
 } catch (error) {
   process.stderr.write(

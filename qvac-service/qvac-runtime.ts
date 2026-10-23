@@ -25,7 +25,21 @@ export async function configureLocalQvac(appDirectory: string) {
 
 type Sdk = typeof import("@qvac/sdk");
 
-export async function loadProposalModel(sdk: Sdk, onProgress?: (percentage: number) => void) {
+// The LoRA base must be fine-tunable. We use the SDK's own fine-tuning example model.
+export const TUNED_BASE_MODEL = "QWEN3_600M_INST_Q4";
+
+export function proposalModelLabel(adapterPath: string | null): string {
+  return adapterPath ? `${TUNED_BASE_MODEL}+LoRA` : PROPOSAL_MODEL;
+}
+
+export async function loadProposalModel(sdk: Sdk, onProgress?: (percentage: number) => void, adapterPath: string | null = null) {
+  if (adapterPath) {
+    return sdk.loadModel({
+      modelSrc: sdk.QWEN3_600M_INST_Q4,
+      modelType: "llm",
+      modelConfig: { ctx_size: 1024, lora: adapterPath },
+    });
+  }
   return sdk.loadModel({
     modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
     modelType: "llm",
@@ -49,4 +63,28 @@ export async function completeText(sdk: Sdk, modelId: string, history: ChatMessa
   let raw = "";
   for await (const token of run.tokenStream) raw += token;
   return raw;
+}
+
+export async function loadTuningBase(sdk: Sdk) {
+  return sdk.loadModel({ modelSrc: sdk.QWEN3_600M_INST_Q4, modelType: "llm", modelConfig: { ctx_size: 512 } });
+}
+
+export function startLoraRun(
+  sdk: Sdk,
+  modelId: string,
+  dirs: { train: string; eval: string; output: string; checkpoints: string },
+) {
+  return sdk.finetune({
+    modelId,
+    options: {
+      trainDatasetDir: dirs.train,
+      validation: { type: "dataset", path: dirs.eval },
+      outputParametersDir: dirs.output,
+      checkpointSaveDir: dirs.checkpoints,
+      numberOfEpochs: 2,
+      learningRate: 1e-4,
+      assistantLossOnly: true,
+      loraSeed: 7,
+    },
+  });
 }
