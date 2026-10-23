@@ -36,7 +36,7 @@ async function tryLoad(label, options) {
 
 // Listen first. Each capability switches on when its model has loaded, so the
 // deck gets a clear 503 instead of a hanging request while models download.
-const capabilities = { retrieve: null, propose: null };
+const capabilities = { retrieve: null, propose: null, embed: null };
 const server = createDeckServer(capabilities);
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Deck QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
@@ -50,6 +50,13 @@ const index = await readFile(path.join(qvacDirectory, "notes-index.json"), "utf8
   });
 const embedId = await tryLoad("Embeddings", { modelSrc: sdk?.GTE_LARGE_FP16, modelType: "embeddings" });
 const embedOne = async (text) => (await sdk.embed({ modelId: embedId, text })).embedding;
+if (embedId) {
+  capabilities.embed = async (texts) => ({
+    vectors: (await sdk.embed({ modelId: embedId, text: texts })).embedding,
+    model: "GTE_LARGE_FP16",
+  });
+  process.stderr.write("Embeddings ready\n");
+}
 
 if (index && embedId) {
   const { searchNotes } = await import("../src/features/deck/notes-index.ts");

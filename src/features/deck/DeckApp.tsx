@@ -21,6 +21,7 @@ import {
   type Treatment,
 } from "./deck";
 import { createAssistClient, type AssistClient } from "./assist-client";
+import { EvidencePanel } from "./EvidencePanel";
 import { NotesPanel } from "./NotesPanel";
 import { ProposalPanel } from "./ProposalPanel";
 import { createLocalStore, type LibraryStore } from "./storage";
@@ -150,6 +151,20 @@ function DeckView({ store, client }: { store: LibraryStore; client: AssistClient
             onRemove={() => {
               commit(removeCard(library, deck.id, selected.id));
               setSelectedId(null);
+            }}
+          />
+        )}
+        {selected?.kind === "claim" && (
+          <EvidencePanel
+            key={`evidence-${selected.id}`}
+            library={library}
+            deckId={deck.id}
+            claim={selected}
+            client={client}
+            onReuse={(card) => {
+              const { id: _ignored, ...copy } = card;
+              void _ignored;
+              commit(addCard(library, deck.id, { ...copy, roundId: selected.roundId }));
             }}
           />
         )}

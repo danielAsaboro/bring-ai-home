@@ -26,6 +26,7 @@ export type ProposeResult = {
 export type AssistClient = {
   retrieve(query: string): Promise<RetrieveResult>;
   propose(topic: string, audience: string): Promise<ProposeResult>;
+  embed(texts: string[]): Promise<{ model: string; vectors: number[][] }>;
 };
 
 // Every failure becomes one of four kinds, so the UI can say what went wrong
@@ -52,5 +53,6 @@ export function createAssistClient(baseUrl = SERVICE_URL, fetchImpl: typeof fetc
   return {
     retrieve: (query) => post<RetrieveResult>("/retrieve", { query }),
     propose: (topic, audience) => post<ProposeResult>("/propose", { topic, audience }),
+    embed: (texts) => post<{ model: string; vectors: number[][] }>("/embed", { texts }),
   };
 }

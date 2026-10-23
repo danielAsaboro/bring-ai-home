@@ -15,10 +15,21 @@ export type NotesRetriever = (query: string) => Promise<{ passages: ScoredChunk[
 // Retrieves sections, then asks the LLM. Returns raw model text for the app to validate.
 export type ClaimProposer = (request: ProposeRequest) => Promise<{ text: string; passages: ScoredChunk[]; model: string }>;
 
+export type Embedder = (texts: string[]) => Promise<{ vectors: number[][]; model: string }>;
+
 export type Capabilities = {
   retrieve: NotesRetriever | null;
   propose: ClaimProposer | null;
+  embed: Embedder | null;
 };
+
+export function parseTexts(value: unknown): string[] {
+  const texts = (value as { texts?: unknown } | null)?.texts;
+  if (!Array.isArray(texts) || texts.length === 0 || texts.length > 64 || !texts.every((t) => typeof t === "string" && t.trim() && t.length <= 1000)) {
+    throw new BadRequest("Request must contain 1 to 64 non-empty texts of at most 1000 characters");
+  }
+  return texts as string[];
+}
 
 export class Unavailable extends Error {}
 export class BadRequest extends Error {}
@@ -87,6 +98,13 @@ export function createDeckServer(capabilities: Capabilities) {
       const { text, passages, model } = await capabilities.propose(request);
       if (passages.length === 0) return { model, passages, proposals: [], dropped: [] };
       return { model, passages, ...parseClaimProposals(text, passages) };
+    },
+    "/embed": async (body) => {
+      const texts = parseTexts(body);
+      if (!capabilities.embed) throw new Unavailable("Embeddings are not available");
+      const { vectors, model } = await capabilities.embed(texts);
+      if (vectors.length !== texts.length) throw new Error("The embedder returned the wrong number of vectors");
+      return { model, vectors };
     },
   };
 
