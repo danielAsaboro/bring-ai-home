@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { Example } from "./patterns";
+import type { Example, GateResult } from "./patterns";
 import { requestProposal, type ProposalResponse } from "./proposal-client";
 import { describeRule, type Rule } from "./rules";
 
@@ -11,9 +11,11 @@ const button = "rounded border border-stone-400 px-2 py-1 text-sm hover:bg-stone
 export function ProposalPanel({
   examples,
   onApply,
+  gate,
   request = requestProposal,
 }: {
   examples: Example[];
+  gate: (rules: Rule[]) => GateResult;
   onApply: (rules: Rule[], model: string) => void;
   request?: (examples: Example[]) => Promise<ProposalResponse>;
 }) {
@@ -43,9 +45,27 @@ export function ProposalPanel({
               <li key={i}>{describeRule(rule)}</li>
             ))}
           </ol>
+          {(() => {
+            const verdict = gate(result.check.rules);
+            return verdict.ok ? (
+              <p className="text-sm text-emerald-700">Replays every example and counterexample.</p>
+            ) : (
+              <div role="alert" className="text-sm text-rose-700">
+                <p>This proposal fails {verdict.failures.length} saved case(s). Fix the weave by hand or ask again.</p>
+                <ul className="list-disc pl-5 font-mono text-xs">
+                  {verdict.failures.map((f) => (
+                    <li key={f.example.id}>
+                      {JSON.stringify(f.example.before)} → {JSON.stringify(f.actual)}, expected {JSON.stringify(f.example.after)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
           <div className="flex gap-2">
             <button
               className={button}
+              disabled={!gate(result.check.rules).ok}
               onClick={() => {
                 if (result.check.ok) onApply(result.check.rules, result.model);
                 setResult(null);

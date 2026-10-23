@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkExamples, samplePatterns } from "./patterns";
+import { checkExamples, replayGate, samplePatterns } from "./patterns";
 import { createLocalStore, createMemoryStore } from "./store";
 import { reduce } from "./workbench";
 
@@ -50,5 +50,18 @@ describe("pattern workbench state", () => {
     expect(createLocalStore(window.localStorage).load()[0].rules).toHaveLength(2);
     expect(store.reset()[0].rules).toHaveLength(3);
     expect(createMemoryStore().load()).toEqual(samplePatterns);
+  });
+});
+
+describe("counterexample gate", () => {
+  it("the finished invoice weave passes examples and counterexamples", () => {
+    const rules = [...samplePatterns[1].rules, { kind: "replace", find: " ", with: "-" } as const];
+    expect(replayGate(rules, samplePatterns[1])).toEqual({ ok: true, failures: [] });
+  });
+
+  it("older saved patterns without counterexamples still gate on examples", () => {
+    const { counterexamples: _drop, ...legacy } = samplePatterns[1];
+    void _drop;
+    expect(replayGate(legacy.rules, legacy).ok).toBe(false);
   });
 });

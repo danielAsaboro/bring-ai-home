@@ -6,7 +6,7 @@ export type Action =
   | { type: "update-rule"; patternId: string; index: number; rule: Rule }
   | { type: "move-rule"; patternId: string; index: number; by: -1 | 1 }
   | { type: "remove-rule"; patternId: string; index: number }
-  | { type: "add-example"; patternId: string; example: Example }
+  | { type: "add-example"; patternId: string; example: Example; counter?: boolean }
   | { type: "remove-example"; patternId: string; exampleId: string }
   | { type: "save-revision"; patternId: string; id: string; savedAt: string; note: string }
   | { type: "restore-revision"; patternId: string; revisionId: string }
@@ -43,11 +43,16 @@ export function reduce(patterns: Pattern[], action: Action): Pattern[] {
         rules: p.rules.filter((_, i) => i !== action.index),
       }));
     case "add-example":
-      return edit(patterns, action.patternId, (p) => ({ ...p, examples: [...p.examples, action.example] }));
+      return edit(patterns, action.patternId, (p) =>
+        action.counter
+          ? { ...p, counterexamples: [...(p.counterexamples ?? []), action.example] }
+          : { ...p, examples: [...p.examples, action.example] },
+      );
     case "remove-example":
       return edit(patterns, action.patternId, (p) => ({
         ...p,
         examples: p.examples.filter((e) => e.id !== action.exampleId),
+        counterexamples: (p.counterexamples ?? []).filter((e) => e.id !== action.exampleId),
       }));
     case "save-revision":
       return edit(patterns, action.patternId, (p) => ({

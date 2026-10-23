@@ -9,6 +9,8 @@ export type Pattern = {
   name: string;
   description: string;
   examples: Example[];
+  /** Held-out cases that are never sent to the model. Optional so older saved data still loads. */
+  counterexamples?: Example[];
   rules: Rule[];
   revisions: Revision[];
 };
@@ -20,6 +22,15 @@ export function checkExamples(rules: readonly Rule[], examples: readonly Example
     const actual = runWeave(rules, example.before).output;
     return { example, actual, passed: actual === example.after };
   });
+}
+
+export type GateResult = { ok: boolean; failures: ExampleResult[] };
+
+// The app decides: a weave must reproduce every example and every counterexample.
+export function replayGate(rules: readonly Rule[], pattern: Pick<Pattern, "examples" | "counterexamples">): GateResult {
+  const all = [...pattern.examples, ...(pattern.counterexamples ?? [])];
+  const failures = checkExamples(rules, all).filter((r) => !r.passed);
+  return { ok: failures.length === 0, failures };
 }
 
 // Fictional sample patterns. Every vendor, person, and code is invented.
@@ -60,6 +71,7 @@ export const samplePatterns: Pattern[] = [
       { id: "e-i2", before: "Inv 1187", after: "INV-1187" },
       { id: "e-i3", before: "INV  0310", after: "INV-0310" },
     ],
+    counterexamples: [{ id: "x-i1", before: "INV-0042", after: "INV-0042" }],
     rules: [
       { kind: "trim", collapse: true },
       { kind: "case", to: "upper" },
@@ -74,6 +86,7 @@ export const samplePatterns: Pattern[] = [
       { id: "e-v1", before: "  BRIGHTWOOL   SUPPLY CO ", after: "Brightwool Supply Co" },
       { id: "e-v2", before: "harbor & finch", after: "Harbor & Finch" },
     ],
+    counterexamples: [{ id: "x-v1", before: "Harbor & Finch", after: "Harbor & Finch" }],
     rules: [],
     revisions: [],
   },

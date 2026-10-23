@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { ProposalPanel } from "./ProposalPanel";
-import { checkExamples, samplePatterns, type Pattern } from "./patterns";
+import { checkExamples, replayGate, samplePatterns, type Pattern } from "./patterns";
 import { defaultRule, describeRule, RULE_KINDS, runWeave, type Rule, type RuleKind } from "./rules";
 import { createLocalStore, type PatternStore } from "./store";
 import { reduce } from "./workbench";
@@ -90,6 +90,7 @@ export function Workbench({ store }: { store?: PatternStore }) {
   const [draftAfter, setDraftAfter] = useState("");
   const [sample, setSample] = useState("");
   const [note, setNote] = useState("");
+  const [isCounter, setIsCounter] = useState(false);
 
   useEffect(() => {
     storeRef.current ??= createLocalStore(window.localStorage);
@@ -106,6 +107,7 @@ export function Workbench({ store }: { store?: PatternStore }) {
   const pattern: Pattern = patterns.find((p) => p.id === selectedId) ?? patterns[0];
   const results = useMemo(() => checkExamples(pattern.rules, pattern.examples), [pattern]);
   const passed = results.filter((r) => r.passed).length;
+  const counterResults = checkExamples(pattern.rules, pattern.counterexamples ?? []);
   const trial = runWeave(pattern.rules, sample);
   const id = pattern.id;
 
@@ -194,24 +196,36 @@ export function Workbench({ store }: { store?: PatternStore }) {
               ))}
             </tbody>
           </table>
+          <h4 className="text-sm font-semibold">Counterexamples · never sent to the model</h4>
+          <ul aria-label="Counterexamples" className="space-y-1 font-mono text-xs">
+            {counterResults.map(({ example, actual, passed: ok }) => (
+              <li key={example.id} className={ok ? "text-emerald-700" : "text-rose-700"}>
+                {JSON.stringify(example.before)} → {JSON.stringify(actual)} {ok ? "✓" : `✗ expected ${JSON.stringify(example.after)}`}
+              </li>
+            ))}
+          </ul>
           <form
             className="flex flex-wrap gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               if (!draftBefore) return;
-              dispatch({ type: "add-example", patternId: id, example: { id: `e-${crypto.randomUUID()}`, before: draftBefore, after: draftAfter } });
+              dispatch({ type: "add-example", patternId: id, counter: isCounter, example: { id: `e-${crypto.randomUUID()}`, before: draftBefore, after: draftAfter } });
               setDraftBefore("");
               setDraftAfter("");
             }}
           >
             <input aria-label="Example before" placeholder="before" className={input} value={draftBefore} onChange={(e) => setDraftBefore(e.target.value)} />
             <input aria-label="Example after" placeholder="after" className={input} value={draftAfter} onChange={(e) => setDraftAfter(e.target.value)} />
+            <label className="text-sm">
+              <input type="checkbox" checked={isCounter} onChange={(e) => setIsCounter(e.target.checked)} /> counterexample (kept from the model)
+            </label>
             <button className={button} type="submit">Add example</button>
           </form>
         </section>
 
         <ProposalPanel
           examples={pattern.examples}
+          gate={(rules) => replayGate(rules, pattern)}
           onApply={(rules, model) =>
             dispatch({
               type: "apply-proposal",
