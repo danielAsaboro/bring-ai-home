@@ -6,6 +6,8 @@ import { acknowledge, mergeTape, replayFrames } from "./events";
 import { ANY_SOURCE, describeRule, type Rule } from "./rules";
 import { findFrame, sampleSources } from "./sources";
 import { createStore, defaultState, type LookoutState } from "./store";
+import { checkFrame } from "./check-client";
+import { decideHit, evaluateWatcher, mergeHits, type WatchHit } from "./watch-eval";
 import type { WatcherProposal } from "./watcher";
 import { proposeWatcher, type ProposeOutcome } from "./watcher-client";
 
@@ -32,6 +34,8 @@ export function ControlRoom() {
   const [sentence, setSentence] = useState("");
   const [proposing, setProposing] = useState(false);
   const [proposal, setProposal] = useState<ProposeOutcome | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [runNote, setRunNote] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +75,25 @@ export function ControlRoom() {
     setProposing(true);
     setProposal(await proposeWatcher(sentence));
     setProposing(false);
+  }
+
+  async function runWatchers() {
+    setChecking(true);
+    setRunNote(null);
+    // Watchers read the same stored frames the event tape replays.
+    const frames = sampleSources.flatMap((s) => s.frames);
+    let hits: WatchHit[] = [];
+    let checked = 0;
+    const errors: string[] = [];
+    for (const watcher of state.watchers) {
+      const run = await evaluateWatcher(watcher, frames, (f, c) => checkFrame(f, c));
+      hits = [...hits, ...run.hits];
+      checked += run.checked;
+      errors.push(...run.errors);
+    }
+    update({ ...state, hits: mergeHits(state.hits, hits) });
+    setRunNote(errors.length > 0 ? `Stopped: ${errors[0]}` : `Checked ${checked} frames; ${hits.length} proposed hits.`);
+    setChecking(false);
   }
 
   function activate(p: WatcherProposal) {
@@ -258,6 +281,62 @@ export function ControlRoom() {
               </button>
             </li>
           ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="hits-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="hits-heading" className="text-lg font-semibold">
+            Watcher hits
+          </h2>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+            disabled={checking || state.watchers.length === 0}
+            onClick={runWatchers}
+          >
+            {checking ? "Checking…" : "Check watchers on stored frames"}
+          </button>
+        </div>
+        {runNote ? <p role="status" className="mb-2 text-sm">{runNote}</p> : null}
+        <ul aria-label="Watcher hits" className="space-y-2">
+          {state.hits.map((hit) => {
+            const frame = findFrame(sampleSources, hit.frameId);
+            const watcher = state.watchers.find((w) => w.id === hit.watcherId);
+            return (
+              <li key={hit.id} className="flex flex-wrap items-center gap-3 rounded border p-2">
+                {frame ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                ) : null}
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-medium">
+                    {watcher ? `“${watcher.condition}”` : "Removed watcher"} · {frame?.at.replace("T", " ")}
+                  </p>
+                  <p>
+                    {hit.model} proposed YES: {hit.verdict.reason || "no reason given"}
+                  </p>
+                </div>
+                {hit.status === "pending" ? (
+                  <span className="flex gap-2">
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, hits: decideHit(state.hits, hit.id, "confirmed") })}
+                    >
+                      Confirm {hit.frameId}
+                    </button>
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, hits: decideHit(state.hits, hit.id, "dismissed") })}
+                    >
+                      Dismiss {hit.frameId}
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-sm">{hit.status === "confirmed" ? "Confirmed" : "Dismissed as false"}</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </section>
 

@@ -1,6 +1,7 @@
 import type { LookoutEvent } from "./events";
 import type { Rule } from "./rules";
 import { sampleSources } from "./sources";
+import type { WatchHit } from "./watch-eval";
 import type { Watcher } from "./watcher";
 
 export type LookoutState = {
@@ -9,6 +10,7 @@ export type LookoutState = {
   rules: Rule[];
   tape: LookoutEvent[];
   watchers: Watcher[];
+  hits: WatchHit[];
 };
 
 export const STORAGE_KEY = "lookout:v1";
@@ -23,6 +25,7 @@ export function defaultState(): LookoutState {
     ],
     tape: [],
     watchers: [],
+    hits: [],
   };
 }
 
