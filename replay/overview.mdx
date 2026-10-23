@@ -1,0 +1,48 @@
+---
+title: "Build Replay"
+description: "A tape library for recording, editing, and following repeatable work."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**In production.** The Replay app works today without AI. The QVAC lessons below are being built and filmed in order, and each one appears here when its checkpoint is tested.
+</Info>
+
+<LessonVideo title="Replay: Narrate a task once, get a procedure" />
+
+Written procedures are expensive to create, go stale, and make people switch constantly between the guide and the task.
+
+**QVAC capabilities:** Transcription · Multimodal · Text generation · Embeddings
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Write and run a five-step weekly-report tape by hand. |
+| **With QVAC** | Narrate and demonstrate once. Replay proposes steps, parameters, preconditions, and stop conditions, then guides a dry run. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | Run the Replay starter | In production |
+| 02 | Transcribe a narrated demonstration | In production |
+| 03 | Read screenshots with a local vision model | In production |
+| 04 | Turn narration into proposed steps | In production |
+| 05 | Extract parameters and stop conditions | In production |
+| 06 | Find a tape by describing the job | In production |
+| 07 | Prove it offline | In production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Tapes become agent skills" icon="sparkles">
+    Export any recorded tape as a SKILL.md, so a coding agent can follow your procedure.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+While Replay is in production, start with [Redact](/redact/overview), the complete project. It teaches the same loop end to end.

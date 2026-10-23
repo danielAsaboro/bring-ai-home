@@ -1,0 +1,49 @@
+---
+title: "Build Ledger"
+description: "An owned account book where every balance traces back to entries and evidence."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**In production.** The Ledger app works today without AI. The QVAC lessons below are being built and filmed in order, and each one appears here when its checkpoint is tested.
+</Info>
+
+<LessonVideo title="Ledger: My bank statement never left my laptop" />
+
+Typing transactions by hand is tedious, but sending statements and receipts to a remote parser hands over your whole financial history.
+
+**QVAC capabilities:** OCR · Text generation · Embeddings
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Import a CSV and categorize entries by hand. |
+| **With QVAC** | Read a statement or receipt locally, review every candidate with its source and confidence, and watch the totals stay exact, because arithmetic never touches the model. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | Run the Ledger starter | In production |
+| 02 | Read one receipt with QVAC | In production |
+| 03 | Add the local service boundary | In production |
+| 04 | Turn OCR into draft transactions | In production |
+| 05 | Propose merchants and categories | In production |
+| 06 | Find similar past entries with embeddings | In production |
+| 07 | Review, accept, and keep the arithmetic deterministic | In production |
+| 08 | Prove it offline | In production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Wallet history" icon="sparkles">
+    Import a USDt wallet's transactions next to your receipts, so one private ledger covers both.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+While Ledger is in production, start with [Redact](/redact/overview), the complete project. It teaches the same loop end to end.

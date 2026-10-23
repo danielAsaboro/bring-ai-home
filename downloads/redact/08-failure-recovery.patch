@@ -1,0 +1,914 @@
+diff --git a/redact/qvac-service/index.ts b/redact/qvac-service/index.ts
+index b2cbffe..f583704 100644
+--- a/redact/qvac-service/index.ts
++++ b/redact/qvac-service/index.ts
+@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
+ import { createQvacOcrAnalyzer } from "./qvac-analyzer";
+ import { resolveLocalQvacPaths } from "./local-config";
+ import { createStructuredReasoner } from "./reasoning";
+-import { createQvacService } from "./server";
++import { closeQvacService, createQvacService } from "./server";
+ 
+ const port = Number.parseInt(process.env.REDACT_QVAC_PORT ?? "4317", 10);
+ const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+@@ -40,9 +40,11 @@ async function main() {
+     process.stdout.write(`Redact QVAC service listening on http://127.0.0.1:${port}\n`);
+   });
+ 
++  let closing = false;
+   async function close() {
+-    server.close();
+-    await analyzer.close();
++    if (closing) return;
++    closing = true;
++    await closeQvacService(server, analyzer);
+   }
+ 
+   process.once("SIGINT", close);
+diff --git a/redact/qvac-service/server.test.ts b/redact/qvac-service/server.test.ts
+index 86fba7b..d0c27c8 100644
+--- a/redact/qvac-service/server.test.ts
++++ b/redact/qvac-service/server.test.ts
+@@ -1,9 +1,10 @@
+ import { once } from "node:events";
++import { request as httpRequest } from "node:http";
+ import type { AddressInfo } from "node:net";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ 
+ import type { DocumentAnalyzer } from "./analyzer";
+-import { createQvacService } from "./server";
++import { createQvacService, type ServiceOptions } from "./server";
+ 
+ const servers: ReturnType<typeof createQvacService>[] = [];
+ 
+@@ -15,8 +16,11 @@ afterEach(async () => {
+   );
+ });
+ 
+-async function start(analyzer: DocumentAnalyzer) {
+-  const server = createQvacService({ analyzer });
++async function start(
++  analyzer: DocumentAnalyzer,
++  options: Omit<ServiceOptions, "analyzer"> = {},
++) {
++  const server = createQvacService({ analyzer, ...options });
+   servers.push(server);
+   server.listen(0, "127.0.0.1");
+   await once(server, "listening");
+@@ -24,6 +28,37 @@ async function start(analyzer: DocumentAnalyzer) {
+   return `http://127.0.0.1:${port}`;
+ }
+ 
++const validRequest = {
++  documentId: "document-1",
++  pageId: "page-1",
++  pageNumber: 1,
++  width: 2,
++  height: 1,
++  pngBase64: "AQID",
++  level: "private" as const,
++  direction: "",
++};
++
++function validResult() {
++  return {
++    run: {
++      id: "run-1",
++      documentId: "document-1",
++      status: "ready" as const,
++      startedAt: "2026-08-14T10:00:00.000Z",
++      completedAt: "2026-08-14T10:00:01.000Z",
++      ocrModel: "qvac-ocr-latin",
++      ocrMs: 1000,
++      reasoningModel: "qwen3-600m-instruct-q4",
++      reasoningMs: 200,
++      error: null,
++    },
++    page: { id: "page-1", number: 1, width: 2, height: 1 },
++    ocrBlocks: [],
++    candidates: [],
++  };
++}
++
+ describe("QVAC loopback service", () => {
+   it("reports service and lazy model state", async () => {
+     const analyzer: DocumentAnalyzer = {
+@@ -112,4 +147,125 @@ describe("QVAC loopback service", () => {
+     expect(response.status).toBe(403);
+     expect(response.headers.get("access-control-allow-origin")).toBeNull();
+   });
++
++  it("reserves one inference slot and reports busy to concurrent requests", async () => {
++    let release!: () => void;
++    const pending = new Promise<void>((resolve) => { release = resolve; });
++    const analyzePage = vi.fn(async () => { await pending; return validResult(); });
++    const analyzer: DocumentAnalyzer = {
++      getState: () => ({ service: "ready", models: [] }),
++      analyzePage,
++      close: vi.fn(),
++    };
++    const baseUrl = await start(analyzer);
++    const request = () => fetch(`${baseUrl}/v1/analyze-page`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify(validRequest),
++    });
++
++    const first = request();
++    await vi.waitFor(() => expect(analyzePage).toHaveBeenCalledOnce());
++    const second = await request();
++    expect(second.status).toBe(409);
++    await expect(second.json()).resolves.toMatchObject({ error: { code: "busy" } });
++    release();
++    expect((await first).status).toBe(200);
++  });
++
++  it("reserves the slot before awaiting a staged request body", async () => {
++    const analyzePage = vi.fn(async () => validResult());
++    const analyzer: DocumentAnalyzer = {
++      getState: () => ({ service: "ready", models: [] }),
++      analyzePage,
++      close: vi.fn(),
++    };
++    const baseUrl = await start(analyzer);
++    const body = JSON.stringify(validRequest);
++    const url = new URL("/v1/analyze-page", baseUrl);
++    const staged = httpRequest({
++      hostname: url.hostname,
++      port: url.port,
++      path: url.pathname,
++      method: "POST",
++      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
++    });
++    staged.on("error", () => undefined);
++    staged.flushHeaders();
++
++    await vi.waitFor(async () => {
++      await expect(fetch(`${baseUrl}/health`).then((value) => value.json())).resolves.toMatchObject({ busy: true });
++    });
++    const second = await fetch(`${baseUrl}/v1/analyze-page`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body,
++    });
++    expect(second.status).toBe(409);
++
++    const firstResponse = new Promise<number>((resolve) => {
++      staged.on("response", (response) => {
++        response.resume();
++        response.on("end", () => resolve(response.statusCode ?? 0));
++      });
++    });
++    staged.end(body);
++    await expect(firstResponse).resolves.toBe(200);
++    expect(analyzePage).toHaveBeenCalledOnce();
++  });
++
++  it("times out the response but stays busy until native inference settles", async () => {
++    let release!: () => void;
++    const pending = new Promise<void>((resolve) => { release = resolve; });
++    const analyzer: DocumentAnalyzer = {
++      getState: () => ({ service: "ready", models: [] }),
++      analyzePage: vi.fn(async () => { await pending; return validResult(); }),
++      close: vi.fn(),
++    };
++    const baseUrl = await start(analyzer, { timeoutMs: 20 });
++    const response = await fetch(`${baseUrl}/v1/analyze-page`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify(validRequest),
++    });
++
++    expect(response.status).toBe(504);
++    await expect(response.json()).resolves.toMatchObject({ error: { code: "analysis_timeout" } });
++    await expect(fetch(`${baseUrl}/health`).then((value) => value.json())).resolves.toMatchObject({ busy: true });
++    release();
++    await vi.waitFor(async () => {
++      await expect(fetch(`${baseUrl}/health`).then((value) => value.json())).resolves.toMatchObject({ busy: false });
++    });
++  });
++
++  it("returns stable body, media, method, and malformed-output failures", async () => {
++    const analyzer: DocumentAnalyzer = {
++      getState: () => ({ service: "ready", models: [] }),
++      analyzePage: vi.fn(async () => ({ invalid: true }) as never),
++      close: vi.fn(),
++    };
++    const baseUrl = await start(analyzer, { maxBodyBytes: 120 });
++    const oversized = await fetch(`${baseUrl}/v1/analyze-page`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({ ...validRequest, direction: "x".repeat(500) }),
++    });
++    const media = await fetch(`${baseUrl}/v1/analyze-page`, { method: "POST", body: "{}" });
++    const method = await fetch(`${baseUrl}/v1/analyze-page`, { method: "PATCH" });
++
++    expect(oversized.status).toBe(413);
++    expect(media.status).toBe(415);
++    expect(method.status).toBe(405);
++
++    const malformedBase = await start(analyzer);
++    const malformed = await fetch(`${malformedBase}/v1/analyze-page`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify(validRequest),
++    });
++    expect(malformed.status).toBe(502);
++    await expect(malformed.json()).resolves.toMatchObject({
++      error: { code: "invalid_analysis_response" },
++    });
++  });
+ });
+diff --git a/redact/qvac-service/server.ts b/redact/qvac-service/server.ts
+index 4fe82c5..eaf32da 100644
+--- a/redact/qvac-service/server.ts
++++ b/redact/qvac-service/server.ts
+@@ -5,15 +5,30 @@ import {
+   type ServerResponse,
+ } from "node:http";
+ 
+-import { analyzePageRequestSchema } from "../src/features/redact/analysis-contract";
++import {
++  analysisResponseSchema,
++  analyzePageRequestSchema,
++} from "../src/features/redact/analysis-contract";
+ import type { DocumentAnalyzer } from "./analyzer";
+ 
+-const MAX_REQUEST_BYTES = 20 * 1024 * 1024;
++const DEFAULT_MAX_REQUEST_BYTES = 20 * 1024 * 1024;
+ 
+ export type ServiceOptions = {
+   analyzer: DocumentAnalyzer;
++  maxBodyBytes?: number;
++  timeoutMs?: number;
+ };
+ 
++class ServiceFailure extends Error {
++  constructor(
++    readonly status: number,
++    readonly code: string,
++    message: string,
++  ) {
++    super(message);
++  }
++}
++
+ function localAppOrigin(request: IncomingMessage): string | null {
+   const origin = request.headers.origin;
+   if (!origin) return null;
+@@ -47,19 +62,56 @@ function sendJson(
+   response.end(encoded);
+ }
+ 
+-async function readJson(request: AsyncIterable<unknown>): Promise<unknown> {
++async function readJson(
++  request: AsyncIterable<unknown>,
++  maxBodyBytes: number,
++): Promise<unknown> {
+   const chunks: Buffer[] = [];
+   let length = 0;
+   for await (const chunk of request) {
+     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+     length += bytes.length;
+-    if (length > MAX_REQUEST_BYTES) throw new Error("request_too_large");
++    if (length > maxBodyBytes) {
++      throw new ServiceFailure(413, "request_too_large", "Raster page request is too large");
++    }
+     chunks.push(bytes);
+   }
+-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
++  try {
++    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
++  } catch {
++    throw new ServiceFailure(400, "invalid_request", "Invalid analyze-page request");
++  }
++}
++
++async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  const timeout = new Promise<never>((_resolve, reject) => {
++    timer = setTimeout(
++      () => reject(new ServiceFailure(504, "analysis_timeout", "Local analysis timed out")),
++      timeoutMs,
++    );
++    timer.unref?.();
++  });
++  try {
++    return await Promise.race([operation, timeout]);
++  } finally {
++    if (timer) clearTimeout(timer);
++  }
++}
++
++function sendFailure(
++  request: IncomingMessage,
++  response: ServerResponse,
++  failure: ServiceFailure,
++) {
++  sendJson(request, response, failure.status, {
++    error: { code: failure.code, message: failure.message },
++  });
+ }
+ 
+ export function createQvacService(options: ServiceOptions): Server {
++  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_REQUEST_BYTES;
++  const timeoutMs = options.timeoutMs ?? 180_000;
+   let busy = false;
+ 
+   return createServer(async (request, response) => {
+@@ -70,36 +122,83 @@ export function createQvacService(options: ServiceOptions): Server {
+       return;
+     }
+     if (request.method === "OPTIONS") {
+-      sendJson(request, response, 204, null);
++      response.writeHead(204, {
++        "access-control-allow-headers": "content-type, accept",
++        "access-control-allow-methods": "GET, POST, OPTIONS",
++        ...(localAppOrigin(request)
++          ? { "access-control-allow-origin": localAppOrigin(request)!, vary: "Origin" }
++          : {}),
++      });
++      response.end();
+       return;
+     }
+     if (request.method === "GET" && request.url === "/health") {
+       sendJson(request, response, 200, { ...options.analyzer.getState(), busy });
+       return;
+     }
++    if (request.url === "/v1/analyze-page" && request.method !== "POST") {
++      sendFailure(
++        request,
++        response,
++        new ServiceFailure(405, "method_not_allowed", "Method is not allowed"),
++      );
++      return;
++    }
+     if (request.method === "POST" && request.url === "/v1/analyze-page") {
+-      let input;
+-      try {
+-        input = analyzePageRequestSchema.parse(await readJson(request));
+-      } catch {
+-        sendJson(request, response, 400, {
+-          error: { code: "invalid_request", message: "Invalid analyze-page request" },
+-        });
++      if (busy) {
++        sendFailure(
++          request,
++          response,
++          new ServiceFailure(409, "busy", "Local analyzer is busy"),
++        );
++        return;
++      }
++      if (!request.headers["content-type"]?.startsWith("application/json")) {
++        sendFailure(
++          request,
++          response,
++          new ServiceFailure(415, "unsupported_media_type", "JSON is required"),
++        );
+         return;
+       }
+ 
+       busy = true;
++      let operationStarted = false;
+       try {
+-        sendJson(request, response, 200, await options.analyzer.analyzePage(input));
+-      } catch (error) {
+-        process.stderr.write(
+-          `Redact QVAC analyze-page failed: ${error instanceof Error ? error.message : String(error)}\n`,
++        const parsed = analyzePageRequestSchema.safeParse(
++          await readJson(request, maxBodyBytes),
++        );
++        if (!parsed.success) {
++          throw new ServiceFailure(400, "invalid_request", "Invalid analyze-page request");
++        }
++        const operation = options.analyzer.analyzePage(parsed.data);
++        operationStarted = true;
++        void operation.then(
++          () => { busy = false; },
++          () => { busy = false; },
++        );
++        const result = analysisResponseSchema.safeParse(
++          await withTimeout(operation, timeoutMs),
+         );
+-        sendJson(request, response, 503, {
+-          error: { code: "analyzer_unavailable", message: "Local analysis is unavailable" },
+-        });
+-      } finally {
+-        busy = false;
++        if (!result.success) {
++          throw new ServiceFailure(
++            502,
++            "invalid_analysis_response",
++            "Local analysis returned an invalid response",
++          );
++        }
++        sendJson(request, response, 200, result.data);
++      } catch (error) {
++        if (!operationStarted) busy = false;
++        const failure = error instanceof ServiceFailure
++          ? error
++          : new ServiceFailure(503, "analyzer_unavailable", "Local analysis is unavailable");
++        if (!(error instanceof ServiceFailure)) {
++          process.stderr.write(
++            `Redact QVAC analyze-page failed: ${error instanceof Error ? error.message : String(error)}\n`,
++          );
++        }
++        sendFailure(request, response, failure);
+       }
+       return;
+     }
+@@ -108,3 +207,15 @@ export function createQvacService(options: ServiceOptions): Server {
+     });
+   });
+ }
++
++export async function closeQvacService(
++  server: Server,
++  analyzer: DocumentAnalyzer,
++): Promise<void> {
++  if (server.listening) {
++    await new Promise<void>((resolve, reject) =>
++      server.close((error) => (error ? reject(error) : resolve())),
++    );
++  }
++  await analyzer.close();
++}
+diff --git a/redact/src/app/globals.css b/redact/src/app/globals.css
+index 7f53045..df0f925 100644
+--- a/redact/src/app/globals.css
++++ b/redact/src/app/globals.css
+@@ -97,6 +97,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
+ .review-heading > div > p:last-child { margin-bottom: 0; color: var(--muted); }
+ .review-actions { display: flex; gap: .65rem; flex-shrink: 0; }
+ .review-gate { margin: -.5rem 0 1rem; padding: .7rem .9rem; color: #6f421f; background: #fff5ec; border: 1px solid #efc7a9; border-radius: 7px; font-size: .76rem; font-weight: 700; }
++.review-error { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .7rem; margin-bottom: 1rem; }
++.review-error .error-banner { margin: 0; }
+ .review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 1rem; }
+ .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; min-width: 0; }
+ .comparison-grid article { min-width: 0; padding: .8rem; background: #e6e4dd; border: 1px solid #c9cec9; border-radius: 12px; }
+diff --git a/redact/src/features/redact/RedactApp.test.tsx b/redact/src/features/redact/RedactApp.test.tsx
+index 81f5ea5..83329e1 100644
+--- a/redact/src/features/redact/RedactApp.test.tsx
++++ b/redact/src/features/redact/RedactApp.test.tsx
+@@ -165,7 +165,7 @@ describe("Redact application", () => {
+         level: "confidential",
+         direction: "Hide Apollo references",
+       }),
+-      undefined,
++      expect.any(AbortSignal),
+     );
+     expect(screen.getByText("2 text regions found locally")).toBeInTheDocument();
+     expect(screen.getByText("2 suggested redactions")).toBeInTheDocument();
+@@ -257,6 +257,64 @@ describe("Redact application", () => {
+     expect(screen.getAllByText("1 redaction")).toHaveLength(2);
+   });
+ 
++  it("cancels local analysis and ignores its stale completion", async () => {
++    const user = userEvent.setup();
++    let resolveLate!: (value: Awaited<ReturnType<AnalysisClient["analyzePage"]>>) => void;
++    const base = adapters();
++    const lateResult = await base.analysis.analyzePage({
++      documentId: "document-sha256-source",
++      pageId: "page-1",
++      pageNumber: 1,
++      width: 1200,
++      height: 1600,
++      pngBytes: page.pngBytes,
++      level: "private",
++      direction: "",
++    });
++    const analyzePage = vi.fn(
++      () => new Promise<Awaited<ReturnType<AnalysisClient["analyzePage"]>>>((resolve) => {
++        resolveLate = resolve;
++      }),
++    );
++    const appAdapters = adapters({ analysis: { health: base.analysis.health, analyzePage } });
++    render(<RedactApp adapters={appAdapters} />);
++
++    await user.upload(
++      screen.getByLabelText("Choose a document"),
++      new File([new Uint8Array([1])], "chat-private.png", { type: "image/png" }),
++    );
++    await screen.findByText("Privacy level");
++    await user.click(screen.getByRole("button", { name: "Prepare for review" }));
++    await user.click(await screen.findByRole("button", { name: "Continue without local analysis" }));
++
++    expect(await screen.findByText("Safe-share preview")).toBeInTheDocument();
++    expect(screen.getByRole("alert")).toHaveTextContent("Local analysis was cancelled");
++    resolveLate(lateResult);
++    await Promise.resolve();
++    expect(screen.queryByText("2 suggested redactions")).not.toBeInTheDocument();
++  });
++
++  it("retries analysis from manual fallback", async () => {
++    const user = userEvent.setup();
++    const appAdapters = adapters();
++    vi.mocked(appAdapters.analysis.analyzePage).mockRejectedValueOnce(
++      new Error("Local analysis request timed out"),
++    );
++    render(<RedactApp adapters={appAdapters} />);
++
++    await user.upload(
++      screen.getByLabelText("Choose a document"),
++      new File([new Uint8Array([1])], "chat-private.png", { type: "image/png" }),
++    );
++    await screen.findByText("Privacy level");
++    await user.click(screen.getByRole("button", { name: "Prepare for review" }));
++    expect(await screen.findByRole("button", { name: "Retry local analysis" })).toBeEnabled();
++    await user.click(screen.getByRole("button", { name: "Retry local analysis" }));
++
++    expect(await screen.findByText("2 suggested redactions")).toBeInTheDocument();
++    expect(appAdapters.analysis.analyzePage).toHaveBeenCalledTimes(2);
++  });
++
+   it("keeps the generated copy available when clipboard access fails", async () => {
+     const user = userEvent.setup();
+     const appAdapters = adapters({
+diff --git a/redact/src/features/redact/RedactApp.tsx b/redact/src/features/redact/RedactApp.tsx
+index 0d72a8d..720bfab 100644
+--- a/redact/src/features/redact/RedactApp.tsx
++++ b/redact/src/features/redact/RedactApp.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ 
+ import { AnalyzeStage } from "./components/AnalyzeStage";
+ import { CompleteStage } from "./components/CompleteStage";
+@@ -100,6 +100,20 @@ export function RedactApp({
+   const [error, setError] = useState<string | null>(null);
+   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+   const [analysisMessage, setAnalysisMessage] = useState("Rasterizing pages without changing the original file…");
++  const [canCancel, setCanCancel] = useState(false);
++  const analysisRequest = useRef<AbortController | null>(null);
++  const analysisSequence = useRef(0);
++  const preparedPages = useRef<RedactSession["pages"]>([]);
++  const partialEvidence = useRef<{
++    ocrBlocks: OCRBlock[];
++    candidates: RedactionCandidate[];
++    analysisRuns: AnalysisRun[];
++  }>({ ocrBlocks: [], candidates: [], analysisRuns: [] });
++
++  useEffect(() => () => {
++    analysisRequest.current?.abort();
++    analysisSequence.current += 1;
++  }, []);
+ 
+   const visibleStage = !session
+     ? "upload"
+@@ -142,6 +156,13 @@ export function RedactApp({
+ 
+   async function prepare() {
+     if (!session || !file || !inspection) return;
++    analysisRequest.current?.abort();
++    const controller = new AbortController();
++    analysisRequest.current = controller;
++    const requestId = ++analysisSequence.current;
++    preparedPages.current = [];
++    setCanCancel(false);
++    partialEvidence.current = { ocrBlocks: [], candidates: [], analysisRuns: [] };
+     setError(null);
+     setBusy(true);
+     setAnalysisMessage("Rasterizing pages without changing the original file…");
+@@ -154,15 +175,21 @@ export function RedactApp({
+         documentId: session.source.id,
+         pageNumber: index + 1,
+       }));
++      if (requestId !== analysisSequence.current) return;
++      preparedPages.current = pages;
++      setCanCancel(true);
+       const ocrBlocks: OCRBlock[] = [];
+       const candidates: RedactionCandidate[] = [];
+       const analysisRuns: AnalysisRun[] = [];
++      partialEvidence.current = { ocrBlocks, candidates, analysisRuns };
+       try {
+         setAnalysisMessage("Loading the local OCR model and reading each page…");
+-        const health = await adapters.analysis.health();
++        const health = await adapters.analysis.health(controller.signal);
++        if (requestId !== analysisSequence.current) return;
+         if (health.service !== "ready") {
+           throw new Error("Local analysis is unavailable");
+         }
++        if (health.busy) throw new Error("Local analyzer is busy");
+         for (const page of pages) {
+           setAnalysisMessage(`Reading page ${page.pageNumber} of ${pages.length} locally…`);
+           const result = await adapters.analysis.analyzePage(
+@@ -176,8 +203,9 @@ export function RedactApp({
+               level: session.configuration.level,
+               direction: session.configuration.direction,
+             },
+-            undefined,
++            controller.signal,
+           );
++          if (requestId !== analysisSequence.current) return;
+           analysisRuns.push({
+             id: result.run.id,
+             documentId: result.run.documentId,
+@@ -228,18 +256,39 @@ export function RedactApp({
+             }),
+           );
+         }
++        if (requestId !== analysisSequence.current) return;
+         setSession(openManualReview(session, pages, { ocrBlocks, candidates, analysisRuns }));
+-      } catch {
+-        setError("Local analysis is unavailable. Manual review remains available.");
++      } catch (caught) {
++        if (requestId !== analysisSequence.current) return;
++        const detail = messageOf(caught);
++        setError(`${detail}. Manual review remains available.`);
+         setSession(openManualReview(session, pages, { ocrBlocks, candidates, analysisRuns }));
+       }
+     } catch (caught) {
++      if (requestId !== analysisSequence.current) return;
+       setError(messageOf(caught));
+     } finally {
+-      setBusy(false);
++      if (requestId === analysisSequence.current) {
++        setCanCancel(false);
++        setBusy(false);
++        analysisRequest.current = null;
++      }
+     }
+   }
+ 
++  function cancelAnalysis() {
++    if (!session || preparedPages.current.length === 0) return;
++    analysisRequest.current?.abort();
++    analysisRequest.current = null;
++    analysisSequence.current += 1;
++    setBusy(false);
++    setCanCancel(false);
++    setError("Local analysis was cancelled. Manual review remains available.");
++    setSession(
++      openManualReview(session, preparedPages.current, partialEvidence.current),
++    );
++  }
++
+   async function createCopy() {
+     if (!session) return;
+     setBusy(true);
+@@ -340,6 +389,8 @@ export function RedactApp({
+             busy={busy}
+             error={error}
+             status={analysisMessage}
++            canCancel={canCancel}
++            onCancel={cancelAnalysis}
+             onRetry={prepare}
+             onBack={() => {
+               setError(null);
+@@ -388,6 +439,7 @@ export function RedactApp({
+             onRemove={(id) => setSession(removeMark(session, id, adapters.now()))}
+             onAccept={(id) => setSession(acceptCandidate(session, id, adapters.now()))}
+             onReject={(id) => setSession(rejectCandidate(session, id, adapters.now()))}
++            onRetry={prepare}
+             onDone={createCopy}
+           />
+         )}
+diff --git a/redact/src/features/redact/analysis-client.test.ts b/redact/src/features/redact/analysis-client.test.ts
+index aefb133..94378a5 100644
+--- a/redact/src/features/redact/analysis-client.test.ts
++++ b/redact/src/features/redact/analysis-client.test.ts
+@@ -19,7 +19,7 @@ describe("local analysis client", () => {
+     await expect(client.health()).resolves.toMatchObject({ service: "ready" });
+     expect(fetchImpl).toHaveBeenCalledWith(
+       "http://127.0.0.1:4317/health",
+-      expect.objectContaining({ signal: undefined }),
++      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+     );
+   });
+ 
+@@ -110,4 +110,44 @@ describe("local analysis client", () => {
+       }),
+     ).rejects.toThrow("invalid analysis response");
+   });
++
++  it("aborts a stalled request at the configured local timeout", async () => {
++    vi.useFakeTimers();
++    const client = createAnalysisClient({
++      requestTimeoutMs: 25,
++      fetchImpl: vi.fn(async (_input, init) =>
++        new Promise<Response>((_resolve, reject) => {
++          init?.signal?.addEventListener("abort", () =>
++            reject(new DOMException("aborted", "AbortError")),
++          );
++        }),
++      ),
++    });
++
++    const assertion = expect(client.health()).rejects.toThrow(
++      "Local analysis request timed out",
++    );
++    await vi.advanceTimersByTimeAsync(25);
++    await assertion;
++    vi.useRealTimers();
++  });
++
++  it("reports caller cancellation separately from a timeout", async () => {
++    const controller = new AbortController();
++    const client = createAnalysisClient({
++      fetchImpl: vi.fn(async (_input, init) =>
++        new Promise<Response>((_resolve, reject) => {
++          init?.signal?.addEventListener("abort", () =>
++            reject(new DOMException("aborted", "AbortError")),
++          );
++        }),
++      ),
++    });
++
++    const assertion = expect(client.health(controller.signal)).rejects.toThrow(
++      "Local analysis request was cancelled",
++    );
++    controller.abort();
++    await assertion;
++  });
+ });
+diff --git a/redact/src/features/redact/analysis-client.ts b/redact/src/features/redact/analysis-client.ts
+index 9701af8..5fa3b91 100644
+--- a/redact/src/features/redact/analysis-client.ts
++++ b/redact/src/features/redact/analysis-client.ts
+@@ -26,6 +26,7 @@ export type AnalysisClient = {
+ type ClientOptions = {
+   baseUrl?: string;
+   fetchImpl?: typeof fetch;
++  requestTimeoutMs?: number;
+ };
+ 
+ function bytesToBase64(bytes: ArrayBuffer): string {
+@@ -45,6 +46,35 @@ export function createAnalysisClient(options: ClientOptions = {}): AnalysisClien
+     "http://127.0.0.1:4317"
+   ).replace(/\/$/, "");
+   const fetchImpl = options.fetchImpl ?? fetch;
++  const requestTimeoutMs = options.requestTimeoutMs ?? 190_000;
++
++  async function request(
++    url: string,
++    init: RequestInit,
++    externalSignal?: AbortSignal,
++  ) {
++    const controller = new AbortController();
++    let timedOut = false;
++    const cancel = () => controller.abort(externalSignal?.reason);
++    if (externalSignal?.aborted) cancel();
++    else externalSignal?.addEventListener("abort", cancel, { once: true });
++    const timer = globalThis.setTimeout(() => {
++      timedOut = true;
++      controller.abort();
++    }, requestTimeoutMs);
++    try {
++      return await fetchImpl(url, { ...init, signal: controller.signal });
++    } catch (error) {
++      if (externalSignal?.aborted) {
++        throw new Error("Local analysis request was cancelled");
++      }
++      if (timedOut) throw new Error("Local analysis request timed out");
++      throw error;
++    } finally {
++      globalThis.clearTimeout(timer);
++      externalSignal?.removeEventListener("abort", cancel);
++    }
++  }
+ 
+   async function parse<T>(
+     response: Response,
+@@ -70,14 +100,13 @@ export function createAnalysisClient(options: ClientOptions = {}): AnalysisClien
+ 
+   return {
+     async health(signal) {
+-      const response = await fetchImpl(`${baseUrl}/health`, {
++      const response = await request(`${baseUrl}/health`, {
+         headers: { accept: "application/json" },
+-        signal,
+-      });
++      }, signal);
+       return parse(response, healthResponseSchema, "Local service returned an invalid health response");
+     },
+     async analyzePage(input, signal) {
+-      const response = await fetchImpl(`${baseUrl}/v1/analyze-page`, {
++      const response = await request(`${baseUrl}/v1/analyze-page`, {
+         method: "POST",
+         headers: { accept: "application/json", "content-type": "application/json" },
+         body: JSON.stringify({
+@@ -90,8 +119,7 @@ export function createAnalysisClient(options: ClientOptions = {}): AnalysisClien
+           level: input.level,
+           direction: input.direction,
+         }),
+-        signal,
+-      });
++      }, signal);
+       return parse(response, analysisResponseSchema, "Local service returned an invalid analysis response");
+     },
+   };
+diff --git a/redact/src/features/redact/components/AnalyzeStage.tsx b/redact/src/features/redact/components/AnalyzeStage.tsx
+index 70c03fb..45160d4 100644
+--- a/redact/src/features/redact/components/AnalyzeStage.tsx
++++ b/redact/src/features/redact/components/AnalyzeStage.tsx
+@@ -1,9 +1,11 @@
+-export function AnalyzeStage({ filename, pageCount, busy, error, status, onRetry, onBack }: {
++export function AnalyzeStage({ filename, pageCount, busy, error, status, canCancel, onCancel, onRetry, onBack }: {
+   filename: string;
+   pageCount: number;
+   busy: boolean;
+   error: string | null;
+   status: string;
++  canCancel: boolean;
++  onCancel(): void;
+   onRetry(): void;
+   onBack(): void;
+ }) {
+@@ -14,6 +16,7 @@ export function AnalyzeStage({ filename, pageCount, busy, error, status, onRetry
+       <h1>{error ? "We could not prepare this document" : "Building your review copy"}</h1>
+       <p>{filename} · {pageCount} {pageCount === 1 ? "page" : "pages"}</p>
+       {!error && <p className="analysis-status">{status}</p>}
++      {!error && canCancel && <button className="secondary-button" onClick={onCancel}>Continue without local analysis</button>}
+       {error && <p className="error-banner" role="alert">{error}</p>}
+       {error && <div className="stage-actions split-actions"><button className="secondary-button" onClick={onBack}>Back</button><button className="primary-button" disabled={busy} onClick={onRetry}>Try again</button></div>}
+     </section>
+diff --git a/redact/src/features/redact/components/ReviewStage.tsx b/redact/src/features/redact/components/ReviewStage.tsx
+index a2607c0..fbc796f 100644
+--- a/redact/src/features/redact/components/ReviewStage.tsx
++++ b/redact/src/features/redact/components/ReviewStage.tsx
+@@ -21,6 +21,7 @@ export function ReviewStage({
+   onRemove,
+   onAccept,
+   onReject,
++  onRetry,
+   onDone,
+ }: {
+   session: RedactSession;
+@@ -34,6 +35,7 @@ export function ReviewStage({
+   onRemove(id: string): void;
+   onAccept(id: string): void;
+   onReject(id: string): void;
++  onRetry(): void;
+   onDone(): void;
+ }) {
+   const page = session.pages[session.activePageNumber - 1];
+@@ -56,7 +58,7 @@ export function ReviewStage({
+         </div>
+       </div>
+       {unresolvedCount > 0 && <p className="review-gate" role="status">Review {unresolvedCount} remaining {unresolvedCount === 1 ? "suggestion" : "suggestions"} before creating a safe copy.</p>}
+-      {error && <p className="error-banner" role="alert">{error}</p>}
++      {error && <div className="review-error"><p className="error-banner" role="alert">{error}</p><button className="secondary-button" disabled={busy} onClick={onRetry}>Retry local analysis</button></div>}
+       <div className="review-layout">
+         <div className="comparison-grid">
+           <article>
+diff --git a/redact/tutorial/08-failure-recovery.md b/redact/tutorial/08-failure-recovery.md
+new file mode 100644
+index 0000000..c519495
+--- /dev/null
++++ b/redact/tutorial/08-failure-recovery.md
+@@ -0,0 +1,53 @@
++# Make local analysis survive failure
++
++This checkpoint hardens both sides of the loopback boundary while preserving the
++manual product path.
++
++## Browser behavior
++
++- Every health and analysis request has a 190-second client timeout.
++- Caller cancellation and timeout produce different messages.
++- One AbortController and monotonically increasing sequence guard each workflow
++  run. A late completion from an old request cannot overwrite current review.
++- Operational pages/evidence stay in refs; the visible `canCancel` flag is React
++  state. Reading a ref during render was rejected because ref updates do not
++  schedule a render.
++- Continue without local analysis becomes available after rasterization. It
++  opens Review with any pages and evidence already completed.
++- Failed Review exposes Retry local analysis. Manual add/edit/export remains
++  usable while the service is absent.
++
++## Service behavior
++
++- The service reserves its single inference slot before awaiting the request
++  body. A staged upload cannot race a second request into QVAC.
++- A concurrent request returns 409; wrong media returns 415; wrong method returns
++  405; oversize payload returns 413; invalid input returns 400.
++- The service timeout is 180 seconds and malformed analyzer output returns 502.
++- A timeout or disconnected client does not imply native inference stopped. The
++  service remains busy until the underlying operation settles, preventing an
++  unsafe overlapping retry.
++- Shutdown stops the server and then unloads models/closes the SDK once.
++
++## Important limitation
++
++The current QVAC operation is not cancelled at the native inference layer.
++Browser cancellation is a product-control action: it stops waiting and opens
++manual review. Health may remain `busy: true` until the local operation finishes.
++Retry should be attempted after the slot is released.
++
++The first combined verification shell also continued after lint failed, so a
++later successful command produced a misleading final exit status. Check each
++gate's status independently (or use a fail-fast runner); do not infer that every
++earlier command passed from the last command alone.
++
++## Verification
++
++```bash
++npm test -- src/features/redact/analysis-client.test.ts qvac-service/server.test.ts src/features/redact/RedactApp.test.tsx
++npm run lint
++npm run typecheck
++npm test
++npm run build
++git diff --check
++```

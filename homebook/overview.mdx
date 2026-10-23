@@ -1,0 +1,48 @@
+---
+title: "Build Homebook"
+description: "The living binder for a home: rooms, assets, documents, maintenance, and projects stay connected."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**In production.** The Homebook app works today without AI. The QVAC lessons below are being built and filmed in order, and each one appears here when its checkpoint is tested.
+</Info>
+
+<LessonVideo title="Homebook: Ask your dishwasher manual" />
+
+Home records scatter across binders, email, drives, and memory, and only become urgent after something breaks.
+
+**QVAC capabilities:** OCR · Multimodal · RAG · Text generation
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Register the water heater and file its manual by hand. |
+| **With QVAC** | Photograph a label and a receipt, accept the extracted details, then ask a question whose answer links to the exact manual page and service record. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | Run the Homebook starter | In production |
+| 02 | Read an appliance label with OCR | In production |
+| 03 | Identify the asset from a photo | In production |
+| 04 | Ingest manuals for retrieval | In production |
+| 05 | Answer with citations to the manual page | In production |
+| 06 | Draft maintenance summaries | In production |
+| 07 | Prove it offline | In production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Scan from your phone" icon="sparkles">
+    A phone app that scans appliance labels, building on QVAC's Expo tutorial.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+While Homebook is in production, start with [Redact](/redact/overview), the complete project. It teaches the same loop end to end.

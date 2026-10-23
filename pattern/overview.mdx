@@ -1,0 +1,48 @@
+---
+title: "Build Pattern"
+description: "A reversible transformation workbench where examples, rules, and outputs stay inspectable."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**In production.** The Pattern app works today without AI. The QVAC lessons below are being built and filmed in order, and each one appears here when its checkpoint is tested.
+</Info>
+
+<LessonVideo title="Pattern: Teach a model your cleanup rules with ten examples" />
+
+People clean the same exports by hand every week because formulas, regex, and scripts feel like too much for the job.
+
+**QVAC capabilities:** Text generation · LoRA fine-tuning · Embeddings
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Compose trim, split, case, and format rules by hand. |
+| **With QVAC** | Give three before-and-after examples, get an editable rule set, expose one failure, correct it, and rerun every sample. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | Run the Pattern starter | In production |
+| 02 | Propose rules from examples | In production |
+| 03 | Constrain proposals to readable, reversible rules | In production |
+| 04 | Test rules against counterexamples | In production |
+| 05 | Find similar saved patterns | In production |
+| 06 | Fine-tune proposals to your domain with LoRA | In production |
+| 07 | Benchmark the fine-tune on your machine | In production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Shareable adapters" icon="sparkles">
+    Share a trained LoRA adapter with a teammate peer to peer.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+While Pattern is in production, start with [Redact](/redact/overview), the complete project. It teaches the same loop end to end.

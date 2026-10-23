@@ -1,0 +1,50 @@
+---
+title: "How the courses work"
+description: "Every project starts as a working app without AI. Each lesson adds one QVAC capability, with a video, a written walkthrough, a checkpoint, and a test."
+---
+
+Bring AI Home teaches local AI the way you will use it at work: inside a real product. Every project is a complete application that already does its job without a model. You then add QVAC one capability at a time.
+
+## What every lesson gives you
+
+<CardGroup cols={2}>
+  <Card title="A video" icon="circle-play">
+    Watch the failure, the fix, and the proof on a real machine.
+  </Card>
+  <Card title="A written walkthrough" icon="book-open">
+    The same lesson in text, with complete source for every file it touches.
+  </Card>
+  <Card title="A checkpoint" icon="code-commit">
+    One tested commit per lesson, plus a patch you can apply with `git apply`.
+  </Card>
+  <Card title="A receipt" icon="receipt">
+    The smallest test or measurement that proves the lesson worked.
+  </Card>
+</CardGroup>
+
+## The learning loop
+
+Each lesson follows the same five steps:
+
+1. Start from the previous checkpoint and reproduce the limitation.
+2. Look at the symptom before we explain its cause.
+3. Find the layer that is actually wrong: model lifecycle, transport, geometry, reasoning, state, resilience, evaluation, or network.
+4. Apply only the change that fixes it.
+5. Run the smallest test that proves it, then see it in the product.
+
+We never fake a model mistake and present it as live output. Timing-dependent and malformed-output cases use checked-in tests, so you can reproduce them exactly.
+
+## One rule across every project
+
+A model **proposes**. Your application **decides** what becomes permanent. A person **approves** anything that matters. OCR becomes evidence, not a redaction. A parsed receipt becomes a draft transaction, not a balance.
+
+## Pick a path
+
+<CardGroup cols={2}>
+  <Card title="New to local AI" icon="seedling" href="/start-here/ai-is-not-one-box">
+    Learn the stack, then build your first QVAC app.
+  </Card>
+  <Card title="Ready to build" icon="hammer" href="/redact/overview">
+    Start the complete Redact project.
+  </Card>
+</CardGroup>

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Bring AI Home",
+  "description": "Learn local AI by building real apps with QVAC: video lessons, written walkthroughs, and tested checkpoints.",
+  "colors": {
+    "primary": "#D4513D",
+    "light": "#F07761",
+    "dark": "#B64030"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Start here",
+        "groups": [
+          {
+            "group": "Welcome",
+            "pages": [
+              "index",
+              "start-here/how-it-works",
+              "local-ai"
+            ]
+          },
+          {
+            "group": "Foundations",
+            "pages": [
+              "start-here/ai-is-not-one-box",
+              "start-here/first-qvac-app"
+            ]
+          },
+          {
+            "group": "Case study",
+            "pages": [
+              "leash/overview"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Projects",
+        "groups": [
+          {
+            "group": "Catalogue",
+            "pages": [
+              "apps"
+            ]
+          },
+          {
+            "group": "Redact",
+            "icon": "file-shield",
+            "pages": [
+              "redact/overview",
+              {
+                "group": "Lessons",
+                "pages": [
+                  "redact/01-starter",
+                  "redact/02-first-ocr",
+                  "redact/03-local-service",
+                  "redact/04-connect-ocr",
+                  "redact/05-coordinate-mapping",
+                  "redact/06-sensitive-suggestions",
+                  "redact/07-human-review",
+                  "redact/08-failure-recovery",
+                  "redact/09-evaluation",
+                  "redact/10-offline-proof"
+                ]
+              },
+              "redact/troubleshooting"
+            ]
+          },
+          {
+            "group": "Ledger",
+            "icon": "book",
+            "pages": [
+              "ledger/overview"
+            ]
+          },
+          {
+            "group": "Chronicle",
+            "icon": "book-open",
+            "pages": [
+              "chronicle/overview"
+            ]
+          },
+          {
+            "group": "Circle",
+            "icon": "address-book",
+            "pages": [
+              "circle/overview"
+            ]
+          },
+          {
+            "group": "Homebook",
+            "icon": "house",
+            "pages": [
+              "homebook/overview"
+            ]
+          },
+          {
+            "group": "Pattern",
+            "icon": "shuffle",
+            "pages": [
+              "pattern/overview"
+            ]
+          },
+          {
+            "group": "Replay",
+            "icon": "cassette-tape",
+            "pages": [
+              "replay/overview"
+            ]
+          },
+          {
+            "group": "Closet",
+            "icon": "shirt",
+            "pages": [
+              "closet/overview"
+            ]
+          },
+          {
+            "group": "Lookout",
+            "icon": "eye",
+            "pages": [
+              "lookout/overview"
+            ]
+          },
+          {
+            "group": "Deck",
+            "icon": "layer-group",
+            "pages": [
+              "deck/overview"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contribute",
+        "groups": [
+          {
+            "group": "Working locally",
+            "pages": [
+              "development"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Leash",
+        "href": "https://github.com/danielAsaboro/leash"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Start learning",
+      "href": "/start-here/how-it-works"
+    }
+  }
+}

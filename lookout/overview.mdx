@@ -1,0 +1,47 @@
+---
+title: "Build Lookout"
+description: "An event-first control room for cameras and visual sources you own."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**In production.** The Lookout app works today without AI. The QVAC lessons below are being built and filmed in order, and each one appears here when its checkpoint is tested.
+</Info>
+
+<LessonVideo title="Lookout: Tell me if the stove is left on, with no cloud" />
+
+Motion alerts are noisy, rules are brittle, and the event you care about disappears inside hours of footage.
+
+**QVAC capabilities:** Multimodal · Image classification · Text generation
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Arm sources and configure time and motion rules by hand. |
+| **With QVAC** | Describe a condition in plain words, inspect the proposed watcher, replay recorded events, and tune out false positives. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | Run the Lookout starter | In production |
+| 02 | Check one frame against a plain-language condition | In production |
+| 03 | Turn a sentence into an inspectable watcher rule | In production |
+| 04 | Add a narrow custom classifier | In production |
+| 05 | Replay events and measure false positives | In production |
+| 06 | Prove footage never leaves the machine | In production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Borrow your Mac's GPU" icon="sparkles">
+    A small camera device hands inference to your Mac through QVAC delegated inference, so footage stays home.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+While Lookout is in production, start with [Redact](/redact/overview), the complete project. It teaches the same loop end to end.
