@@ -1,4 +1,4 @@
-import { runWeave, type Rule } from "./rules";
+import { runWeave, type Rule } from "./rules.ts";
 
 export type Example = { id: string; before: string; after: string };
 
