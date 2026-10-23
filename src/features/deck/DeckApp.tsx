@@ -22,6 +22,7 @@ import {
 } from "./deck";
 import { createAssistClient, type AssistClient } from "./assist-client";
 import { EvidencePanel } from "./EvidencePanel";
+import { HealthPanel } from "./HealthPanel";
 import { NotesPanel } from "./NotesPanel";
 import { ProposalPanel } from "./ProposalPanel";
 import { createLocalStore, type LibraryStore } from "./storage";
@@ -92,6 +93,7 @@ function DeckView({ store, client }: { store: LibraryStore; client: AssistClient
         </header>
 
         <PacingView deck={deck} />
+        <HealthPanel key={`health-${deck.id}`} deck={deck} client={client} onDiscard={(cardId) => commit(removeCard(library, deck.id, cardId))} />
         <NotesPanel client={client} />
         <ProposalPanel
           key={deck.id}
