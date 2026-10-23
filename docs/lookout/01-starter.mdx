@@ -34,14 +34,14 @@ To compare with the starting checkpoint: `git diff ae0d652 d67fc04`.
 
 ```bash
 git clone https://github.com/danielAsaboro/bring-ai-home
-cd bring-ai-home/apps/lookout
+cd bring-ai-home
 git checkout d67fc04
 node --version
 npm ci
 npm run dev
 ```
 
-The app lives in `apps/lookout` of the Bring AI Home repository. The repository publishes soon; until then the link may not open.
+Each lesson checkpoint holds the app at the repository root. The finished app also lives in `apps/lookout` on `main`.
 
 Use Node 22.22 or newer. Open `http://localhost:3000`.
 
@@ -75,7 +75,7 @@ We will test this rule in every chapter.
 
 ## Read the checkpoint implementation
 
-These are complete files from `d67fc04`, changed in this chapter. Paths are relative to `apps/lookout`.
+These are complete files from `d67fc04`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="src/app/layout.tsx">
