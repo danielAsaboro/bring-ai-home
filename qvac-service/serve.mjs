@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +36,7 @@ async function tryLoad(label, options) {
 
 // Listen first. Each capability switches on when its model has loaded, so the
 // deck gets a clear 503 instead of a hanging request while models download.
-const capabilities = { retrieve: null, propose: null, embed: null };
+const capabilities = { retrieve: null, propose: null, embed: null, critique: null };
 const server = createDeckServer(capabilities);
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Deck QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
@@ -88,6 +88,38 @@ if (index && embedId && llmId) {
     return { text, passages, model: "LLAMA_3_2_1B_INST_Q4_0 + GTE_LARGE_FP16" };
   };
   process.stderr.write("Card proposals ready\n");
+}
+
+// Rubric critique uses the house-rubric LoRA adapter from qvac:finetune-rubric
+// when it exists, and says so. Without it, the base model critiques.
+const adapterDirectory = path.join(qvacDirectory, "adapters/house-rubric");
+const adapter = await readdir(adapterDirectory)
+  .then((names) => names.find((n) => n.endsWith(".gguf")))
+  .catch(() => undefined);
+const criticId = adapter
+  ? await tryLoad("Rubric adapter", {
+      modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0,
+      modelType: "llm",
+      modelConfig: { lora: path.join(adapterDirectory, adapter) },
+    })
+  : llmId;
+if (criticId) {
+  const { buildCritiqueHistory, CRITIQUE_JSON_SCHEMA } = await import("../src/features/deck/house-rubric.ts");
+  capabilities.critique = async (deck) => {
+    const run = sdk.completion({
+      modelId: criticId,
+      history: buildCritiqueHistory(deck),
+      stream: true,
+      responseFormat: { type: "json_schema", json_schema: { name: "critique", schema: CRITIQUE_JSON_SCHEMA } },
+    });
+    const usingAdapter = Boolean(adapter) && criticId !== llmId;
+    return {
+      text: (await run.final).contentText,
+      model: usingAdapter ? `LLAMA_3_2_1B_INST_Q4_0 + ${adapter}` : "LLAMA_3_2_1B_INST_Q4_0",
+      adapter: usingAdapter,
+    };
+  };
+  process.stderr.write(`Rubric critique ready (${adapter ? `adapter ${adapter}` : "base model, no adapter"})\n`);
 }
 
 async function shutdown() {

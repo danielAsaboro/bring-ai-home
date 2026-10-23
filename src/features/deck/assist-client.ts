@@ -1,4 +1,6 @@
 import type { ClaimProposal } from "./claim-proposals";
+import type { Deck } from "./deck";
+import type { CritiqueFinding } from "./house-rubric";
 import type { ScoredChunk } from "./notes-index";
 
 export const SERVICE_URL = "http://127.0.0.1:4321";
@@ -27,7 +29,10 @@ export type AssistClient = {
   retrieve(query: string): Promise<RetrieveResult>;
   propose(topic: string, audience: string): Promise<ProposeResult>;
   embed(texts: string[]): Promise<{ model: string; vectors: number[][] }>;
+  critique(deck: Deck): Promise<CritiqueResult>;
 };
+
+export type CritiqueResult = { model: string; adapter: boolean; findings: CritiqueFinding[]; dropped: number };
 
 // Every failure becomes one of four kinds, so the UI can say what went wrong
 // and the deck stays exactly as it was.
@@ -54,5 +59,6 @@ export function createAssistClient(baseUrl = SERVICE_URL, fetchImpl: typeof fetc
     retrieve: (query) => post<RetrieveResult>("/retrieve", { query }),
     propose: (topic, audience) => post<ProposeResult>("/propose", { topic, audience }),
     embed: (texts) => post<{ model: string; vectors: number[][] }>("/embed", { texts }),
+    critique: (deck) => post<CritiqueResult>("/critique", { deck }),
   };
 }

@@ -5,6 +5,8 @@ import {
   parseProposeRequest,
   type ProposeRequest,
 } from "../src/features/deck/claim-proposals.ts";
+import type { Deck } from "../src/features/deck/deck.ts";
+import { parseCritique } from "../src/features/deck/house-rubric.ts";
 import type { ScoredChunk } from "../src/features/deck/notes-index.ts";
 
 export const SERVICE_PORT = 4321;
@@ -17,11 +19,30 @@ export type ClaimProposer = (request: ProposeRequest) => Promise<{ text: string;
 
 export type Embedder = (texts: string[]) => Promise<{ vectors: number[][]; model: string }>;
 
+// adapter is true only when the house-rubric LoRA adapter was loaded.
+export type Critic = (deck: Deck) => Promise<{ text: string; model: string; adapter: boolean }>;
+
 export type Capabilities = {
   retrieve: NotesRetriever | null;
   propose: ClaimProposer | null;
   embed: Embedder | null;
+  critique: Critic | null;
 };
+
+export function parseDeck(value: unknown): Deck {
+  const d = (value as { deck?: unknown } | null)?.deck as Deck | undefined;
+  const ok =
+    d &&
+    typeof d.title === "string" &&
+    typeof d.audience === "string" &&
+    Array.isArray(d.rounds) &&
+    Array.isArray(d.cards) &&
+    d.cards.length <= 60 &&
+    d.rounds.every((r) => typeof r?.id === "string" && typeof r.title === "string") &&
+    d.cards.every((c) => typeof c?.id === "string" && typeof c.title === "string" && typeof c.body === "string" && typeof c.roundId === "string");
+  if (!ok) throw new BadRequest("Request must contain a deck with rounds and at most 60 cards");
+  return d;
+}
 
 export function parseTexts(value: unknown): string[] {
   const texts = (value as { texts?: unknown } | null)?.texts;
@@ -105,6 +126,12 @@ export function createDeckServer(capabilities: Capabilities) {
       const { vectors, model } = await capabilities.embed(texts);
       if (vectors.length !== texts.length) throw new Error("The embedder returned the wrong number of vectors");
       return { model, vectors };
+    },
+    "/critique": async (body) => {
+      const deck = parseDeck(body);
+      if (!capabilities.critique) throw new Unavailable("Rubric critique is not available");
+      const { text, model, adapter } = await capabilities.critique(deck);
+      return { model, adapter, ...parseCritique(text, deck) };
     },
   };
 

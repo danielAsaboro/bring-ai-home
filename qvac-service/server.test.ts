@@ -19,14 +19,14 @@ const post = (url: string, body: unknown) =>
 
 describe("deck service", () => {
   it("reports capabilities and answers 503 while a model is missing", async () => {
-    const base = await start({ retrieve: null, propose: null, embed: null });
-    expect(await (await fetch(`${base}/health`)).json()).toEqual({ ok: true, capabilities: { retrieve: false, propose: false, embed: false } });
+    const base = await start({ retrieve: null, propose: null, embed: null, critique: null });
+    expect(await (await fetch(`${base}/health`)).json()).toEqual({ ok: true, capabilities: { retrieve: false, propose: false, embed: false, critique: false } });
     const res = await post(`${base}/retrieve`, { query: "unattended kettles" });
     expect(res.status).toBe(503);
   });
 
   it("rejects bad requests and foreign origins", async () => {
-    const base = await start({ retrieve: null, propose: null, embed: null });
+    const base = await start({ retrieve: null, propose: null, embed: null, critique: null });
     expect((await post(`${base}/retrieve`, { query: "" })).status).toBe(400);
     expect((await fetch(`${base}/health`, { headers: { origin: "https://example.com" } })).status).toBe(403);
     expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
@@ -34,7 +34,7 @@ describe("deck service", () => {
 
   it("returns cited passages from the retriever (fixture retriever, not a model)", async () => {
     const passage = { id: "diary-study-notes#unattended-boiling", noteId: "diary-study-notes", noteTitle: "Kitchen diary study notes", section: "Unattended boiling", text: "In 9 of 12 homes…", score: 0.8 };
-    const base = await start({ retrieve: async () => ({ passages: [passage], model: "fixture" }), propose: null, embed: null });
+    const base = await start({ retrieve: async () => ({ passages: [passage], model: "fixture" }), propose: null, embed: null, critique: null });
     const body = await (await post(`${base}/retrieve`, { query: "unattended" })).json();
     expect(body).toMatchObject({ query: "unattended", model: "fixture", passages: [{ id: passage.id }] });
   });
@@ -45,7 +45,7 @@ describe("deck service", () => {
       { title: "Kettles boil alone", body: "Nobody watched the kettle in 9 of 12 homes.", citations: [passage.id] },
       { title: "Invented stat", body: "90% of people agree.", citations: ["nowhere#1"] },
     ] });
-    const base = await start({ retrieve: null, propose: async () => ({ text, passages: [passage], model: "fixture" }), embed: null });
+    const base = await start({ retrieve: null, propose: async () => ({ text, passages: [passage], model: "fixture" }), embed: null, critique: null });
     const body = await (await post(`${base}/propose`, { topic: "why now", audience: "buyers" })).json();
     expect(body.proposals.map((p: { title: string }) => p.title)).toEqual(["Kettles boil alone"]);
     expect(body.dropped).toEqual([{ title: "Invented stat", reason: "cites no retrieved note section" }]);
@@ -53,8 +53,20 @@ describe("deck service", () => {
   });
 
   it("embeds a bounded batch (fixture embedder, not a model)", async () => {
-    const base = await start({ retrieve: null, propose: null, embed: async (texts) => ({ vectors: texts.map((t) => [t.length, 1]), model: "fixture" }) });
+    const base = await start({ retrieve: null, propose: null, embed: async (texts) => ({ vectors: texts.map((t) => [t.length, 1]), model: "fixture" }), critique: null });
     expect(await (await post(`${base}/embed`, { texts: ["ab", "abc"] })).json()).toEqual({ model: "fixture", vectors: [[2, 1], [3, 1]] });
     expect((await post(`${base}/embed`, { texts: [] })).status).toBe(400);
+  });
+
+  it("validates critique findings against the rubric and the deck (fixture critic text, not a model)", async () => {
+    const { sampleLibrary } = await import("../src/features/deck/sample-library");
+    const text = JSON.stringify({ findings: [
+      { rubricId: "specific-ask", cardId: "c-8", note: "Name the week and the store count." },
+      { rubricId: "vibes", cardId: null, note: "More energy." },
+    ] });
+    const base = await start({ retrieve: null, propose: null, embed: null, critique: async () => ({ text, model: "fixture", adapter: false }) });
+    const body = await (await post(`${base}/critique`, { deck: sampleLibrary.decks[0] })).json();
+    expect(body).toEqual({ model: "fixture", adapter: false, dropped: 1, findings: [{ rubricId: "specific-ask", cardId: "c-8", note: "Name the week and the store count." }] });
+    expect((await post(`${base}/critique`, { deck: { title: 1 } })).status).toBe(400);
   });
 });
