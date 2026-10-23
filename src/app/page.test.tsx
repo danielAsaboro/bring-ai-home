@@ -1,14 +1,14 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import Home from "./page";
 
 describe("Deck home", () => {
-  it("introduces Deck by name", () => {
-    render(<Home />);
+  beforeEach(() => localStorage.clear());
 
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Deck" }),
-    ).toBeInTheDocument();
+  it("opens the sample deck", () => {
+    render(<Home />);
+    expect(screen.getByRole("heading", { level: 1, name: "Deck" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Lumen Kettle launch" })).toBeInTheDocument();
   });
 });
