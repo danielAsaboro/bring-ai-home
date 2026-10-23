@@ -1,14 +1,19 @@
-import { createReceiptServer, unavailableReader } from "./server.ts";
+import { createQvacReader, defaultAppDirectory } from "./qvac-reader.ts";
+import { createReceiptServer } from "./server.ts";
 
 const port = Number(process.env.LEDGER_QVAC_PORT ?? 4318);
-const server = createReceiptServer(unavailableReader);
+const reader = createQvacReader(defaultAppDirectory);
+const server = createReceiptServer(reader);
 
 server.listen(port, "127.0.0.1", () => {
   process.stdout.write(`Ledger QVAC service listening on http://127.0.0.1:${port}\n`);
 });
 
 function shutdown() {
-  server.close(() => process.exit(0));
+  server.close(async () => {
+    await reader.close();
+    process.exit(0);
+  });
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
