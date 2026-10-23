@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs"
+    "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",

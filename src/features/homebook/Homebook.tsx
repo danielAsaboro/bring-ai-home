@@ -2,6 +2,8 @@
 
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 
+import type { AssistClient } from "./assist-client";
+import { AssistPanel } from "./AssistPanel";
 import {
   ASSET_CATEGORIES,
   completeTask,
@@ -13,6 +15,7 @@ import {
   type AssetCategory,
   type Binder,
   type DocumentKind,
+  updateAsset,
 } from "./binder";
 import { browserStore, type BinderStore } from "./storage";
 
@@ -22,16 +25,16 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function Homebook({ store, today }: { store?: BinderStore; today?: string }) {
+export function Homebook({ store, today, client }: { store?: BinderStore; today?: string; client?: AssistClient }) {
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   if (!mounted) return <p className="p-6">Opening the binder…</p>;
-  return <BinderView store={store ?? browserStore()} today={today ?? todayIso()} />;
+  return <BinderView store={store ?? browserStore()} today={today ?? todayIso()} client={client} />;
 }
 
 const field = "rounded border border-stone-400 bg-white px-2 py-1 text-sm";
 const button = "rounded bg-emerald-800 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-900";
 
-function BinderView({ store, today }: { store: BinderStore; today: string }) {
+function BinderView({ store, today, client }: { store: BinderStore; today: string; client?: AssistClient }) {
   const [binder, setBinder] = useState<Binder>(() => store.load());
   const [roomId, setRoomId] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(binder.assets[0]?.id ?? null);
@@ -200,6 +203,12 @@ function BinderView({ store, today }: { store: BinderStore; today: string }) {
               </dl>
               {selected.notes ? <p className="mt-2 font-sans">{selected.notes}</p> : null}
             </div>
+
+            <AssistPanel
+              asset={selected}
+              client={client}
+              onAccept={(field, value) => attempt(() => updateAsset(binder, { ...selected, [field]: value }))}
+            />
 
             <div>
               <h3 className="font-serif text-lg">Maintenance schedule</h3>
