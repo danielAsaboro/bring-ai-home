@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 
-import { proposalInputFromDraft } from "./categories";
-import { draftFromOcr, formatCents, type DraftTransaction, type Evidence } from "./draft-transactions";
+import { suggestedValues, type ReviewedValues } from "./book";
+import { CATEGORIES, proposalInputFromDraft, type Category } from "./categories";
+import { draftFromOcr, parseAmountCents, formatCents, type DraftTransaction, type Evidence } from "./draft-transactions";
 import { createReceiptClient, type ReceiptClient } from "./receipt-client";
 import type { ProposeResponse, SimilarResponse } from "./receipt-contract";
 import { SAMPLE_BOOK } from "./sample-book";
@@ -38,7 +39,74 @@ function Source({ evidence }: { evidence: Evidence<unknown> | null }) {
   );
 }
 
-export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
+export type ReviewDecision = {
+  accept(draft: DraftTransaction, reviewed: ReviewedValues, proposal: { merchant: string; category: Category } | null): void;
+  reject(draft: DraftTransaction): void;
+  decided: string[];
+};
+
+function ReviewForm({
+  draft,
+  proposal,
+  review,
+}: {
+  draft: DraftTransaction;
+  proposal: { merchant: string; category: Category } | null;
+  review: ReviewDecision;
+}) {
+  const start = suggestedValues(draft, proposal);
+  const [date, setDate] = useState(start.date);
+  const [merchant, setMerchant] = useState(start.merchant);
+  const [category, setCategory] = useState<Category>(start.category);
+  const [amount, setAmount] = useState(start.amountCents ? formatCents(start.amountCents) : "");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  if (review.decided.includes(draft.id)) return <p role="status">This draft has been decided.</p>;
+
+  return (
+    <form
+      aria-label="Review draft"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const amountCents = parseAmountCents(amount);
+        if (amountCents === null) {
+          setProblem("Enter the amount with two decimals, for example 10.53");
+          return;
+        }
+        try {
+          review.accept(draft, { date, merchant, category, amountCents }, proposal);
+        } catch (error) {
+          setProblem(error instanceof Error ? error.message : String(error));
+        }
+      }}
+    >
+      <label>
+        Date <input value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <label>
+        Merchant <input value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+      </label>
+      <label>
+        Category
+        <select value={category} onChange={(e) => setCategory(e.target.value as Category)}>
+          {CATEGORIES.map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Amount <input value={amount} onChange={(e) => setAmount(e.target.value)} />
+      </label>
+      {problem && <p role="alert">{problem}</p>}
+      <button type="submit">Accept into ledger</button>
+      <button type="button" onClick={() => review.reject(draft)}>
+        Reject draft
+      </button>
+    </form>
+  );
+}
+
+export function ReceiptInbox({ client, review }: { client?: ReceiptClient; review?: ReviewDecision }) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [proposal, setProposal] = useState<ProposalStatus>({ kind: "idle" });
   const [similar, setSimilar] = useState<SimilarStatus>({ kind: "idle" });
@@ -205,6 +273,14 @@ export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
               </ul>
             )}
           </section>
+          {review && (
+            <ReviewForm
+              key={`${status.draft.id}-${proposal.kind}`}
+              draft={status.draft}
+              proposal={proposal.kind === "done" && proposal.response.result.ok ? (proposal.response.result.proposal as { merchant: string; category: Category }) : null}
+              review={review}
+            />
+          )}
         </article>
       )}
     </section>

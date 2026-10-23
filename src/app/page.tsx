@@ -1,10 +1,10 @@
-import { ReceiptInbox } from "@/features/ledger/receipt-inbox";
+import { LedgerApp } from "@/features/ledger/ledger-app";
 
 export default function Home() {
   return (
     <main>
       <h1>Ledger</h1>
-      <ReceiptInbox />
+      <LedgerApp />
     </main>
   );
 }
