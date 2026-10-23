@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "qvac:transcribe-smoke": "node --no-warnings qvac-service/transcribe-recap-smoke.mjs"
+    "qvac:transcribe-smoke": "node --no-warnings qvac-service/transcribe-recap-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/server.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",
