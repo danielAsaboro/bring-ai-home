@@ -1,6 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sampleState, type LibraryStore } from "./library-store";
 import { ReplayApp } from "./replay-app";
@@ -15,6 +15,11 @@ function memoryStore(): LibraryStore {
     reset: () => (state = sampleState()),
   };
 }
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("ReplayApp", () => {
   it("authors a frame, plays a guided run, and records it in history", async () => {
@@ -45,5 +50,25 @@ describe("ReplayApp", () => {
     await user.click(screen.getByRole("tab", { name: "history" }));
     const history = screen.getByRole("list", { name: "Run history" });
     expect(history).toHaveTextContent("Channel was archived");
+  });
+
+  it("finds a tape by meaning, and falls back to words when the service is down", async () => {
+    const user = userEvent.setup();
+    // FIXTURE service answer, not live embeddings.
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ model: "GTE_LARGE_FP16", matches: [{ tapeId: "tape-checkout-bug", score: 0.81 }] })));
+    render(<ReplayApp store={memoryStore()} />);
+    const shelf = screen.getByRole("navigation", { name: "Tape shelf" });
+    await user.type(screen.getByLabelText("Describe the job"), "cart total is a cent off");
+    await user.click(screen.getByRole("button", { name: "Find tape" }));
+    expect(await within(shelf).findByText(/Closest tapes by meaning/)).toBeInTheDocument();
+    expect(within(shelf).getAllByRole("button", { pressed: false }).map((b) => b.textContent)).toEqual([
+      expect.stringContaining("Reproduce the checkout rounding bug"),
+    ]);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
+    await user.clear(screen.getByLabelText("Describe the job"));
+    await user.type(screen.getByLabelText("Describe the job"), "weekly");
+    await user.click(screen.getByRole("button", { name: "Find tape" }));
+    expect(await within(shelf).findByText(/Showing word matches instead/)).toBeInTheDocument();
   });
 });

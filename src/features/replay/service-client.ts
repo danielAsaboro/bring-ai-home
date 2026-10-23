@@ -1,10 +1,13 @@
 import {
+  parseFindTapeResponse,
   parseProposeConditionsResponse,
   parseProposeStepsResponse,
   parseReadScreenshotResponse,
   parseServiceError,
   parseTranscribeResponse,
   SERVICE_URL,
+  type FindTapeRequest,
+  type FindTapeResponse,
   type Parsed,
   type ProposeConditionsResponse,
   type ProposeStepsRequest,
@@ -81,4 +84,8 @@ export function proposeSteps(body: ProposeStepsRequest, fetchImpl?: typeof fetch
 
 export function proposeConditions(transcript: string, fetchImpl?: typeof fetch): Promise<ClientResult<ProposeConditionsResponse>> {
   return postJson("/v1/propose-conditions", { transcript }, parseProposeConditionsResponse, fetchImpl);
+}
+
+export function findTape(body: FindTapeRequest, fetchImpl?: typeof fetch): Promise<ClientResult<FindTapeResponse>> {
+  return postJson("/v1/find-tape", body, parseFindTapeResponse, fetchImpl);
 }

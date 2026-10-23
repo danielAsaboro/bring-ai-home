@@ -7,8 +7,10 @@ import path from "node:path";
 import { buildConditionsHistory, CONDITIONS_JSON_SCHEMA, parseConditions } from "../src/features/replay/conditions.ts";
 import { toNarration, type NarrationSegment } from "../src/features/replay/narration.ts";
 import { buildStepsHistory, parseStepProposals, STEPS_JSON_SCHEMA, type ChatMessage } from "../src/features/replay/proposals.ts";
+import { rankTapes } from "../src/features/replay/search.ts";
 import { parseScreenNote, SCREEN_NOTE_PROMPT } from "../src/features/replay/screen-notes.ts";
 import {
+  parseFindTapeRequest,
   parseProposeConditionsRequest,
   parseProposeStepsRequest,
   parseReadScreenshotRequest,
@@ -34,7 +36,13 @@ export type Drafter = {
   complete(history: ChatMessage[], schema: { name: string; schema: Record<string, unknown> }): Promise<string>;
 };
 
-export type ServiceModels = { transcriber?: Transcriber; viewer?: Viewer; drafter?: Drafter };
+// Embeddings: text in, vectors out. Ranking stays in plain code.
+export type Embedder = {
+  modelState(): ModelState;
+  embed(texts: string[]): Promise<number[][]>;
+};
+
+export type ServiceModels = { transcriber?: Transcriber; viewer?: Viewer; drafter?: Drafter; embedder?: Embedder };
 
 // Write request bytes to a private temp file for the length of one model call.
 async function withTempFile<T>(name: string, bytes: Buffer, run: (filePath: string) => Promise<T>) {
@@ -154,6 +162,21 @@ export function createReplayServer(models: ServiceModels) {
       } catch (cause) {
         throw new RequestError(422, "unusable_output", (cause as Error).message);
       }
+    });
+  }
+
+  if (models.embedder) {
+    const embedder = models.embedder;
+    // Vectors are cached by exact tape text, so an edited tape is re-embedded automatically.
+    const cache = new Map<string, number[]>();
+    routes.set("/v1/find-tape", async (req) => {
+      const parsed = parseFindTapeRequest(await readJson(req, 2_000_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const missing = [...new Set(parsed.value.tapes.map((t) => t.text).filter((t) => !cache.has(t)))];
+      const [query, ...vectors] = await embedder.embed([parsed.value.query, ...missing]);
+      missing.forEach((text, i) => cache.set(text, vectors[i]));
+      const index = parsed.value.tapes.map((t) => ({ tapeId: t.id, vector: cache.get(t.text)! }));
+      return { model: embedder.modelState().id, matches: rankTapes(index, query, { limit: 3, minScore: 0.5 }) };
     });
   }
 

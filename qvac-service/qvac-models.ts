@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { ModelState } from "../src/features/replay/service-contract.ts";
-import type { Drafter, Transcriber, Viewer } from "./server.ts";
+import type { Drafter, Embedder, Transcriber, Viewer } from "./server.ts";
 
 type Sdk = typeof import("@qvac/sdk");
 
@@ -114,6 +114,21 @@ export function createQvacDrafter(): Drafter & { close(): Promise<void> } {
         responseFormat: { type: "json_schema", json_schema: schema },
       });
       return (await run.final).contentText;
+    },
+    close: model.close,
+  };
+}
+
+export function createQvacEmbedder(): Embedder & { close(): Promise<void> } {
+  const model = lazyModel("embeddings", "GTE_LARGE_FP16", (q) =>
+    q.loadModel({ modelSrc: q.GTE_LARGE_FP16, modelType: "embeddings" }),
+  );
+  return {
+    modelState: model.modelState,
+    async embed(texts) {
+      const modelId = await model.ensure();
+      const { embedding } = await (await sdk()).embed({ modelId, text: texts });
+      return embedding;
     },
     close: model.close,
   };

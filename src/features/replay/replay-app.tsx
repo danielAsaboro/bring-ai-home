@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { mergeConditions } from "./conditions";
 import { DemonstrationPanel } from "./demonstration-panel";
+import { filterByWords } from "./search";
+import { findTape } from "./service-client";
 import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
 import {
   addStep,
@@ -13,6 +15,7 @@ import {
   removeStep,
   startRun,
   summarizeRun,
+  tapeText,
   updateStep,
   updateTape,
   type Run,
@@ -35,6 +38,8 @@ export function ReplayApp({ store }: { store?: LibraryStore }) {
   const [mode, setMode] = useState<Mode>("edit");
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<{ ids: string[]; note: string } | null>(null);
 
   useEffect(() => library.save(state), [library, state]);
 
@@ -71,6 +76,26 @@ export function ReplayApp({ store }: { store?: LibraryStore }) {
     });
   }
 
+  async function describeJob() {
+    setFound({ ids: [], note: "Searching on this machine…" });
+    const result = await findTape({ query, tapes: state.tapes.map((t) => ({ id: t.id, text: tapeText(t) })) });
+    if (!result.ok) {
+      // The word filter below keeps working; say what failed without inventing matches.
+      setFound({ ids: [], note: `${result.message} Showing word matches instead.` });
+      return;
+    }
+    setFound({
+      ids: result.value.matches.map((m) => m.tapeId),
+      note: result.value.matches.length
+        ? `Closest tapes by meaning (${result.value.model}).`
+        : "No tape is close enough. Try other words or record a new tape.",
+    });
+  }
+
+  const shelf = found && found.ids.length
+    ? found.ids.map((id) => state.tapes.find((t) => t.id === id)).filter((t): t is Tape => Boolean(t))
+    : filterByWords(state.tapes, found ? query : "");
+
   function newTape() {
     const t = blankTape("Untitled tape", now());
     setState((s) => ({ ...s, tapes: [t, ...s.tapes] }));
@@ -102,8 +127,30 @@ export function ReplayApp({ store }: { store?: LibraryStore }) {
           <button type="button" onClick={newTape} className="w-full rounded bg-amber-500 px-3 py-2 font-semibold text-stone-950">
             New tape
           </button>
+          <form
+            className="space-y-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (query.trim()) void describeJob();
+            }}
+          >
+            <input
+              aria-label="Describe the job"
+              placeholder="Describe the job…"
+              className="w-full rounded border border-stone-700 bg-stone-900 px-2 py-1 text-sm"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setFound(null);
+              }}
+            />
+            <button type="submit" className="w-full rounded border border-stone-700 px-2 py-1 text-sm">
+              Find tape
+            </button>
+            {found && <p className="text-xs text-stone-400">{found.note}</p>}
+          </form>
           <ul className="space-y-2">
-            {state.tapes.map((t) => (
+            {shelf.map((t) => (
               <li key={t.id}>
                 <button
                   type="button"

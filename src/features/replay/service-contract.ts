@@ -3,6 +3,7 @@
 import type { ConditionsResult } from "./conditions.ts";
 import type { Narration } from "./narration.ts";
 import type { ProposalResult } from "./proposals.ts";
+import type { TapeMatch } from "./search.ts";
 import { imageExtension, type ScreenNote } from "./screen-notes.ts";
 
 export const SERVICE_PORT = 4319;
@@ -111,4 +112,26 @@ export function parseProposeConditionsResponse(json: unknown): Parsed<ProposeCon
     return { ok: false, message: "Conditions response is malformed" };
   }
   return { ok: true, value: json as ProposeConditionsResponse };
+}
+
+export type FindTapeRequest = { query: string; tapes: { id: string; text: string }[] };
+export type FindTapeResponse = { model: string; matches: TapeMatch[] };
+
+export function parseFindTapeRequest(json: unknown): Parsed<FindTapeRequest> {
+  if (!isRecord(json) || !nonEmptyString(json.query, 500)) return { ok: false, message: "query is required" };
+  const tapes = json.tapes;
+  if (
+    !Array.isArray(tapes) ||
+    tapes.length > 500 ||
+    !tapes.every((t) => isRecord(t) && nonEmptyString(t.id, 100) && nonEmptyString(t.text, 10_000))
+  ) {
+    return { ok: false, message: "tapes must be up to 500 { id, text } objects" };
+  }
+  return { ok: true, value: { query: json.query, tapes: tapes as FindTapeRequest["tapes"] } };
+}
+
+export function parseFindTapeResponse(json: unknown): Parsed<FindTapeResponse> {
+  if (!isRecord(json) || !Array.isArray(json.matches)) return { ok: false, message: "Search response is malformed" };
+  const ok = json.matches.every((m) => isRecord(m) && typeof m.tapeId === "string" && typeof m.score === "number");
+  return ok ? { ok: true, value: json as FindTapeResponse } : { ok: false, message: "Search response is malformed" };
 }

@@ -134,4 +134,28 @@ describe("replay QVAC service boundary", () => {
     expect(body.result.parameters.map((p: { name: string }) => p.name)).toEqual(["week_start"]);
     expect(body.result.rejected).toHaveLength(2);
   });
+
+  it("finds a tape with injected vectors and re-embeds only new text", async () => {
+    const calls: string[][] = [];
+    // FIXTURE embedder: maps words to hand-made vectors. Not a model.
+    const embedder = {
+      modelState: () => ({ kind: "embeddings", id: "GTE_LARGE_FP16", state: "ready" as const }),
+      embed: async (texts: string[]) => {
+        calls.push(texts);
+        return texts.map((t) => (/report|numbers/i.test(t) ? [1, 0] : [0, 1]));
+      },
+    };
+    const url = await start({ embedder });
+    const body = {
+      query: "post last week's numbers",
+      tapes: [
+        { id: "a", text: "Publish the weekly report" },
+        { id: "b", text: "Onboard a new contractor" },
+      ],
+    };
+    const first = await (await fetch(`${url}/v1/find-tape`, { method: "POST", body: JSON.stringify(body) })).json();
+    expect(first.matches).toEqual([{ tapeId: "a", score: 1 }]);
+    await fetch(`${url}/v1/find-tape`, { method: "POST", body: JSON.stringify(body) });
+    expect(calls[1]).toEqual(["post last week's numbers"]);
+  });
 });
