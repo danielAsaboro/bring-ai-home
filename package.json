@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "qvac:ocr-smoke": "node qvac-service/ocr-smoke.mjs",
-    "qvac:service": "node qvac-service/main.ts"
+    "qvac:service": "node qvac-service/main.ts",
+    "qvac:offline": "sandbox-exec -f qvac-service/offline.sb node qvac-service/offline-check.mjs",
+    "qvac:service:offline": "sandbox-exec -f qvac-service/offline.sb node qvac-service/main.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",

@@ -1,0 +1,6 @@
+(version 1)
+(allow default)
+; Deny every outbound connection except loopback and local sockets.
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
