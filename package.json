@@ -10,9 +10,12 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "qvac:ingest-notes": "node --no-warnings qvac-service/ingest-notes.mjs"
   },
   "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
     "next": "16.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
@@ -33,5 +36,8 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "^22.22.0 || ^24.15.0 || >=26.0.0"
   }
 }
