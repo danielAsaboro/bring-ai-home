@@ -1,12 +1,14 @@
 import type { LookoutEvent } from "./events";
 import type { Rule } from "./rules";
 import { sampleSources } from "./sources";
+import type { Watcher } from "./watcher";
 
 export type LookoutState = {
   version: 1;
   armed: Record<string, boolean>;
   rules: Rule[];
   tape: LookoutEvent[];
+  watchers: Watcher[];
 };
 
 export const STORAGE_KEY = "lookout:v1";
@@ -20,6 +22,7 @@ export function defaultState(): LookoutState {
       { id: "rule-change", sourceId: "front-gate", kind: "change", minChange: 0.15 },
     ],
     tape: [],
+    watchers: [],
   };
 }
 

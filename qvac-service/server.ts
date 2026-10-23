@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { parseCheckFrameRequest } from "../src/features/lookout/check-contract.ts";
+import { sampleSources } from "../src/features/lookout/sources.ts";
 import { buildConditionPrompt, parseVerdict } from "../src/features/lookout/verdict.ts";
+import { buildWatcherHistory, parseWatcherJson } from "../src/features/lookout/watcher.ts";
 
 export const SERVICE_PORT = 4319;
 const MAX_BODY_BYTES = 2_100_000;
@@ -11,6 +13,11 @@ const MAX_BODY_BYTES = 2_100_000;
 export type FrameChecker = {
   model: string;
   check(png: Buffer, prompt: string): Promise<string>;
+};
+
+export type WatcherProposer = {
+  model: string;
+  complete(history: ReturnType<typeof buildWatcherHistory>): Promise<string>;
 };
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
@@ -48,7 +55,13 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-export function createLookoutServer({ checker }: { checker: FrameChecker | null }) {
+export function createLookoutServer({
+  checker,
+  proposer = null,
+}: {
+  checker: FrameChecker | null;
+  proposer?: WatcherProposer | null;
+}) {
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (!isAllowedOrigin(origin)) return fail(res, 403, "origin_denied", "Only local pages may call Lookout's service");
@@ -58,7 +71,11 @@ export function createLookoutServer({ checker }: { checker: FrameChecker | null 
       return send(
         res,
         200,
-        { service: "ready", vision: checker ? { model: checker.model, state: "configured" } : { state: "not_configured" } },
+        {
+          service: "ready",
+          vision: checker ? { model: checker.model, state: "configured" } : { state: "not_configured" },
+          language: proposer ? { model: proposer.model, state: "configured" } : { state: "not_configured" },
+        },
         origin,
       );
     }
@@ -95,6 +112,30 @@ export function createLookoutServer({ checker }: { checker: FrameChecker | null 
       } catch (error) {
         return fail(res, 503, "vision_failed", error instanceof Error ? error.message : "Vision check failed", origin);
       }
+    }
+
+    if (req.method === "POST" && req.url === "/v1/propose-watcher") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch {
+        return fail(res, 400, "bad_json", "Body must be JSON", origin);
+      }
+      const sentence = (body as { sentence?: unknown } | null)?.sentence;
+      if (typeof sentence !== "string" || !sentence.trim() || sentence.length > 300) {
+        return fail(res, 400, "bad_request", "sentence is required (300 characters or fewer)", origin);
+      }
+      if (!proposer) return fail(res, 503, "language_unavailable", "The local language model is not configured", origin);
+      let raw: string;
+      try {
+        raw = await proposer.complete(buildWatcherHistory(sentence, sampleSources));
+      } catch (error) {
+        return fail(res, 503, "language_failed", error instanceof Error ? error.message : "Proposal failed", origin);
+      }
+      const parsed = parseWatcherJson(raw, sampleSources.map((s) => s.id));
+      // A rejected proposal still returns the raw text, so a person can see why.
+      if (!parsed.ok) return send(res, 422, { error: { code: "invalid_proposal", message: parsed.message }, raw }, origin);
+      return send(res, 200, { proposal: parsed.value, raw, model: proposer.model }, origin);
     }
 
     return fail(res, 404, "not_found", "Unknown route", origin);

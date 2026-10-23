@@ -6,6 +6,8 @@ import { acknowledge, mergeTape, replayFrames } from "./events";
 import { ANY_SOURCE, describeRule, type Rule } from "./rules";
 import { findFrame, sampleSources } from "./sources";
 import { createStore, defaultState, type LookoutState } from "./store";
+import type { WatcherProposal } from "./watcher";
+import { proposeWatcher, type ProposeOutcome } from "./watcher-client";
 
 function browserStorage() {
   try {
@@ -27,6 +29,9 @@ export function ControlRoom() {
   const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
   const [draftValue, setDraftValue] = useState("40");
   const [draftTo, setDraftTo] = useState("6");
+  const [sentence, setSentence] = useState("");
+  const [proposing, setProposing] = useState(false);
+  const [proposal, setProposal] = useState<ProposeOutcome | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +65,18 @@ export function ControlRoom() {
       rule = { id, sourceId: draftSource, kind: "change", minChange: Math.min(Math.max(n, 0), 100) / 100 };
     }
     update({ ...state, rules: [...state.rules, rule] });
+  }
+
+  async function propose() {
+    setProposing(true);
+    setProposal(await proposeWatcher(sentence));
+    setProposing(false);
+  }
+
+  function activate(p: WatcherProposal) {
+    update({ ...state, watchers: [...state.watchers, { ...p, id: `watcher-${Date.now()}` }] });
+    setProposal(null);
+    setSentence("");
   }
 
   return (
@@ -166,6 +183,81 @@ export function ControlRoom() {
               </li>
             );
           })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="watchers-heading" className="mb-8">
+        <h2 id="watchers-heading" className="mb-2 text-lg font-semibold">
+          Watchers
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Describe what to watch for. A local model proposes a rule; nothing is active until you accept it.
+        </p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <label className="flex min-w-0 flex-1 flex-col text-sm">
+            Describe a watcher
+            <input
+              value={sentence}
+              onChange={(e) => setSentence(e.target.value)}
+              placeholder="Tell me when a parcel is left by the gate"
+              className="border p-1"
+            />
+          </label>
+          <button
+            className="self-end rounded border px-3 py-1"
+            disabled={proposing || !sentence.trim()}
+            onClick={propose}
+          >
+            {proposing ? "Proposing…" : "Propose watcher"}
+          </button>
+        </div>
+        {proposal && !proposal.ok ? (
+          <p role="alert" className="mb-3 text-sm text-red-700">
+            No watcher proposed: {proposal.message}
+            {proposal.raw ? <span className="block font-mono">Model reply: {proposal.raw}</span> : null}
+          </p>
+        ) : null}
+        {proposal && proposal.ok ? (
+          <div aria-label="Proposed watcher" role="group" className="mb-3 rounded border border-amber-500 p-2 text-sm">
+            <p className="font-semibold">Proposed by {proposal.model}. Check every field.</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3">
+              <dt>Source</dt>
+              <dd>{sourceName(proposal.proposal.sourceId)}</dd>
+              <dt>Condition</dt>
+              <dd>{proposal.proposal.condition}</dd>
+              <dt>Hours</dt>
+              <dd>
+                {proposal.proposal.fromHour === proposal.proposal.toHour
+                  ? "All day"
+                  : `${proposal.proposal.fromHour}:00 to ${proposal.proposal.toHour}:00`}
+              </dd>
+              <dt>Motion at least</dt>
+              <dd>{Math.round(proposal.proposal.minMotion * 100)}%</dd>
+            </dl>
+            <div className="mt-2 flex gap-2">
+              <button className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => activate(proposal.proposal)}>
+                Accept watcher
+              </button>
+              <button className="rounded border px-3 py-1" onClick={() => setProposal(null)}>
+                Discard
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <ul aria-label="Active watchers" className="space-y-1">
+          {state.watchers.map((w) => (
+            <li key={w.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(w.sourceId)}: “{w.condition}”
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, watchers: state.watchers.filter((x) => x.id !== w.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
         </ul>
       </section>
 
