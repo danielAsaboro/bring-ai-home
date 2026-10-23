@@ -1,0 +1,1030 @@
+---
+title: "04. Turn a sentence into an inspectable watcher rule"
+description: "We will let a local language model turn \"tell me when a parcel is left by the gate\" into a JSON watcher proposal, validate it against fixed lists, and activate it only when a person accepts."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 04. Turn a sentence into an inspectable watcher rule" />
+
+We will type "tell me when a parcel is left by the gate" and get back a watcher: a source, a condition, hours, and a motion floor. A local language model proposes it as JSON. The app validates it against fixed lists. A person reads every field and accepts it, or discards it.
+
+**Source checkpoint:** `f15f98d` · **Starting checkpoint:** `702516e`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `src/features/lookout/watcher.ts` | Watcher type, JSON Schema, prompt, and validation |
+| `src/features/lookout/watcher-client.ts` | Browser client that validates again on its side |
+| `qvac-service/qvac-proposer.ts` | `LLAMA_3_2_1B_INST_Q4_0` with `responseFormat: json_schema` |
+| `qvac-service/server.ts` | New route `POST /v1/propose-watcher` |
+| `src/features/lookout/ControlRoom.tsx` | Watchers section: propose, inspect, accept, discard |
+| `src/features/lookout/store.ts` | Saves accepted watchers |
+
+To compare with the starting checkpoint: `git diff 702516e f15f98d`.
+
+## Build and observe
+
+### 1. Read the authority line
+
+Open `watcher.ts`. The JSON Schema asks for `sourceId`, `condition`, `fromHour`, `toHour`, and `minMotion`. A schema constrains shape. It does not make the answer right. So `validateWatcherProposal` checks again: the source must be one of the three real IDs, hours are whole numbers 0 to 23, motion is 0 to 1, and the condition is short and non-empty.
+
+### 2. Read the proposer
+
+Open `qvac-proposer.ts`. It calls `completion` with `responseFormat: { type: "json_schema", json_schema: { name: "watcher", schema } }` and reads `(await run.final).contentText`.
+
+### 3. Propose a watcher
+
+```bash
+git checkout f15f98d
+npm run qvac:service
+npm run dev
+```
+
+Type **Tell me when a parcel is left by the gate** and click **Propose watcher**. A yellow box shows each field and the model that proposed it. Nothing is active yet. Click **Accept watcher** to activate it, or **Discard**.
+
+If the model invents a source, the service answers `422 invalid_proposal` and returns the raw reply, so you can see what it said. The UI shows "No watcher proposed" and the reply. Stop the service and try again: the UI says the local service is not running.
+
+### 4. A runtime import detail
+
+`watcher.ts` imports `./verdict.ts` with the extension. The Node service loads these files directly, without a bundler, and Node needs the extension. Next accepts it because of `allowImportingTsExtensions`.
+
+## Read the checkpoint implementation
+
+These are complete files from `f15f98d`, changed in this chapter. Paths are relative to `apps/lookout`.
+
+<AccordionGroup>
+<Accordion title="qvac-service/qvac-proposer.ts">
+
+```typescript
+import type { WatcherProposer } from "./server.ts";
+import { WATCHER_JSON_SCHEMA } from "../src/features/lookout/watcher.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+export const LANGUAGE_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
+
+// A small local LLM that proposes a watcher as JSON. Loaded on first use.
+export function createQvacProposer(): WatcherProposer & { close(): Promise<void> } {
+  let sdk: Sdk | undefined;
+  let loading: Promise<string> | undefined;
+
+  function ensureModel() {
+    loading ??= (async () => {
+      sdk = await import("@qvac/sdk");
+      return sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" });
+    })().catch((error: unknown) => {
+      loading = undefined;
+      throw error;
+    });
+    return loading;
+  }
+
+  return {
+    model: LANGUAGE_MODEL,
+    async complete(history) {
+      const modelId = await ensureModel();
+      const run = sdk!.completion({
+        modelId,
+        history,
+        stream: true,
+        responseFormat: { type: "json_schema", json_schema: { name: "watcher", schema: WATCHER_JSON_SCHEMA } },
+      });
+      return (await run.final).contentText;
+    },
+    async close() {
+      const modelId = await loading?.catch(() => undefined);
+      if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/serve.mjs">
+
+```javascript
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+const { createLookoutServer, SERVICE_PORT } = await import("./server.ts");
+const { createQvacChecker } = await import("./qvac-checker.ts");
+const { createQvacProposer } = await import("./qvac-proposer.ts");
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+
+// LOOKOUT_VISION=off starts the boundary without a model, to see the 503 path.
+const checker = process.env.LOOKOUT_VISION === "off" ? null : createQvacChecker(appDirectory);
+const proposer = process.env.LOOKOUT_LANGUAGE === "off" ? null : createQvacProposer();
+const server = createLookoutServer({ checker, proposer });
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stderr.write(`Lookout QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+async function shutdown() {
+  server.close();
+  await proposer?.close();
+  await checker?.close();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createLookoutServer, isAllowedOrigin, type FrameChecker, type WatcherProposer } from "./server";
+
+// A fixture checker with a fixed reply. It is not a model.
+const fixtureChecker: FrameChecker = { model: "fixture-checker", check: async () => "YES. A box by the gate." };
+
+let close: (() => void) | undefined;
+afterEach(() => close?.());
+
+async function start(checker: FrameChecker | null, proposer: WatcherProposer | null = null) {
+  const server = createLookoutServer({ checker, proposer });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+const body = JSON.stringify({ frameId: "front-gate-3", condition: "a parcel by the gate", pngBase64: "aGk=" });
+
+describe("Lookout service boundary", () => {
+  it("reports health without claiming a loaded model", async () => {
+    const url = await start(null);
+    expect(await (await fetch(`${url}/health`)).json()).toEqual({
+      service: "ready",
+      vision: { state: "not_configured" },
+      language: { state: "not_configured" },
+    });
+  });
+
+  it("answers 503 when vision is not configured instead of inventing a verdict", async () => {
+    const url = await start(null);
+    const res = await fetch(`${url}/v1/check-frame`, { method: "POST", body });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("vision_unavailable");
+  });
+
+  it("rejects bad requests and foreign origins", async () => {
+    const url = await start(fixtureChecker);
+    expect((await fetch(`${url}/v1/check-frame`, { method: "POST", body: "{}" })).status).toBe(400);
+    expect(isAllowedOrigin("https://evil.example")).toBe(false);
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
+  });
+
+  it("returns the digest of the bytes it received and a parsed verdict", async () => {
+    const url = await start(fixtureChecker);
+    const json = await (await fetch(`${url}/v1/check-frame`, { method: "POST", body })).json();
+    expect(json.frameDigest).toBe("8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4");
+    expect(json.verdict).toEqual({ answer: "yes", reason: "A box by the gate." });
+    expect(json.model).toBe("fixture-checker");
+  });
+
+  it("validates a proposed watcher and keeps the raw reply when it is rejected", async () => {
+    // Fixture proposers with fixed replies, not a model.
+    const good: WatcherProposer = {
+      model: "fixture-proposer",
+      complete: async () => '{"sourceId":"front-gate","condition":"a parcel left by the gate","fromHour":0,"toHour":0,"minMotion":0}',
+    };
+    let url = await start(null, good);
+    const sentence = JSON.stringify({ sentence: "tell me when a parcel is left by the gate" });
+    const ok = await (await fetch(`${url}/v1/propose-watcher`, { method: "POST", body: sentence })).json();
+    expect(ok.proposal.sourceId).toBe("front-gate");
+    close?.();
+
+    const invented: WatcherProposer = { model: "fixture-proposer", complete: async () => '{"sourceId":"driveway"}' };
+    url = await start(null, invented);
+    const res = await fetch(`${url}/v1/propose-watcher`, { method: "POST", body: sentence });
+    expect(res.status).toBe(422);
+    expect((await res.json()).raw).toBe('{"sourceId":"driveway"}');
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createHash } from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import { parseCheckFrameRequest } from "../src/features/lookout/check-contract.ts";
+import { sampleSources } from "../src/features/lookout/sources.ts";
+import { buildConditionPrompt, parseVerdict } from "../src/features/lookout/verdict.ts";
+import { buildWatcherHistory, parseWatcherJson } from "../src/features/lookout/watcher.ts";
+
+export const SERVICE_PORT = 4319;
+const MAX_BODY_BYTES = 2_100_000;
+
+// The only thing the server knows about inference. QVAC lives behind it.
+export type FrameChecker = {
+  model: string;
+  check(png: Buffer, prompt: string): Promise<string>;
+};
+
+export type WatcherProposer = {
+  model: string;
+  complete(history: ReturnType<typeof buildWatcherHistory>): Promise<string>;
+};
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and local scripts send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function fail(res: ServerResponse, status: number, code: string, message: string, origin?: string) {
+  send(res, status, { error: { code, message } }, origin);
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("too_large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function createLookoutServer({
+  checker,
+  proposer = null,
+}: {
+  checker: FrameChecker | null;
+  proposer?: WatcherProposer | null;
+}) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return fail(res, 403, "origin_denied", "Only local pages may call Lookout's service");
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+
+    if (req.method === "GET" && req.url === "/health") {
+      return send(
+        res,
+        200,
+        {
+          service: "ready",
+          vision: checker ? { model: checker.model, state: "configured" } : { state: "not_configured" },
+          language: proposer ? { model: proposer.model, state: "configured" } : { state: "not_configured" },
+        },
+        origin,
+      );
+    }
+
+    if (req.method === "POST" && req.url === "/v1/check-frame") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch (error) {
+        const tooLarge = error instanceof Error && error.message === "too_large";
+        return fail(res, tooLarge ? 413 : 400, tooLarge ? "too_large" : "bad_json", tooLarge ? "Frame is too large" : "Body must be JSON", origin);
+      }
+      const parsed = parseCheckFrameRequest(body);
+      if (!parsed.ok) return fail(res, 400, "bad_request", parsed.message, origin);
+      let prompt: string;
+      try {
+        prompt = buildConditionPrompt(parsed.value.condition);
+      } catch (error) {
+        return fail(res, 400, "bad_condition", (error as Error).message, origin);
+      }
+      if (!checker) return fail(res, 503, "vision_unavailable", "The local vision model is not configured", origin);
+
+      const png = Buffer.from(parsed.value.pngBase64, "base64");
+      const frameDigest = createHash("sha256").update(png).digest("hex");
+      const startedAt = Date.now();
+      try {
+        const raw = await checker.check(png, prompt);
+        return send(
+          res,
+          200,
+          { frameId: parsed.value.frameId, frameDigest, model: checker.model, raw, verdict: parseVerdict(raw), ms: Date.now() - startedAt },
+          origin,
+        );
+      } catch (error) {
+        return fail(res, 503, "vision_failed", error instanceof Error ? error.message : "Vision check failed", origin);
+      }
+    }
+
+    if (req.method === "POST" && req.url === "/v1/propose-watcher") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch {
+        return fail(res, 400, "bad_json", "Body must be JSON", origin);
+      }
+      const sentence = (body as { sentence?: unknown } | null)?.sentence;
+      if (typeof sentence !== "string" || !sentence.trim() || sentence.length > 300) {
+        return fail(res, 400, "bad_request", "sentence is required (300 characters or fewer)", origin);
+      }
+      if (!proposer) return fail(res, 503, "language_unavailable", "The local language model is not configured", origin);
+      let raw: string;
+      try {
+        raw = await proposer.complete(buildWatcherHistory(sentence, sampleSources));
+      } catch (error) {
+        return fail(res, 503, "language_failed", error instanceof Error ? error.message : "Proposal failed", origin);
+      }
+      const parsed = parseWatcherJson(raw, sampleSources.map((s) => s.id));
+      // A rejected proposal still returns the raw text, so a person can see why.
+      if (!parsed.ok) return send(res, 422, { error: { code: "invalid_proposal", message: parsed.message }, raw }, origin);
+      return send(res, 200, { proposal: parsed.value, raw, model: proposer.model }, origin);
+    }
+
+    return fail(res, 404, "not_found", "Unknown route", origin);
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/app/page.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import Home from "./page";
+
+describe("Lookout control room", () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("introduces Lookout and starts disarmed", async () => {
+    render(<Home />);
+    expect(screen.getByRole("heading", { level: 1, name: "Lookout" })).toBeInTheDocument();
+    expect(await screen.findByText(/No events/)).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Armed state" })).toHaveTextContent("DISARMED");
+  });
+
+  it("arms a source, replays frames onto the tape, and acknowledges an event", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByText(/No events/);
+
+    await user.click(screen.getByRole("button", { name: "Arm Front gate" }));
+    expect(screen.getByRole("status", { name: "Armed state" })).toHaveTextContent("ARMED · 1 of 3");
+
+    await user.click(screen.getByRole("button", { name: "Replay stored frames" }));
+    const tape = screen.getByRole("list", { name: "Events" });
+    expect(within(tape).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText("3 to review")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Acknowledge Front gate 10:44" }));
+    expect(screen.getByText("2 to review")).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("lookout:v1")!).tape[1].acknowledged).toBe(true);
+  });
+
+  it("shows a proposed watcher and activates it only after a person accepts", async () => {
+    // Fixture service reply, not live model output.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          proposal: { sourceId: "front-gate", condition: "a parcel left by the gate", fromHour: 0, toHour: 0, minMotion: 0 },
+          raw: "{}",
+          model: "fixture-proposer",
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByText(/No events/);
+    await user.type(screen.getByLabelText("Describe a watcher"), "tell me when a parcel is left by the gate");
+    await user.click(screen.getByRole("button", { name: "Propose watcher" }));
+
+    const proposed = await screen.findByRole("group", { name: "Proposed watcher" });
+    expect(within(proposed).getByText("a parcel left by the gate")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Active watchers" })).queryAllByRole("listitem")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Accept watcher" }));
+    expect(within(screen.getByRole("list", { name: "Active watchers" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("explains when the service is not running", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByText(/No events/);
+    await user.type(screen.getByLabelText("Describe a watcher"), "parcel at the gate");
+    await user.click(screen.getByRole("button", { name: "Propose watcher" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The local QVAC service is not running");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/ControlRoom.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { acknowledge, mergeTape, replayFrames } from "./events";
+import { ANY_SOURCE, describeRule, type Rule } from "./rules";
+import { findFrame, sampleSources } from "./sources";
+import { createStore, defaultState, type LookoutState } from "./store";
+import type { WatcherProposal } from "./watcher";
+import { proposeWatcher, type ProposeOutcome } from "./watcher-client";
+
+function browserStorage() {
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function sourceName(id: string) {
+  return id === ANY_SOURCE ? "Any source" : (sampleSources.find((s) => s.id === id)?.name ?? id);
+}
+
+export function ControlRoom() {
+  const store = useMemo(() => createStore(browserStorage()), []);
+  const [state, setState] = useState<LookoutState>(defaultState);
+  const [loaded, setLoaded] = useState(false);
+  const [draftKind, setDraftKind] = useState<Rule["kind"]>("motion");
+  const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
+  const [draftValue, setDraftValue] = useState("40");
+  const [draftTo, setDraftTo] = useState("6");
+  const [sentence, setSentence] = useState("");
+  const [proposing, setProposing] = useState(false);
+  const [proposal, setProposal] = useState<ProposeOutcome | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setState(store.load());
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [store]);
+
+  function update(next: LookoutState) {
+    setState(next);
+    store.save(next);
+  }
+
+  const armedCount = Object.values(state.armed).filter(Boolean).length;
+  const unacked = state.tape.filter((e) => !e.acknowledged).length;
+
+  function addRule() {
+    const id = `rule-${Date.now()}`;
+    const n = Number(draftValue);
+    let rule: Rule;
+    if (draftKind === "time") {
+      rule = { id, sourceId: draftSource, kind: "time", fromHour: n % 24, toHour: Number(draftTo) % 24 };
+    } else if (draftKind === "motion") {
+      rule = { id, sourceId: draftSource, kind: "motion", minMotion: Math.min(Math.max(n, 0), 100) / 100 };
+    } else {
+      rule = { id, sourceId: draftSource, kind: "change", minChange: Math.min(Math.max(n, 0), 100) / 100 };
+    }
+    update({ ...state, rules: [...state.rules, rule] });
+  }
+
+  async function propose() {
+    setProposing(true);
+    setProposal(await proposeWatcher(sentence));
+    setProposing(false);
+  }
+
+  function activate(p: WatcherProposal) {
+    update({ ...state, watchers: [...state.watchers, { ...p, id: `watcher-${Date.now()}` }] });
+    setProposal(null);
+    setSentence("");
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl p-4 font-sans text-slate-900">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Lookout</h1>
+        <button
+          className="rounded border px-3 py-1 text-sm"
+          onClick={() => update(store.reset())}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <p
+        role="status"
+        aria-label="Armed state"
+        className={`mb-6 rounded p-4 text-xl font-bold ${armedCount > 0 ? "bg-red-600 text-white" : "bg-slate-200 text-slate-700"}`}
+      >
+        {armedCount > 0
+          ? `ARMED · ${armedCount} of ${sampleSources.length} sources watched`
+          : "DISARMED · no source is watched"}
+      </p>
+
+      <section aria-labelledby="tape-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="tape-heading" className="text-lg font-semibold">
+            Event tape
+          </h2>
+          <span className="text-sm text-slate-600">{unacked} to review</span>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white"
+            onClick={() =>
+              update({ ...state, tape: mergeTape(state.tape, replayFrames(sampleSources, state.armed, state.rules)) })
+            }
+          >
+            Replay stored frames
+          </button>
+        </div>
+        {state.tape.length === 0 ? (
+          <p className="text-slate-600">
+            {loaded ? "No events. Arm a source and replay its stored frames." : "Loading…"}
+          </p>
+        ) : (
+          <ol aria-label="Events" className="space-y-2">
+            {state.tape.map((event) => {
+              const frame = findFrame(sampleSources, event.frameId);
+              return (
+                <li
+                  key={event.id}
+                  className={`flex flex-wrap items-center gap-3 rounded border p-2 ${event.acknowledged ? "opacity-60" : "border-red-400"}`}
+                >
+                  {frame ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">
+                      {sourceName(event.sourceId)} · {event.at.replace("T", " ")}
+                    </p>
+                    <p className="text-sm text-slate-600">Matched: {event.reasons.join(", ")}</p>
+                  </div>
+                  {event.acknowledged ? (
+                    <span className="text-sm">Acknowledged</span>
+                  ) : (
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, tape: acknowledge(state.tape, event.id) })}
+                    >
+                      Acknowledge {sourceName(event.sourceId)} {event.at.slice(11)}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+
+      <section aria-labelledby="sources-heading" className="mb-8">
+        <h2 id="sources-heading" className="mb-2 text-lg font-semibold">
+          Sources
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Stored still frames from sample sources. Lookout does not connect to cameras.
+        </p>
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {sampleSources.map((source) => {
+            const armed = Boolean(state.armed[source.id]);
+            const latest = source.frames[source.frames.length - 1];
+            return (
+              <li key={source.id} className={`rounded border-4 p-2 ${armed ? "border-red-600" : "border-slate-200"}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={latest.image} alt={latest.caption} width={320} height={200} className="w-full rounded" />
+                <p className="mt-1 font-medium">{source.name}</p>
+                <p className="text-sm text-slate-600">{source.place}</p>
+                <button
+                  aria-pressed={armed}
+                  className={`mt-2 w-full rounded px-2 py-1 font-semibold ${armed ? "bg-red-600 text-white" : "bg-slate-200"}`}
+                  onClick={() => update({ ...state, armed: { ...state.armed, [source.id]: !armed } })}
+                >
+                  {armed ? `Disarm ${source.name}` : `Arm ${source.name}`}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="watchers-heading" className="mb-8">
+        <h2 id="watchers-heading" className="mb-2 text-lg font-semibold">
+          Watchers
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Describe what to watch for. A local model proposes a rule; nothing is active until you accept it.
+        </p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <label className="flex min-w-0 flex-1 flex-col text-sm">
+            Describe a watcher
+            <input
+              value={sentence}
+              onChange={(e) => setSentence(e.target.value)}
+              placeholder="Tell me when a parcel is left by the gate"
+              className="border p-1"
+            />
+          </label>
+          <button
+            className="self-end rounded border px-3 py-1"
+            disabled={proposing || !sentence.trim()}
+            onClick={propose}
+          >
+            {proposing ? "Proposing…" : "Propose watcher"}
+          </button>
+        </div>
+        {proposal && !proposal.ok ? (
+          <p role="alert" className="mb-3 text-sm text-red-700">
+            No watcher proposed: {proposal.message}
+            {proposal.raw ? <span className="block font-mono">Model reply: {proposal.raw}</span> : null}
+          </p>
+        ) : null}
+        {proposal && proposal.ok ? (
+          <div aria-label="Proposed watcher" role="group" className="mb-3 rounded border border-amber-500 p-2 text-sm">
+            <p className="font-semibold">Proposed by {proposal.model}. Check every field.</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3">
+              <dt>Source</dt>
+              <dd>{sourceName(proposal.proposal.sourceId)}</dd>
+              <dt>Condition</dt>
+              <dd>{proposal.proposal.condition}</dd>
+              <dt>Hours</dt>
+              <dd>
+                {proposal.proposal.fromHour === proposal.proposal.toHour
+                  ? "All day"
+                  : `${proposal.proposal.fromHour}:00 to ${proposal.proposal.toHour}:00`}
+              </dd>
+              <dt>Motion at least</dt>
+              <dd>{Math.round(proposal.proposal.minMotion * 100)}%</dd>
+            </dl>
+            <div className="mt-2 flex gap-2">
+              <button className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => activate(proposal.proposal)}>
+                Accept watcher
+              </button>
+              <button className="rounded border px-3 py-1" onClick={() => setProposal(null)}>
+                Discard
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <ul aria-label="Active watchers" className="space-y-1">
+          {state.watchers.map((w) => (
+            <li key={w.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(w.sourceId)}: “{w.condition}”
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, watchers: state.watchers.filter((x) => x.id !== w.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="rules-heading">
+        <h2 id="rules-heading" className="mb-2 text-lg font-semibold">
+          Rules
+        </h2>
+        <ul aria-label="Rules" className="mb-3 space-y-1">
+          {state.rules.map((rule) => (
+            <li key={rule.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(rule.sourceId)}: {describeRule(rule)}
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, rules: state.rules.filter((r) => r.id !== rule.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-end gap-2 text-sm">
+          <label className="flex flex-col">
+            Kind
+            <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as Rule["kind"])} className="border">
+              <option value="motion">Motion at least (%)</option>
+              <option value="change">Scene change at least (%)</option>
+              <option value="time">Only between hours</option>
+            </select>
+          </label>
+          <label className="flex flex-col">
+            Source
+            <select value={draftSource} onChange={(e) => setDraftSource(e.target.value)} className="border">
+              <option value={ANY_SOURCE}>Any source</option>
+              {sampleSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col">
+            {draftKind === "time" ? "From hour" : "Threshold"}
+            <input value={draftValue} onChange={(e) => setDraftValue(e.target.value)} inputMode="numeric" className="w-20 border" />
+          </label>
+          {draftKind === "time" ? (
+            <label className="flex flex-col">
+              To hour
+              <input value={draftTo} onChange={(e) => setDraftTo(e.target.value)} inputMode="numeric" className="w-20 border" />
+            </label>
+          ) : null}
+          <button className="rounded border px-3 py-1" onClick={addRule}>
+            Add rule
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/store.ts">
+
+```typescript
+import type { LookoutEvent } from "./events";
+import type { Rule } from "./rules";
+import { sampleSources } from "./sources";
+import type { Watcher } from "./watcher";
+
+export type LookoutState = {
+  version: 1;
+  armed: Record<string, boolean>;
+  rules: Rule[];
+  tape: LookoutEvent[];
+  watchers: Watcher[];
+};
+
+export const STORAGE_KEY = "lookout:v1";
+
+export function defaultState(): LookoutState {
+  return {
+    version: 1,
+    armed: Object.fromEntries(sampleSources.map((s) => [s.id, false])),
+    rules: [
+      { id: "rule-motion", sourceId: "any", kind: "motion", minMotion: 0.3 },
+      { id: "rule-change", sourceId: "front-gate", kind: "change", minChange: 0.15 },
+    ],
+    tape: [],
+    watchers: [],
+  };
+}
+
+type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+// The only place Lookout touches browser storage.
+export function createStore(storage: KeyValue | undefined) {
+  return {
+    load(): LookoutState {
+      try {
+        const raw = storage?.getItem(STORAGE_KEY);
+        if (!raw) return defaultState();
+        const parsed = JSON.parse(raw) as Partial<LookoutState>;
+        if (parsed.version !== 1 || !parsed.armed || !Array.isArray(parsed.rules) || !Array.isArray(parsed.tape)) {
+          return defaultState();
+        }
+        return { ...defaultState(), ...parsed } as LookoutState;
+      } catch {
+        return defaultState();
+      }
+    },
+    save(state: LookoutState) {
+      try {
+        storage?.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch {
+        // Storage can be full or blocked. The app keeps working in memory.
+      }
+    },
+    reset(): LookoutState {
+      try {
+        storage?.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      return defaultState();
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watcher-client.ts">
+
+```typescript
+import { SERVICE_URL } from "./check-contract";
+import { sampleSources } from "./sources";
+import { validateWatcherProposal, type WatcherProposal } from "./watcher";
+
+export type ProposeOutcome =
+  | { ok: true; proposal: WatcherProposal; raw: string; model: string }
+  | { ok: false; message: string; raw?: string };
+
+export async function proposeWatcher(
+  sentence: string,
+  fetchImpl: typeof fetch = fetch,
+  serviceUrl = SERVICE_URL,
+): Promise<ProposeOutcome> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${serviceUrl}/v1/propose-watcher`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sentence }),
+    });
+  } catch {
+    return { ok: false, message: "The local QVAC service is not running" };
+  }
+  const body = (await response.json().catch(() => null)) as
+    | { proposal?: unknown; raw?: string; model?: string; error?: { message?: string } }
+    | null;
+  if (!response.ok || !body) {
+    return { ok: false, message: body?.error?.message ?? `Service answered ${response.status}`, raw: body?.raw };
+  }
+  // Validate again on this side of the boundary.
+  const checked = validateWatcherProposal(body.proposal, sampleSources.map((s) => s.id));
+  if (!checked.ok) return { ok: false, message: checked.message, raw: body.raw };
+  return { ok: true, proposal: checked.value, raw: body.raw ?? "", model: body.model ?? "unknown" };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watcher.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { parseWatcherJson } from "./watcher";
+
+const ids = ["front-gate", "back-garden", "studio-door"];
+
+// Hand-written replies (fixtures), not live model output.
+describe("watcher proposals", () => {
+  it("accepts a proposal that fits the fixed lists", () => {
+    const raw = '{"sourceId":"front-gate","condition":" a parcel  left by the gate","fromHour":0,"toHour":0,"minMotion":0}';
+    expect(parseWatcherJson(raw, ids)).toEqual({
+      ok: true,
+      value: { sourceId: "front-gate", condition: "a parcel left by the gate", fromHour: 0, toHour: 0, minMotion: 0 },
+    });
+  });
+
+  it("rejects invented sources, bad hours, and broken JSON", () => {
+    expect(parseWatcherJson('{"sourceId":"driveway","condition":"car","fromHour":0,"toHour":0,"minMotion":0}', ids)).toMatchObject({ ok: false, message: 'Unknown source "driveway"' });
+    expect(parseWatcherJson('{"sourceId":"front-gate","condition":"x","fromHour":25,"toHour":0,"minMotion":0}', ids).ok).toBe(false);
+    expect(parseWatcherJson('{"sourceId":"front-gate","condition":"x","fromHour":1,"toHour":0,"minMotion":2}', ids).ok).toBe(false);
+    expect(parseWatcherJson("Sure! Here is", ids)).toMatchObject({ ok: false, message: "Model reply was not JSON" });
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watcher.ts">
+
+```typescript
+// A watcher is an inspectable rule: ordinary prefilters (source, hours, motion)
+// plus one plain-language condition that a vision model checks later.
+// A language model may propose one. Only a person may activate it.
+import { MAX_CONDITION_LENGTH } from "./verdict.ts";
+
+export type Watcher = {
+  id: string;
+  sourceId: string;
+  condition: string;
+  fromHour: number;
+  toHour: number;
+  minMotion: number;
+};
+
+export type WatcherProposal = Omit<Watcher, "id">;
+
+export const WATCHER_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sourceId", "condition", "fromHour", "toHour", "minMotion"],
+  properties: {
+    sourceId: { type: "string" },
+    condition: { type: "string" },
+    fromHour: { type: "integer", minimum: 0, maximum: 23 },
+    toHour: { type: "integer", minimum: 0, maximum: 23 },
+    minMotion: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as const;
+
+export function buildWatcherHistory(sentence: string, sources: { id: string; name: string }[]) {
+  const list = sources.map((s) => `${s.id} (${s.name})`).join(", ");
+  return [
+    {
+      role: "system" as const,
+      content:
+        "You turn a request into a watcher rule as JSON. " +
+        `sourceId must be one of: ${list}. ` +
+        "condition is a short visible situation to look for in one still frame. " +
+        "fromHour and toHour are whole hours 0-23; use 0 and 0 for all day. " +
+        "minMotion is 0 to 1; use 0 when the thing may be still.",
+    },
+    { role: "user" as const, content: sentence },
+  ];
+}
+
+type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+function isHour(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 23;
+}
+
+// The app decides. Shape, the fixed source list, and ranges are checked here,
+// whatever the JSON Schema promised.
+export function validateWatcherProposal(value: unknown, sourceIds: readonly string[]): Result<WatcherProposal> {
+  if (typeof value !== "object" || value === null) return { ok: false, message: "Proposal is not an object" };
+  const v = value as Record<string, unknown>;
+  if (typeof v.sourceId !== "string" || !sourceIds.includes(v.sourceId)) {
+    return { ok: false, message: `Unknown source "${String(v.sourceId)}"` };
+  }
+  const condition = typeof v.condition === "string" ? v.condition.replace(/\s+/g, " ").trim() : "";
+  if (!condition || condition.length > MAX_CONDITION_LENGTH) return { ok: false, message: "Condition is empty or too long" };
+  if (!isHour(v.fromHour) || !isHour(v.toHour)) return { ok: false, message: "Hours must be whole numbers from 0 to 23" };
+  if (typeof v.minMotion !== "number" || !(v.minMotion >= 0 && v.minMotion <= 1)) {
+    return { ok: false, message: "minMotion must be between 0 and 1" };
+  }
+  return {
+    ok: true,
+    value: { sourceId: v.sourceId, condition, fromHour: v.fromHour, toHour: v.toHour, minMotion: v.minMotion },
+  };
+}
+
+export function parseWatcherJson(raw: string, sourceIds: readonly string[]): Result<WatcherProposal> {
+  try {
+    return validateWatcherProposal(JSON.parse(raw), sourceIds);
+  } catch {
+    return { ok: false, message: "Model reply was not JSON" };
+  }
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- src/features/lookout/watcher.test.ts qvac-service/server.test.ts src/app/page.test.tsx
+```
+
+Expected result: 3 test files pass, 11 tests pass. Proposals come from fixture proposers and a stubbed `fetch`, labelled as fixtures in the code.
+
+These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 04: Turn a sentence into an inspectable watcher rule"
+```
+
+## Before continuing
+
+- [ ] A proposal appeared with every field visible and nothing active.
+- [ ] Accepting added exactly one active watcher.
+
+Next: [05. Evaluate watchers on the event tape](/lookout/05-evaluate-watchers)

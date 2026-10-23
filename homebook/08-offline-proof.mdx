@@ -1,0 +1,323 @@
+---
+title: "08. Prove it offline"
+description: "We will show that Homebook's local AI runs with the process denied network access, after the models are on disk."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Homebook · 08. Prove it offline" />
+
+Saying "local" is not proof. Blocking one API call is not proof either. This chapter denies the whole Node process outbound network access, checks that the model cache is warm, and then runs OCR and manual retrieval.
+
+**Source checkpoint:** `0d80ba6` · **Starting checkpoint:** `9e876d0`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `qvac-service/offline-proof.ts` | `assertWarmedCache` rejects missing or 0-byte model files. `classifyProbe` separates a DNS failure from denied access |
+| `qvac-service/offline-check.mjs` | Probe the network, check the cache and index, then run OCR on the plate and retrieval for one question |
+| `qvac-service/offline.sb` | macOS sandbox profile: deny outbound network except loopback |
+| `package.json` | `qvac:offline` (macOS), `qvac:offline:linux`, and `qvac:service:offline` |
+
+## Build and observe
+
+### 1. Warm the cache online
+
+```bash
+npm run qvac:label-smoke
+npm run qvac:ingest-manuals
+```
+
+### 2. Run the proof
+
+On macOS:
+
+```bash
+npm run qvac:offline
+```
+
+On Linux:
+
+```bash
+npm run qvac:offline:linux
+```
+
+`sandbox-exec` and `unshare -rn` both deny network to the process itself. The check runs in order:
+
+1. Probe `https://1.1.1.1/`. We use an IP address so a DNS failure cannot pass as denied access. `EAI_AGAIN` counts as `dns-failed`, not `network-denied`.
+2. Check that the OCR recogniser, the OCR detector, and the embedding model are on disk and not empty.
+3. Load OCR and read the plate, then embed a question and search the saved index.
+
+### 3. What we saw in our container
+
+We ran the check with the process in its own network namespace:
+
+```text
+Network probe: network-denied
+Offline proof failed: QVAC cache is incomplete (label OCR recogniser, label OCR detector, embeddings). Warm it online with qvac:label-smoke and qvac:ingest-manuals first.
+```
+
+The probe works. The cache check caught the 0-byte files the blocked download left behind, so the check refused to claim anything. That is the correct result for that machine. On a machine with a warm cache, the same command prints the label facts and the manual pages.
+
+Two notes:
+
+- Our container already blocks direct outbound connections, so the plain command also printed `network-denied`. On your machine, run it without the sandbox first. You should see `network-allowed`, which shows that the sandbox is what blocks the network.
+- In our container, `unshare -rn` could not read the app folder, because the folder belongs to another user. Plain `unshare -n` as root worked. On a normal laptop, `-rn` is the unprivileged form.
+
+### 4. Run the service offline
+
+```bash
+npm run qvac:service:offline
+```
+
+Loopback stays allowed, so the browser can still reach `127.0.0.1:4319`.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "homebook",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:identify-smoke": "node --no-warnings qvac-service/identify-photo-smoke.mjs",
+    "qvac:ingest-manuals": "node --no-warnings qvac-service/ingest-manuals-smoke.mjs",
+    "qvac:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:offline:linux": "unshare -rn node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:service:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/serve.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-check.mjs">
+
+```javascript
+import { readdir, readFile, stat } from "node:fs/promises";
+import https from "node:https";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const labelPath = path.join(appDirectory, "public/test-files/homebook/water-heater-label.png");
+const question = "How often should I flush the water heater?";
+
+const { assertWarmedCache, classifyProbe } = await import("./offline-proof.ts");
+const { proposeLabelFacts } = await import("../src/features/homebook/label-facts.ts");
+const { searchManuals } = await import("../src/features/homebook/manual-index.ts");
+
+function probe() {
+  return new Promise((resolve) => {
+    const req = https.get("https://1.1.1.1/", { timeout: 5000 }, (res) => {
+      res.resume();
+      resolve({ ok: true });
+    });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
+    req.on("error", (error) => resolve({ ok: false, code: error.code }));
+  });
+}
+
+let sdk;
+const loaded = [];
+try {
+  // 1. Prove the process itself cannot reach the internet.
+  const network = classifyProbe(await probe());
+  process.stderr.write(`Network probe: ${network}\n`);
+  if (network !== "network-denied") throw new Error(`Expected network-denied, got ${network}`);
+
+  // 2. Prove the models are already on disk.
+  const names = await readdir(cacheDirectory).catch(() => []);
+  const files = await Promise.all(
+    names.map(async (name) => ({ name, bytes: (await stat(path.join(cacheDirectory, name))).size })),
+  );
+  assertWarmedCache(files);
+  const index = JSON.parse(await readFile(path.join(qvacDirectory, "manual-index.json"), "utf8"));
+
+  // 3. Run OCR and retrieval with the network denied.
+  process.env.QVAC_CONFIG_PATH = configPath;
+  sdk = await import("@qvac/sdk");
+  const startedAt = Date.now();
+  const ocrId = await sdk.loadModel({
+    modelSrc: sdk.OCR_LATIN,
+    modelType: sdk.MODEL_TYPES.ggmlOcr,
+    modelConfig: { langList: ["en"], magRatio: 1.5, contrastRetry: false, lowConfidenceThreshold: 0.5 },
+  });
+  loaded.push(ocrId);
+  const blocks = await sdk.ocr({ modelId: ocrId, image: labelPath, options: { paragraph: false } }).blocks;
+  const embedId = await sdk.loadModel({ modelSrc: sdk.GTE_LARGE_FP16, modelType: "embeddings" });
+  loaded.push(embedId);
+  const { embedding } = await sdk.embed({ modelId: embedId, text: question });
+  const pages = searchManuals(index, embedding, { limit: 2, minScore: 0.3 }).map(({ title, page, score }) => ({ title, page, score }));
+  process.stdout.write(
+    `${JSON.stringify({ network, labelFacts: proposeLabelFacts(blocks), question, pages, elapsedMs: Date.now() - startedAt }, null, 2)}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`Offline proof failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  for (const modelId of loaded) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { assertWarmedCache, classifyProbe } from "./offline-proof";
+
+describe("offline proof", () => {
+  it("rejects a cache with 0-byte files left by a stalled download", () => {
+    // These names match the 0-byte files a blocked download left in our build container.
+    expect(() =>
+      assertWarmedCache([
+        { name: "1bd09b23f28caa7e_latin_g2.gguf", bytes: 0 },
+        { name: "bb5d57baeb6ae9e7_craft_mlt_25k.gguf", bytes: 0 },
+      ]),
+    ).toThrow("label OCR recogniser, label OCR detector, embeddings");
+  });
+
+  it("accepts a warmed cache", () => {
+    expect(() =>
+      assertWarmedCache([
+        { name: "a_latin_g2.gguf", bytes: 10 },
+        { name: "b_craft_mlt_25k.gguf", bytes: 10 },
+        { name: "gte-large_fp16.gguf", bytes: 10 },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("only counts a refused connection as denied", () => {
+    expect(classifyProbe({ ok: true })).toBe("network-allowed");
+    expect(classifyProbe({ ok: false, code: "EAI_AGAIN" })).toBe("dns-failed");
+    expect(classifyProbe({ ok: false, code: "ENETUNREACH" })).toBe("network-denied");
+    expect(classifyProbe({ ok: false, code: "EPERM" })).toBe("network-denied");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.ts">
+
+```typescript
+// Each pattern must match at least one non-empty file in the model cache.
+// The OCR names were observed in .qvac/models; the others follow the model names.
+export const REQUIRED_MODELS: Record<string, RegExp> = {
+  "label OCR recogniser": /latin_g2/i,
+  "label OCR detector": /craft/i,
+  embeddings: /gte-large/i,
+};
+
+export function assertWarmedCache(
+  files: readonly { name: string; bytes: number }[],
+  required: Record<string, RegExp> = REQUIRED_MODELS,
+) {
+  const missing = Object.entries(required)
+    .filter(([, pattern]) => !files.some((f) => pattern.test(f.name) && f.bytes > 0))
+    .map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(
+      `QVAC cache is incomplete (${missing.join(", ")}). Warm it online with qvac:label-smoke and qvac:ingest-manuals first.`,
+    );
+  }
+}
+
+// Classify a probe to a public IP address. A literal IP avoids DNS, so a
+// resolver failure cannot be mistaken for denied network access.
+export function classifyProbe(result: { ok: true } | { ok: false; code: string | undefined }) {
+  if (result.ok) return "network-allowed" as const;
+  if (result.code === "ENOTFOUND" || result.code === "EAI_AGAIN") return "dns-failed" as const;
+  return "network-denied" as const;
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline.sb">
+
+```scheme
+(version 1)
+(allow default)
+; Deny every outbound connection except loopback and local sockets.
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/offline-proof.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 08: Prove it offline"
+```
+
+## Before continuing
+
+- [ ] Without the sandbox the probe says `network-allowed`.
+- [ ] With it, the probe says `network-denied` and inference still runs from the warm cache.
+
+You finished Homebook. Return to the [overview](/homebook/overview).

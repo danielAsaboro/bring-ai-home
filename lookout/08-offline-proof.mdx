@@ -1,0 +1,317 @@
+---
+title: "08. Prove footage never leaves the machine"
+description: "We will deny the QVAC process every outbound connection except loopback, prove the denial with a probe, and still check a stored frame with the local vision model."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 08. Prove footage never leaves the machine" />
+
+A blocked `fetch` or a full cache is not an offline proof. We will run the vision check inside an operating-system sandbox that denies every outbound connection except loopback, prove the denial with a probe, and still get a verdict for a stored frame.
+
+**Source checkpoint:** `4f6617d` · **Starting checkpoint:** `3e3ecdc`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `qvac-service/offline.sb` | macOS sandbox profile: deny outbound network except loopback |
+| `qvac-service/offline-check.mjs` | Probe, cache check, and one local vision check |
+| `qvac-service/offline-proof.ts` | Pure checks: warm cache, probe classification, no delegate |
+| `qvac-service/offline-proof.test.ts` | Tests with hand-written listings and probe results |
+| `package.json` | `qvac:offline` and `qvac:service:offline` |
+
+To compare with the starting checkpoint: `git diff 3e3ecdc 4f6617d`.
+
+## Build and observe
+
+### 1. Warm the cache online
+
+```bash
+git checkout 4f6617d
+npm run qvac:check-smoke
+```
+
+The offline run needs SmolVLM2 and its projection model already in `.qvac/models`. Without them, `offline-check.mjs` stops with "QVAC cache is incomplete". We saw exactly that message in our build container, where the cache is empty.
+
+### 2. Run the proof
+
+```bash
+unset LOOKOUT_DELEGATE
+npm run qvac:offline
+```
+
+`sandbox-exec` is macOS only. The script first tries `https://example.com`. Only a refused connection counts as `network-denied`; a DNS failure does not prove anything. Then it checks `front-gate-3.png` and prints the frame digest and the verdict.
+
+The proof refuses to run with `LOOKOUT_DELEGATE` set. Delegation needs the home network, and this chapter proves the opposite.
+
+### 3. Run the whole app under the policy
+
+```bash
+npm run qvac:service:offline
+npm run dev
+```
+
+Check watchers on stored frames. The browser talks to `127.0.0.1`, which the policy allows. The QVAC process cannot reach anything else.
+
+This is process-level denial, not a disconnected machine. Other processes on the computer still have the network.
+
+## Read the checkpoint implementation
+
+These are complete files from `4f6617d`, changed in this chapter. Paths are relative to `apps/lookout`.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "lookout",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:check-smoke": "node --no-warnings qvac-service/check-frame-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:measure": "node --no-warnings qvac-service/measure.mjs",
+    "qvac:rpc-host": "node --no-warnings qvac-service/rpc-host.mjs",
+    "qvac:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:service:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/serve.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-check.mjs">
+
+```javascript
+// Run under the sandbox: npm run qvac:offline (macOS).
+// Proves three things in one process: the public network is refused, the model
+// cache is warm, and a stored frame is still checked locally.
+import { createHash } from "node:crypto";
+import { readdir, readFile, stat } from "node:fs/promises";
+import https from "node:https";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const framePath = path.join(appDirectory, "public/test-files/lookout/front-gate-3.png");
+
+const { assertNoDelegate, assertWarmedCache, classifyProbe } = await import("./offline-proof.ts");
+const { PARCEL_CONDITION } = await import("../src/features/lookout/measure.ts");
+const { buildConditionPrompt, parseVerdict } = await import("../src/features/lookout/verdict.ts");
+const { createQvacChecker } = await import("./qvac-checker.ts");
+
+function probe() {
+  return new Promise((resolve) => {
+    const req = https.get("https://example.com/", { timeout: 5000 }, (res) => {
+      res.resume();
+      resolve({ ok: true });
+    });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
+    req.on("error", (error) => resolve({ ok: false, code: error.code }));
+  });
+}
+
+let checker;
+try {
+  assertNoDelegate(process.env.LOOKOUT_DELEGATE);
+  const names = await readdir(cacheDirectory);
+  const files = await Promise.all(
+    names.map(async (name) => ({ name, bytes: (await stat(path.join(cacheDirectory, name))).size })),
+  );
+  assertWarmedCache(files);
+
+  const network = classifyProbe(await probe());
+  if (network !== "network-denied") throw new Error(`Expected network-denied, got ${network}`);
+
+  process.env.QVAC_CONFIG_PATH = configPath;
+  checker = createQvacChecker(appDirectory);
+  const png = await readFile(framePath);
+  const startedAt = Date.now();
+  const raw = await checker.check(png, buildConditionPrompt(PARCEL_CONDITION));
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        network,
+        frame: path.basename(framePath),
+        frameDigest: createHash("sha256").update(png).digest("hex"),
+        condition: PARCEL_CONDITION,
+        model: checker.model,
+        verdict: parseVerdict(raw),
+        elapsedMs: Date.now() - startedAt,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`Offline proof failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  await checker?.close();
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { assertNoDelegate, assertWarmedCache, classifyProbe } from "./offline-proof";
+
+// Hand-written file listings and probe results (fixtures), not a sandbox run.
+describe("offline proof checks", () => {
+  it("requires both the vision model and its projection model in the cache", () => {
+    expect(() => assertWarmedCache([{ name: "SmolVLM2-500M-Q8_0.gguf", bytes: 10 }])).toThrow("projection");
+    expect(() =>
+      assertWarmedCache([
+        { name: "SmolVLM2-500M-Q8_0.gguf", bytes: 10 },
+        { name: "mmproj-SmolVLM2-500M-Q8_0.gguf", bytes: 0 },
+      ]),
+    ).toThrow("projection");
+    expect(() =>
+      assertWarmedCache([
+        { name: "SmolVLM2-500M-Q8_0.gguf", bytes: 10 },
+        { name: "mmproj-SmolVLM2-500M-Q8_0.gguf", bytes: 10 },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("counts only a refused connection as network denial", () => {
+    expect(classifyProbe({ ok: true })).toBe("network-allowed");
+    expect(classifyProbe({ ok: false, code: "ENOTFOUND" })).toBe("dns-failed");
+    expect(classifyProbe({ ok: false, code: "EPERM" })).toBe("network-denied");
+  });
+
+  it("refuses to run the proof with a delegate configured", () => {
+    expect(() => assertNoDelegate("192.168.1.20:50052")).toThrow("Unset LOOKOUT_DELEGATE");
+    expect(() => assertNoDelegate(undefined)).not.toThrow();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.ts">
+
+```typescript
+// Pure checks for the offline proof. Tested with hand-written inputs.
+
+// Each pattern must match at least one non-empty file in the model cache.
+export const REQUIRED_MODELS: Record<string, RegExp> = {
+  vision: /smolvlm2/i,
+  projection: /mmproj/i,
+};
+
+export function assertWarmedCache(
+  files: readonly { name: string; bytes: number }[],
+  required: Record<string, RegExp> = REQUIRED_MODELS,
+) {
+  const missing = Object.entries(required)
+    .filter(([, pattern]) => !files.some((f) => pattern.test(f.name) && f.bytes > 0))
+    .map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(`QVAC cache is incomplete (${missing.join(", ")}). Warm it online with qvac:check-smoke first.`);
+  }
+}
+
+// Classify a probe to a public host. Only a refused connection counts as proof.
+export function classifyProbe(result: { ok: true } | { ok: false; code: string | undefined }) {
+  if (result.ok) return "network-allowed" as const;
+  if (result.code === "ENOTFOUND" || result.code === "EAI_AGAIN") return "dns-failed" as const;
+  return "network-denied" as const;
+}
+
+// The offline proof runs vision on this machine only. A delegate would need
+// LAN access, which the sandbox denies on purpose.
+export function assertNoDelegate(value: string | undefined) {
+  if (value) throw new Error("Unset LOOKOUT_DELEGATE: the offline proof keeps inference on this machine");
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline.sb">
+
+```scheme
+(version 1)
+(allow default)
+; Deny every outbound connection except loopback and local sockets.
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- qvac-service/offline-proof.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass. They use hand-written file listings and probe results, not a real sandbox run.
+
+These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 08: Prove footage never leaves the machine"
+```
+
+## Before continuing
+
+- [ ] `npm run qvac:offline` reported `network-denied` and a verdict.
+- [ ] You checked watchers in the app with the service under the policy.
+
+You finished the Lookout course. Back to the [Lookout overview](/lookout/overview).

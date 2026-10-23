@@ -1,0 +1,1303 @@
+---
+title: "07. Adapt critique to a house rubric with LoRA"
+description: "We will train a small LoRA adapter on a tiny fixture dataset so the local model critiques decks in the house rubric's terms, and keep the app's validator in charge."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Deck · 07. Adapt critique to a house rubric with LoRA" />
+
+Every team has a house style for arguments. Here it is four rules: one beat per card, evidence after every claim, a specific ask, and an opening that speaks to the audience. A general model critiques vaguely. A LoRA adapter, trained locally on a few examples, nudges it toward the rubric's voice.
+
+The installed SDK exports `finetune()` in `@qvac/sdk` 0.22.0, and the llama.cpp model config accepts a `lora` path, so this chapter keeps LoRA. The dataset is a tiny fixture of eight invented decks. It teaches the mechanics, not a production-quality adapter.
+
+**Source checkpoint:** `067701b` · **Starting checkpoint:** `2434066`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/deck/house-rubric.ts` | The fixed rubric, system prompt, outline format, JSON schema, and `parseCritique`: unknown rubric ids and unknown cards are dropped |
+| `qvac-service/rubric/train.jsonl`, `eval.jsonl` | Six training and two evaluation chat examples, using the same prompt and outline format as run time |
+| `qvac-service/finetune-rubric.mjs` | Loads `LLAMA_3_2_1B_INST_Q4_0`, runs `sdk.finetune` with `assistantLossOnly`, LoRA rank 8, and a fixed seed, and writes to `.qvac/adapters/house-rubric` |
+| `qvac-service/server.ts`, `serve.mjs` | `POST /critique`. Loads the adapter with `modelConfig.lora` when a `.gguf` exists and reports whether it was applied |
+| `src/features/deck/CritiquePanel.tsx` | Findings labelled by rule and card, the model and adapter status, and **Dismiss**. It never edits a card |
+
+## Build and observe
+
+### 1. Check the dataset first
+
+```bash
+npm test -- src/features/deck/house-rubric.test.ts
+```
+
+The last test runs every assistant answer in the dataset through `parseCritique`. A training example the app would reject would teach the model to produce output the app throws away.
+
+### 2. Train the adapter
+
+```bash
+npm run qvac:finetune-rubric
+```
+
+It prints the loss for each step and the final result. Record your own numbers. The SDK's own finetune example names `QWEN3_600M_INST_Q4`, which is not in the 0.22.0 model registry, so the course uses the text model already in the service. Fine-tuning is not supported for every model and quantization: if this run fails at the start, that is a model support limit, not a dataset problem.
+
+### 3. Critique a deck
+
+Restart `npm run qvac:service`. The log says either `Rubric critique ready (adapter …)` or `(base model, no adapter)`. Press **Critique this deck**. The status line repeats which one answered, so a viewer can always tell whether the adapter was in use.
+
+Compare the two on the same deck if you like, but do not call the adapter better until you have measured it on labelled decks.
+
+## Read the checkpoint implementation
+
+These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "deck",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:ingest-notes": "node --no-warnings qvac-service/ingest-notes.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:finetune-rubric": "node --no-warnings qvac-service/finetune-rubric.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "^22.22.0 || ^24.15.0 || >=26.0.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/finetune-rubric.mjs">
+
+```javascript
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const adapterDirectory = path.join(qvacDirectory, "adapters/house-rubric");
+const datasetDirectory = path.join(appDirectory, "qvac-service/rubric");
+
+let sdk;
+let modelId;
+try {
+  await mkdir(adapterDirectory, { recursive: true });
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelType: "llm",
+    modelConfig: { ctx_size: 1024 },
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const startedAt = Date.now();
+  const handle = sdk.finetune({
+    modelId,
+    options: {
+      trainDatasetDir: path.join(datasetDirectory, "train.jsonl"),
+      validation: { type: "dataset", path: path.join(datasetDirectory, "eval.jsonl") },
+      outputParametersDir: adapterDirectory,
+      numberOfEpochs: 3,
+      learningRate: 1e-4,
+      assistantLossOnly: true,
+      loraRank: 8,
+      loraSeed: 7,
+    },
+  });
+  for await (const tick of handle.progressStream) {
+    process.stderr.write(`epoch ${tick.current_epoch + 1} step ${tick.global_steps} ${tick.is_train ? "train" : "val"} loss ${tick.loss?.toFixed(4)}\n`);
+  }
+  const result = await handle.result;
+  process.stdout.write(`${JSON.stringify({ model: "LLAMA_3_2_1B_INST_Q4_0", result, adapterDirectory, elapsedMs: Date.now() - startedAt }, null, 2)}\n`);
+} catch (error) {
+  process.stderr.write(`QVAC rubric finetune failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/rubric/eval.jsonl">
+
+```json
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Food bank route\nAudience: Drivers\nRound: Change\n- [f1] claim: New Tuesday route \u2014 Saves 20 minutes.\nRound: Ask\n- [f2] claim: Help out \u2014 Thanks everyone."}, {"role": "assistant", "content": "{\"findings\": [{\"rubricId\": \"evidence-follows-claim\", \"cardId\": \"f1\", \"note\": \"Show the old and new route times.\"}, {\"rubricId\": \"specific-ask\", \"cardId\": \"f2\", \"note\": \"Ask each driver to confirm the new route by Friday.\"}]}"}]}
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Library late nights\nAudience: Town council\nRound: Why\n- [l1] claim: Evenings work for residents \u2014 Most cannot visit before 6 pm.\n- [l2] evidence: Survey \u2014 Two in three asked for later closing."}, {"role": "assistant", "content": "{\"findings\": []}"}]}
+```
+
+</Accordion>
+<Accordion title="qvac-service/rubric/train.jsonl">
+
+```json
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Harbor bakery expansion\nAudience: Neighborhood lenders\nRound: Why\n- [h1] claim: Lines out the door \u2014 Saturday queues reach the corner.\n- [h2] claim: We need a second oven \u2014 Capacity caps sales at noon.\nRound: Ask\n- [h3] claim: Support us \u2014 Please help the bakery grow."}, {"role": "assistant", "content": "{\"findings\": [{\"rubricId\": \"evidence-follows-claim\", \"cardId\": \"h1\", \"note\": \"Show the queue count or wait time before moving on.\"}, {\"rubricId\": \"specific-ask\", \"cardId\": \"h3\", \"note\": \"Name the loan amount, the term, and the decision date.\"}]}"}]}
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Trail cleanup day\nAudience: Parks volunteers\nRound: Plan\n- [t1] claim: Three trails, one Saturday \u2014 We split into teams of six. Bring gloves, water, and a friend; parking is at the north lot and lunch is at noon.\n- [t2] evidence: Last year \u2014 42 bags collected."}, {"role": "assistant", "content": "{\"findings\": [{\"rubricId\": \"one-beat\", \"cardId\": \"t1\", \"note\": \"Split logistics from the plan; this card carries three beats.\"}]}"}]}
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Clinic scheduling app\nAudience: Front-desk staff\nRound: Opening\n- [s1] claim: Our architecture \u2014 Microservices on managed queues.\nRound: Benefit\n- [s2] claim: Fewer phone calls \u2014 Patients rebook online.\n- [s3] evidence: Pilot \u2014 Calls fell by a third in four weeks."}, {"role": "assistant", "content": "{\"findings\": [{\"rubricId\": \"audience-first\", \"cardId\": \"s1\", \"note\": \"Front-desk staff care about calls and queues, not architecture. Open with s2.\"}]}"}]}
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: School garden fund\nAudience: Parent association\nRound: Why\n- [g1] claim: Kids eat what they grow \u2014 Taste tests went up after harvest.\n- [g2] evidence: Taste test log \u2014 18 of 25 tried the kale.\nRound: Ask\n- [g3] claim: Fund two raised beds by May 1 \u2014 The association approves 600 at the April meeting."}, {"role": "assistant", "content": "{\"findings\": []}"}]}
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Studio rent increase\nAudience: Members\nRound: Context\n- [r1] claim: Costs rose \u2014 Utilities and insurance are up.\n- [r2] claim: Other studios charge more \u2014 We are still cheaper.\nRound: Ask\n- [r3] claim: New rate from June \u2014 Members pay 8 more per month starting June 1."}, {"role": "assistant", "content": "{\"findings\": [{\"rubricId\": \"evidence-follows-claim\", \"cardId\": \"r1\", \"note\": \"Add the utility and insurance numbers after this claim.\"}, {\"rubricId\": \"evidence-follows-claim\", \"cardId\": \"r2\", \"note\": \"Cite two studio prices so the comparison is checkable.\"}]}"}]}
+{"messages": [{"role": "system", "content": "You critique presentation decks against the house rubric: one-beat (One beat per card); evidence-follows-claim (Every claim is followed by evidence); specific-ask (The ask names who does what by when); audience-first (The opening speaks to the named audience). Return JSON findings. Cite a card id or null. Keep each note under 160 characters."}, {"role": "user", "content": "Deck: Book club app\nAudience: Club organizers\nRound: Ask\n- [b1] claim: Try it \u2014 Let us know what you think."}, {"role": "assistant", "content": "{\"findings\": [{\"rubricId\": \"specific-ask\", \"cardId\": \"b1\", \"note\": \"Ask organizers to run one meeting with it before the next month's pick.\"}]}"}]}
+```
+
+</Accordion>
+<Accordion title="qvac-service/serve.mjs">
+
+```javascript
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+const { createDeckServer, SERVICE_PORT } = await import("./server.ts");
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+
+const loaded = [];
+let sdk = null;
+try {
+  sdk = await import("@qvac/sdk");
+} catch (error) {
+  process.stderr.write(`QVAC SDK unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+}
+
+// Load one model, or report why not and leave that capability off.
+async function tryLoad(label, options) {
+  if (!sdk) return null;
+  try {
+    const modelId = await sdk.loadModel(options);
+    loaded.push(modelId);
+    return modelId;
+  } catch (error) {
+    process.stderr.write(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+    return null;
+  }
+}
+
+// Listen first. Each capability switches on when its model has loaded, so the
+// deck gets a clear 503 instead of a hanging request while models download.
+const capabilities = { retrieve: null, propose: null, embed: null, critique: null };
+const server = createDeckServer(capabilities);
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stderr.write(`Deck QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+const index = await readFile(path.join(qvacDirectory, "notes-index.json"), "utf8")
+  .then((text) => JSON.parse(text))
+  .catch(() => {
+    process.stderr.write("No notes index yet. Run npm run qvac:ingest-notes first.\n");
+    return null;
+  });
+const embedId = await tryLoad("Embeddings", { modelSrc: sdk?.GTE_LARGE_FP16, modelType: "embeddings" });
+const embedOne = async (text) => (await sdk.embed({ modelId: embedId, text })).embedding;
+if (embedId) {
+  capabilities.embed = async (texts) => ({
+    vectors: (await sdk.embed({ modelId: embedId, text: texts })).embedding,
+    model: "GTE_LARGE_FP16",
+  });
+  process.stderr.write("Embeddings ready\n");
+}
+
+if (index && embedId) {
+  const { searchNotes } = await import("../src/features/deck/notes-index.ts");
+  capabilities.retrieve = async (query) => ({
+    passages: searchNotes(index, await embedOne(query), { limit: 3, minScore: 0.3 }),
+    model: "GTE_LARGE_FP16",
+  });
+  process.stderr.write("Note retrieval ready\n");
+}
+
+const llmId = await tryLoad("Text model", { modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" });
+async function completeJson(history, name, schema) {
+  const run = sdk.completion({
+    modelId: llmId,
+    history,
+    stream: true,
+    responseFormat: { type: "json_schema", json_schema: { name, schema } },
+  });
+  return (await run.final).contentText;
+}
+if (index && embedId && llmId) {
+  const { searchNotes } = await import("../src/features/deck/notes-index.ts");
+  const { buildProposalHistory, PROPOSAL_JSON_SCHEMA } = await import("../src/features/deck/claim-proposals.ts");
+  capabilities.propose = async (request) => {
+    const passages = searchNotes(index, await embedOne(request.topic), { limit: 4, minScore: 0.3 });
+    // No retrieved sections means nothing to cite, so the model is not asked.
+    if (passages.length === 0) return { text: "", passages, model: "LLAMA_3_2_1B_INST_Q4_0" };
+    const text = await completeJson(buildProposalHistory(request, passages), "claim_cards", PROPOSAL_JSON_SCHEMA);
+    return { text, passages, model: "LLAMA_3_2_1B_INST_Q4_0 + GTE_LARGE_FP16" };
+  };
+  process.stderr.write("Card proposals ready\n");
+}
+
+// Rubric critique uses the house-rubric LoRA adapter from qvac:finetune-rubric
+// when it exists, and says so. Without it, the base model critiques.
+const adapterDirectory = path.join(qvacDirectory, "adapters/house-rubric");
+const adapter = await readdir(adapterDirectory)
+  .then((names) => names.find((n) => n.endsWith(".gguf")))
+  .catch(() => undefined);
+const criticId = adapter
+  ? await tryLoad("Rubric adapter", {
+      modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0,
+      modelType: "llm",
+      modelConfig: { lora: path.join(adapterDirectory, adapter) },
+    })
+  : llmId;
+if (criticId) {
+  const { buildCritiqueHistory, CRITIQUE_JSON_SCHEMA } = await import("../src/features/deck/house-rubric.ts");
+  capabilities.critique = async (deck) => {
+    const run = sdk.completion({
+      modelId: criticId,
+      history: buildCritiqueHistory(deck),
+      stream: true,
+      responseFormat: { type: "json_schema", json_schema: { name: "critique", schema: CRITIQUE_JSON_SCHEMA } },
+    });
+    const usingAdapter = Boolean(adapter) && criticId !== llmId;
+    return {
+      text: (await run.final).contentText,
+      model: usingAdapter ? `LLAMA_3_2_1B_INST_Q4_0 + ${adapter}` : "LLAMA_3_2_1B_INST_Q4_0",
+      adapter: usingAdapter,
+    };
+  };
+  process.stderr.write(`Rubric critique ready (${adapter ? `adapter ${adapter}` : "base model, no adapter"})\n`);
+}
+
+async function shutdown() {
+  server.close();
+  for (const modelId of loaded) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createDeckServer, isAllowedOrigin, type Capabilities } from "./server";
+
+let close: (() => void) | null = null;
+afterEach(() => close?.());
+
+async function start(capabilities: Capabilities) {
+  const server = createDeckServer(capabilities);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+const post = (url: string, body: unknown) =>
+  fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+describe("deck service", () => {
+  it("reports capabilities and answers 503 while a model is missing", async () => {
+    const base = await start({ retrieve: null, propose: null, embed: null, critique: null });
+    expect(await (await fetch(`${base}/health`)).json()).toEqual({ ok: true, capabilities: { retrieve: false, propose: false, embed: false, critique: false } });
+    const res = await post(`${base}/retrieve`, { query: "unattended kettles" });
+    expect(res.status).toBe(503);
+  });
+
+  it("rejects bad requests and foreign origins", async () => {
+    const base = await start({ retrieve: null, propose: null, embed: null, critique: null });
+    expect((await post(`${base}/retrieve`, { query: "" })).status).toBe(400);
+    expect((await fetch(`${base}/health`, { headers: { origin: "https://example.com" } })).status).toBe(403);
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
+  });
+
+  it("returns cited passages from the retriever (fixture retriever, not a model)", async () => {
+    const passage = { id: "diary-study-notes#unattended-boiling", noteId: "diary-study-notes", noteTitle: "Kitchen diary study notes", section: "Unattended boiling", text: "In 9 of 12 homes…", score: 0.8 };
+    const base = await start({ retrieve: async () => ({ passages: [passage], model: "fixture" }), propose: null, embed: null, critique: null });
+    const body = await (await post(`${base}/retrieve`, { query: "unattended" })).json();
+    expect(body).toMatchObject({ query: "unattended", model: "fixture", passages: [{ id: passage.id }] });
+  });
+
+  it("validates proposals before they leave the service (fixture proposer text, not a model)", async () => {
+    const passage = { id: "diary-study-notes#unattended-boiling", noteId: "diary-study-notes", noteTitle: "Kitchen diary study notes", section: "Unattended boiling", text: "In 9 of 12 homes…", score: 0.8 };
+    const text = JSON.stringify({ cards: [
+      { title: "Kettles boil alone", body: "Nobody watched the kettle in 9 of 12 homes.", citations: [passage.id] },
+      { title: "Invented stat", body: "90% of people agree.", citations: ["nowhere#1"] },
+    ] });
+    const base = await start({ retrieve: null, propose: async () => ({ text, passages: [passage], model: "fixture" }), embed: null, critique: null });
+    const body = await (await post(`${base}/propose`, { topic: "why now", audience: "buyers" })).json();
+    expect(body.proposals.map((p: { title: string }) => p.title)).toEqual(["Kettles boil alone"]);
+    expect(body.dropped).toEqual([{ title: "Invented stat", reason: "cites no retrieved note section" }]);
+    expect((await post(`${base}/propose`, { topic: "" })).status).toBe(400);
+  });
+
+  it("embeds a bounded batch (fixture embedder, not a model)", async () => {
+    const base = await start({ retrieve: null, propose: null, embed: async (texts) => ({ vectors: texts.map((t) => [t.length, 1]), model: "fixture" }), critique: null });
+    expect(await (await post(`${base}/embed`, { texts: ["ab", "abc"] })).json()).toEqual({ model: "fixture", vectors: [[2, 1], [3, 1]] });
+    expect((await post(`${base}/embed`, { texts: [] })).status).toBe(400);
+  });
+
+  it("validates critique findings against the rubric and the deck (fixture critic text, not a model)", async () => {
+    const { sampleLibrary } = await import("../src/features/deck/sample-library");
+    const text = JSON.stringify({ findings: [
+      { rubricId: "specific-ask", cardId: "c-8", note: "Name the week and the store count." },
+      { rubricId: "vibes", cardId: null, note: "More energy." },
+    ] });
+    const base = await start({ retrieve: null, propose: null, embed: null, critique: async () => ({ text, model: "fixture", adapter: false }) });
+    const body = await (await post(`${base}/critique`, { deck: sampleLibrary.decks[0] })).json();
+    expect(body).toEqual({ model: "fixture", adapter: false, dropped: 1, findings: [{ rubricId: "specific-ask", cardId: "c-8", note: "Name the week and the store count." }] });
+    expect((await post(`${base}/critique`, { deck: { title: 1 } })).status).toBe(400);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import {
+  parseClaimProposals,
+  parseProposeRequest,
+  type ProposeRequest,
+} from "../src/features/deck/claim-proposals.ts";
+import type { Deck } from "../src/features/deck/deck.ts";
+import { parseCritique } from "../src/features/deck/house-rubric.ts";
+import type { ScoredChunk } from "../src/features/deck/notes-index.ts";
+
+export const SERVICE_PORT = 4321;
+const MAX_BODY_BYTES = 256 * 1024;
+
+export type NotesRetriever = (query: string) => Promise<{ passages: ScoredChunk[]; model: string }>;
+
+// Retrieves sections, then asks the LLM. Returns raw model text for the app to validate.
+export type ClaimProposer = (request: ProposeRequest) => Promise<{ text: string; passages: ScoredChunk[]; model: string }>;
+
+export type Embedder = (texts: string[]) => Promise<{ vectors: number[][]; model: string }>;
+
+// adapter is true only when the house-rubric LoRA adapter was loaded.
+export type Critic = (deck: Deck) => Promise<{ text: string; model: string; adapter: boolean }>;
+
+export type Capabilities = {
+  retrieve: NotesRetriever | null;
+  propose: ClaimProposer | null;
+  embed: Embedder | null;
+  critique: Critic | null;
+};
+
+export function parseDeck(value: unknown): Deck {
+  const d = (value as { deck?: unknown } | null)?.deck as Deck | undefined;
+  const ok =
+    d &&
+    typeof d.title === "string" &&
+    typeof d.audience === "string" &&
+    Array.isArray(d.rounds) &&
+    Array.isArray(d.cards) &&
+    d.cards.length <= 60 &&
+    d.rounds.every((r) => typeof r?.id === "string" && typeof r.title === "string") &&
+    d.cards.every((c) => typeof c?.id === "string" && typeof c.title === "string" && typeof c.body === "string" && typeof c.roundId === "string");
+  if (!ok) throw new BadRequest("Request must contain a deck with rounds and at most 60 cards");
+  return d;
+}
+
+export function parseTexts(value: unknown): string[] {
+  const texts = (value as { texts?: unknown } | null)?.texts;
+  if (!Array.isArray(texts) || texts.length === 0 || texts.length > 64 || !texts.every((t) => typeof t === "string" && t.trim() && t.length <= 1000)) {
+    throw new BadRequest("Request must contain 1 to 64 non-empty texts of at most 1000 characters");
+  }
+  return texts as string[];
+}
+
+export class Unavailable extends Error {}
+export class BadRequest extends Error {}
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and other local tools send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseQuery(value: unknown): string {
+  const v = value as { query?: unknown } | null;
+  if (!v || typeof v.query !== "string" || !v.query.trim() || v.query.length > 300) {
+    throw new BadRequest("Request must contain a query of at most 300 characters");
+  }
+  return v.query.trim();
+}
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new BadRequest("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new BadRequest("Request body is not JSON");
+  }
+}
+
+type Route = (body: unknown) => Promise<unknown>;
+
+// The service proposes. It never writes to a deck. The browser decides.
+export function createDeckServer(capabilities: Capabilities) {
+  const routes: Record<string, Route> = {
+    "/retrieve": async (body) => {
+      const query = parseQuery(body);
+      if (!capabilities.retrieve) throw new Unavailable("Note retrieval is not available");
+      return { query, ...(await capabilities.retrieve(query)) };
+    },
+    "/propose": async (body) => {
+      let request: ProposeRequest;
+      try {
+        request = parseProposeRequest(body);
+      } catch (error) {
+        throw new BadRequest((error as Error).message);
+      }
+      if (!capabilities.propose) throw new Unavailable("Card proposals are not available");
+      const { text, passages, model } = await capabilities.propose(request);
+      if (passages.length === 0) return { model, passages, proposals: [], dropped: [] };
+      return { model, passages, ...parseClaimProposals(text, passages) };
+    },
+    "/embed": async (body) => {
+      const texts = parseTexts(body);
+      if (!capabilities.embed) throw new Unavailable("Embeddings are not available");
+      const { vectors, model } = await capabilities.embed(texts);
+      if (vectors.length !== texts.length) throw new Error("The embedder returned the wrong number of vectors");
+      return { model, vectors };
+    },
+    "/critique": async (body) => {
+      const deck = parseDeck(body);
+      if (!capabilities.critique) throw new Unavailable("Rubric critique is not available");
+      const { text, model, adapter } = await capabilities.critique(deck);
+      return { model, adapter, ...parseCritique(text, deck) };
+    },
+  };
+
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      const available = Object.fromEntries(Object.entries(capabilities).map(([k, v]) => [k, v !== null]));
+      return send(res, 200, { ok: true, capabilities: available }, origin);
+    }
+    const route = req.method === "POST" && req.url ? routes[req.url] : undefined;
+    if (!route) return send(res, 404, { error: "Not found" }, origin);
+    try {
+      return send(res, 200, await route(await readJson(req)), origin);
+    } catch (error) {
+      if (error instanceof BadRequest) return send(res, 400, { error: error.message }, origin);
+      if (error instanceof Unavailable) return send(res, 503, { error: error.message }, origin);
+      return send(res, 502, { error: (error as Error).message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/CritiquePanel.test.tsx">
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import type { AssistClient } from "./assist-client";
+import { DeckApp } from "./DeckApp";
+import { createMemoryStore } from "./storage";
+
+// FIXTURE critique, already validated. Not live output.
+const client = {
+  critique: async () => ({
+    model: "fixture",
+    adapter: true,
+    dropped: 1,
+    findings: [{ rubricId: "specific-ask", cardId: "c-8", note: "Name the week and the store count." }],
+  }),
+} as unknown as AssistClient;
+
+describe("CritiquePanel", () => {
+  it("shows labelled findings and never edits the deck", async () => {
+    const user = userEvent.setup();
+    const store = createMemoryStore();
+    const before = JSON.stringify(store.load());
+    render(<DeckApp store={store} client={client} />);
+    await user.click(screen.getByRole("button", { name: "Critique this deck" }));
+    expect(screen.getByText("The ask names who does what by when · What we need from you")).toBeInTheDocument();
+    expect(screen.getByText(/house-rubric adapter applied · 1 finding\(s\) removed/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("Name the week and the store count.")).not.toBeInTheDocument();
+    expect(JSON.stringify(store.load())).toBe(before);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/deck/CritiquePanel.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { AssistError, type AssistClient, type CritiqueResult } from "./assist-client";
+import type { Deck } from "./deck";
+import { rubricLabel } from "./house-rubric";
+
+const button = "rounded bg-indigo-800 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-900 disabled:opacity-50";
+const ghost = "rounded border border-slate-400 px-2 py-0.5 text-xs hover:bg-slate-100";
+
+// Critique is advice. It never edits a card; the author dismisses or acts on it.
+export function CritiquePanel({ deck, client }: { deck: Deck; client: AssistClient }) {
+  const [result, setResult] = useState<CritiqueResult | null>(null);
+  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const title = (id: string | null) => (id ? (deck.cards.find((c) => c.id === id)?.title ?? id) : "Whole deck");
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await client.critique(deck));
+      setDismissed(new Set());
+    } catch (e) {
+      setError(e instanceof AssistError ? e.message : "Critique failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-label="House rubric critique" className="space-y-2 rounded-lg border border-slate-300 bg-white p-3">
+      <h3 className="text-sm font-semibold">Critique against the house rubric</h3>
+      <button className={button} disabled={busy} onClick={() => void run()}>
+        Critique this deck
+      </button>
+      {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
+      {result && (
+        <p className="text-xs text-slate-500">
+          {result.model} · {result.adapter ? "house-rubric adapter applied" : "base model, no adapter"} · {result.dropped} finding(s) removed by the app
+        </p>
+      )}
+      <ul className="space-y-1">
+        {result?.findings.map((f, i) =>
+          dismissed.has(i) ? null : (
+            <li key={i} className="rounded bg-violet-50 p-2 text-sm">
+              <span className="block text-xs font-medium">
+                {rubricLabel(f.rubricId)} · {title(f.cardId)}
+              </span>
+              {f.note}
+              <button className={`${ghost} ml-2`} onClick={() => setDismissed((s) => new Set(s).add(i))}>
+                Dismiss
+              </button>
+            </li>
+          ),
+        )}
+      </ul>
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/DeckApp.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
+
+import {
+  activeDeck,
+  addCard,
+  addRound,
+  createDeck,
+  formatSeconds,
+  moveCard,
+  moveRound,
+  pacing,
+  playOrder,
+  removeCard,
+  updateCard,
+  type Card,
+  type CardKind,
+  type Deck,
+  type Library,
+  type Treatment,
+} from "./deck";
+import { createAssistClient, type AssistClient } from "./assist-client";
+import { CritiquePanel } from "./CritiquePanel";
+import { EvidencePanel } from "./EvidencePanel";
+import { HealthPanel } from "./HealthPanel";
+import { NotesPanel } from "./NotesPanel";
+import { ProposalPanel } from "./ProposalPanel";
+import { createLocalStore, type LibraryStore } from "./storage";
+
+const noopSubscribe = () => () => undefined;
+
+export function DeckApp({ store, client }: { store?: LibraryStore; client?: AssistClient }) {
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!mounted) return <p className="p-6">Shuffling the deck…</p>;
+  return <DeckView store={store ?? createLocalStore()} client={client ?? createAssistClient()} />;
+}
+
+const field = "rounded border border-slate-400 bg-white px-2 py-1 text-sm text-slate-900";
+const button = "rounded bg-indigo-800 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-900";
+const ghost = "rounded border border-slate-400 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-40";
+
+function DeckView({ store, client }: { store: LibraryStore; client: AssistClient }) {
+  const [library, setLibrary] = useState<Library>(() => store.load());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
+  const deck = activeDeck(library);
+  const selected = deck.cards.find((c) => c.id === selectedId) ?? null;
+
+  function commit(next: Library) {
+    setLibrary(next);
+    store.save(next);
+  }
+
+  if (presenting) return <Match deck={deck} onExit={() => setPresenting(false)} />;
+
+  return (
+    <div className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-[220px_1fr]">
+      <aside className="space-y-4">
+        <h1 className="text-2xl font-bold">Deck</h1>
+        <nav aria-label="Decks">
+          <ul className="space-y-1">
+            {library.decks.map((d) => (
+              <li key={d.id}>
+                <button
+                  className={`w-full rounded px-2 py-1 text-left text-sm ${d.id === deck.id ? "bg-indigo-100 font-semibold" : "hover:bg-slate-100"}`}
+                  aria-current={d.id === deck.id ? "true" : undefined}
+                  onClick={() => {
+                    commit({ ...library, activeDeckId: d.id });
+                    setSelectedId(null);
+                  }}
+                >
+                  {d.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <NewDeckForm onCreate={(title, audience) => commit(createDeck(library, title, audience))} />
+        <button className={ghost} onClick={() => commit(store.reset())}>
+          Reset demo data
+        </button>
+      </aside>
+
+      <section className="space-y-4">
+        <header className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-xl font-semibold">{deck.title}</h2>
+            <p className="text-sm text-slate-600">Audience: {deck.audience || "not set"}</p>
+          </div>
+          <button className={button} onClick={() => setPresenting(true)} disabled={deck.cards.length === 0}>
+            Play the match
+          </button>
+        </header>
+
+        <PacingView deck={deck} />
+        <HealthPanel key={`health-${deck.id}`} deck={deck} client={client} onDiscard={(cardId) => commit(removeCard(library, deck.id, cardId))} />
+        <CritiquePanel key={`critique-${deck.id}`} deck={deck} client={client} />
+        <NotesPanel client={client} />
+        <ProposalPanel
+          key={deck.id}
+          deck={deck}
+          client={client}
+          onAccept={(card) => commit(addCard(library, deck.id, { kind: "claim", treatment: "headline", seconds: 40, ...card }))}
+        />
+
+        <div className="grid gap-3 lg:grid-cols-3">
+          {deck.rounds.map((round, i) => (
+            <section key={round.id} aria-label={`Round: ${round.title}`} className="rounded-lg border border-slate-300 bg-white p-3">
+              <div className="mb-2 flex items-center justify-between gap-1">
+                <h3 className="font-semibold">
+                  Round {i + 1}: {round.title}
+                </h3>
+                <span className="flex gap-1">
+                  <button className={ghost} aria-label={`Move ${round.title} earlier`} disabled={i === 0} onClick={() => commit(moveRound(library, deck.id, round.id, -1))}>
+                    ←
+                  </button>
+                  <button className={ghost} aria-label={`Move ${round.title} later`} disabled={i === deck.rounds.length - 1} onClick={() => commit(moveRound(library, deck.id, round.id, 1))}>
+                    →
+                  </button>
+                </span>
+              </div>
+              <ol className="space-y-2">
+                {deck.cards
+                  .filter((c) => c.roundId === round.id)
+                  .map((card, j, roundCards) => (
+                    <li key={card.id}>
+                      <CardTile
+                        card={card}
+                        selected={card.id === selectedId}
+                        onSelect={() => setSelectedId(card.id)}
+                        onUp={j > 0 ? () => commit(moveCard(library, deck.id, card.id, -1)) : undefined}
+                        onDown={j < roundCards.length - 1 ? () => commit(moveCard(library, deck.id, card.id, 1)) : undefined}
+                      />
+                    </li>
+                  ))}
+              </ol>
+              <AddCardForm
+                roundTitle={round.title}
+                onAdd={(title, kind) =>
+                  commit(addCard(library, deck.id, { kind, title, body: "", treatment: "headline", seconds: 30, roundId: round.id }))
+                }
+              />
+            </section>
+          ))}
+        </div>
+        <AddRoundForm onAdd={(title) => commit(addRound(library, deck.id, title))} />
+
+        {selected && (
+          <CardEditor
+            key={selected.id}
+            card={selected}
+            deck={deck}
+            onSave={(patch) => commit(updateCard(library, deck.id, selected.id, patch))}
+            onRemove={() => {
+              commit(removeCard(library, deck.id, selected.id));
+              setSelectedId(null);
+            }}
+          />
+        )}
+        {selected?.kind === "claim" && (
+          <EvidencePanel
+            key={`evidence-${selected.id}`}
+            library={library}
+            deckId={deck.id}
+            claim={selected}
+            client={client}
+            onReuse={(card) => {
+              const { id: _ignored, ...copy } = card;
+              void _ignored;
+              commit(addCard(library, deck.id, { ...copy, roundId: selected.roundId }));
+            }}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function CardTile({ card, selected, onSelect, onUp, onDown }: { card: Card; selected: boolean; onSelect: () => void; onUp?: () => void; onDown?: () => void }) {
+  const tone = card.kind === "claim" ? "border-indigo-600" : "border-amber-600";
+  return (
+    <article className={`rounded border-l-4 ${tone} bg-slate-50 p-2 ${selected ? "ring-2 ring-indigo-400" : ""}`}>
+      <button className="w-full text-left" onClick={onSelect}>
+        <span className="text-xs uppercase tracking-wide text-slate-500">
+          {card.kind} · {card.treatment} · {formatSeconds(card.seconds)}
+        </span>
+        <span className="block font-medium">{card.title}</span>
+      </button>
+      <span className="mt-1 flex gap-1">
+        <button className={ghost} aria-label={`Move ${card.title} up`} disabled={!onUp} onClick={onUp}>
+          ↑
+        </button>
+        <button className={ghost} aria-label={`Move ${card.title} down`} disabled={!onDown} onClick={onDown}>
+          ↓
+        </button>
+      </span>
+    </article>
+  );
+}
+
+function CardEditor({ card, deck, onSave, onRemove }: { card: Card; deck: Deck; onSave: (patch: Partial<Card>) => void; onRemove: () => void }) {
+  const [draft, setDraft] = useState(card);
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    onSave({ title: draft.title, body: draft.body, kind: draft.kind, treatment: draft.treatment, seconds: draft.seconds, roundId: draft.roundId, source: draft.source });
+  }
+  return (
+    <form aria-label="Edit card" onSubmit={submit} className="grid gap-2 rounded-lg border border-slate-300 bg-white p-3 md:grid-cols-2">
+      <label className="grid text-sm">
+        Title
+        <input className={field} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+      </label>
+      <label className="grid text-sm">
+        Source
+        <input className={field} value={draft.source ?? ""} onChange={(e) => setDraft({ ...draft, source: e.target.value || undefined })} />
+      </label>
+      <label className="grid text-sm md:col-span-2">
+        Body
+        <textarea className={field} rows={3} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
+      </label>
+      <label className="grid text-sm">
+        Kind
+        <select className={field} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as CardKind })}>
+          <option value="claim">claim</option>
+          <option value="evidence">evidence</option>
+        </select>
+      </label>
+      <label className="grid text-sm">
+        Treatment
+        <select className={field} value={draft.treatment} onChange={(e) => setDraft({ ...draft, treatment: e.target.value as Treatment })}>
+          <option value="headline">headline</option>
+          <option value="quiet">quiet</option>
+          <option value="data">data</option>
+        </select>
+      </label>
+      <label className="grid text-sm">
+        Seconds
+        <input className={field} type="number" min={5} max={600} value={draft.seconds} onChange={(e) => setDraft({ ...draft, seconds: Number(e.target.value) })} />
+      </label>
+      <label className="grid text-sm">
+        Round
+        <select className={field} value={draft.roundId} onChange={(e) => setDraft({ ...draft, roundId: e.target.value })}>
+          {deck.rounds.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <span className="flex gap-2 md:col-span-2">
+        <button className={button} type="submit">
+          Save card
+        </button>
+        <button className={ghost} type="button" onClick={onRemove}>
+          Discard card
+        </button>
+      </span>
+    </form>
+  );
+}
+
+function PacingView({ deck }: { deck: Deck }) {
+  const { total, rounds } = pacing(deck);
+  return (
+    <section aria-label="Pacing" className="rounded-lg border border-slate-300 bg-white p-3">
+      <h3 className="text-sm font-semibold">Pacing · {formatSeconds(total)} total</h3>
+      <ul className="mt-2 space-y-1">
+        {rounds.map((r) => (
+          <li key={r.roundId} className="grid grid-cols-[8rem_1fr_4rem] items-center gap-2 text-sm">
+            <span className="truncate">{r.title}</span>
+            <span className="h-2 rounded bg-slate-200">
+              <span className="block h-2 rounded bg-indigo-600" style={{ width: `${Math.round(r.share * 100)}%` }} />
+            </span>
+            <span>{formatSeconds(r.seconds)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Match({ deck, onExit }: { deck: Deck; onExit: () => void }) {
+  const cards = playOrder(deck);
+  const [index, setIndex] = useState(0);
+  const card = cards[Math.min(index, cards.length - 1)];
+  const round = deck.rounds.find((r) => r.id === card?.roundId);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "ArrowRight") setIndex((i) => Math.min(i + 1, cards.length - 1));
+      if (event.key === "ArrowLeft") setIndex((i) => Math.max(i - 1, 0));
+      if (event.key === "Escape") onExit();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cards.length, onExit]);
+
+  if (!card) return null;
+  return (
+    <section aria-label="Presentation" className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-900 p-8 text-white">
+      <p className="text-sm uppercase tracking-widest text-slate-400">
+        {round?.title} · card {index + 1} of {cards.length}
+      </p>
+      <h2 className={card.treatment === "headline" ? "text-5xl font-bold" : "text-3xl"}>{card.title}</h2>
+      <p className="max-w-2xl text-center text-xl text-slate-200">{card.body}</p>
+      {card.source && <p className="text-sm text-slate-400">Source: {card.source}</p>}
+      <div className="flex gap-3">
+        <button className={button} onClick={() => setIndex((i) => Math.max(i - 1, 0))} disabled={index === 0}>
+          Previous
+        </button>
+        <button className={button} onClick={() => setIndex((i) => Math.min(i + 1, cards.length - 1))} disabled={index >= cards.length - 1}>
+          Next
+        </button>
+        <button className={button} onClick={onExit}>
+          Leave the match
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function NewDeckForm({ onCreate }: { onCreate: (title: string, audience: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [audience, setAudience] = useState("");
+  return (
+    <form
+      aria-label="New deck"
+      className="grid gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onCreate(title, audience);
+        setTitle("");
+        setAudience("");
+      }}
+    >
+      <input className={field} placeholder="Deck title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input className={field} placeholder="Audience" value={audience} onChange={(e) => setAudience(e.target.value)} />
+      <button className={button}>New deck</button>
+    </form>
+  );
+}
+
+function AddCardForm({ roundTitle, onAdd }: { roundTitle: string; onAdd: (title: string, kind: CardKind) => void }) {
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<CardKind>("claim");
+  return (
+    <form
+      aria-label={`Add card to ${roundTitle}`}
+      className="mt-2 flex gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        onAdd(title.trim(), kind);
+        setTitle("");
+      }}
+    >
+      <input className={`${field} min-w-0 flex-1`} placeholder="New card" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <select className={field} aria-label="Card kind" value={kind} onChange={(e) => setKind(e.target.value as CardKind)}>
+        <option value="claim">claim</option>
+        <option value="evidence">evidence</option>
+      </select>
+      <button className={ghost}>Add</button>
+    </form>
+  );
+}
+
+function AddRoundForm({ onAdd }: { onAdd: (title: string) => void }) {
+  const [title, setTitle] = useState("");
+  return (
+    <form
+      aria-label="Add round"
+      className="flex gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAdd(title);
+        setTitle("");
+      }}
+    >
+      <input className={field} placeholder="Round title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <button className={ghost}>Add round</button>
+    </form>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/assist-client.ts">
+
+```typescript
+import type { ClaimProposal } from "./claim-proposals";
+import type { Deck } from "./deck";
+import type { CritiqueFinding } from "./house-rubric";
+import type { ScoredChunk } from "./notes-index";
+
+export const SERVICE_URL = "http://127.0.0.1:4321";
+
+export type AssistErrorKind = "service-stopped" | "unavailable" | "rejected" | "failed";
+
+export class AssistError extends Error {
+  constructor(
+    readonly kind: AssistErrorKind,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export type RetrieveResult = { query: string; model: string; passages: ScoredChunk[] };
+
+export type ProposeResult = {
+  model: string;
+  passages: ScoredChunk[];
+  proposals: ClaimProposal[];
+  dropped: { title: string; reason: string }[];
+};
+
+export type AssistClient = {
+  retrieve(query: string): Promise<RetrieveResult>;
+  propose(topic: string, audience: string): Promise<ProposeResult>;
+  embed(texts: string[]): Promise<{ model: string; vectors: number[][] }>;
+  critique(deck: Deck): Promise<CritiqueResult>;
+};
+
+export type CritiqueResult = { model: string; adapter: boolean; findings: CritiqueFinding[]; dropped: number };
+
+// Every failure becomes one of four kinds, so the UI can say what went wrong
+// and the deck stays exactly as it was.
+export function createAssistClient(baseUrl = SERVICE_URL, fetchImpl: typeof fetch = (...a) => fetch(...a)): AssistClient {
+  async function post<T>(path: string, body: unknown): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetchImpl(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new AssistError("service-stopped", "The local QVAC service is not running");
+    }
+    const payload = (await res.json().catch(() => ({}))) as { error?: string };
+    if (res.status === 503) throw new AssistError("unavailable", payload.error ?? "The model is not loaded yet");
+    if (res.status === 400) throw new AssistError("rejected", payload.error ?? "The request was rejected");
+    if (!res.ok) throw new AssistError("failed", payload.error ?? `The service answered ${res.status}`);
+    return payload as T;
+  }
+
+  return {
+    retrieve: (query) => post<RetrieveResult>("/retrieve", { query }),
+    propose: (topic, audience) => post<ProposeResult>("/propose", { topic, audience }),
+    embed: (texts) => post<{ model: string; vectors: number[][] }>("/embed", { texts }),
+    critique: (deck) => post<CritiqueResult>("/critique", { deck }),
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/house-rubric.test.ts">
+
+```typescript
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { buildCritiqueHistory, parseCritique, RUBRIC_SYSTEM_PROMPT } from "./house-rubric";
+import { sampleLibrary } from "./sample-library";
+
+const kettle = sampleLibrary.decks[0];
+
+function readDataset(name: string) {
+  const file = path.join(process.cwd(), "qvac-service/rubric", name);
+  return readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { messages: { role: string; content: string }[] });
+}
+
+describe("house rubric", () => {
+  it("keeps findings with known rubric ids and real cards (fixture text, not model output)", () => {
+    const text = JSON.stringify({
+      findings: [
+        { rubricId: "specific-ask", cardId: "c-8", note: "Name the week and the store count." },
+        { rubricId: "be-more-exciting", cardId: "c-1", note: "Add energy." },
+        { rubricId: "one-beat", cardId: "c-99", note: "No such card." },
+        { rubricId: "audience-first", cardId: null, note: "Open with the buyer's shelf problem." },
+      ],
+    });
+    const { findings, dropped } = parseCritique(text, kettle);
+    expect(findings.map((f) => f.rubricId)).toEqual(["specific-ask", "audience-first"]);
+    expect(dropped).toBe(2);
+    expect(() => parseCritique("Looks great!", kettle)).toThrow("did not return JSON");
+  });
+
+  it("uses the same system prompt and outline format as the training data", () => {
+    const history = buildCritiqueHistory(kettle);
+    expect(history[0].content).toBe(RUBRIC_SYSTEM_PROMPT);
+    expect(history[1].content).toContain("- [c-1] claim: Mornings are rushed");
+  });
+
+  it("trains only on well-formed examples that pass the app's own validator", () => {
+    const train = readDataset("train.jsonl");
+    const evalSet = readDataset("eval.jsonl");
+    expect([train.length, evalSet.length]).toEqual([6, 2]);
+    for (const { messages } of [...train, ...evalSet]) {
+      expect(messages.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
+      expect(messages[0].content).toBe(RUBRIC_SYSTEM_PROMPT);
+      const ids = [...messages[1].content.matchAll(/\[([a-z0-9-]+)\]/g)].map((m) => ({ id: m[1] }));
+      const parsed = parseCritique(messages[2].content, { cards: ids as never });
+      expect(parsed.dropped).toBe(0);
+    }
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/deck/house-rubric.ts">
+
+```typescript
+import { playOrder, type Deck } from "./deck";
+
+// The house rubric is fixed. A critique may only cite these ids and cards that
+// exist in the deck. The LoRA adapter changes the model's voice, not this rule.
+
+export const HOUSE_RUBRIC = [
+  { id: "one-beat", label: "One beat per card" },
+  { id: "evidence-follows-claim", label: "Every claim is followed by evidence" },
+  { id: "specific-ask", label: "The ask names who does what by when" },
+  { id: "audience-first", label: "The opening speaks to the named audience" },
+] as const;
+
+export type RubricId = (typeof HOUSE_RUBRIC)[number]["id"];
+export type CritiqueFinding = { rubricId: RubricId; cardId: string | null; note: string };
+
+export const RUBRIC_SYSTEM_PROMPT = `You critique presentation decks against the house rubric: ${HOUSE_RUBRIC.map((r) => `${r.id} (${r.label})`).join("; ")}. Return JSON findings. Cite a card id or null. Keep each note under 160 characters.`;
+
+export const CRITIQUE_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    findings: {
+      type: "array",
+      maxItems: 6,
+      items: {
+        type: "object",
+        properties: {
+          rubricId: { type: "string", enum: HOUSE_RUBRIC.map((r) => r.id) },
+          cardId: { type: ["string", "null"] },
+          note: { type: "string" },
+        },
+        required: ["rubricId", "cardId", "note"],
+      },
+    },
+  },
+  required: ["findings"],
+} as const;
+
+// The same outline format is used in the training dataset and at run time.
+export function deckOutline(deck: Pick<Deck, "title" | "audience" | "rounds" | "cards">): string {
+  const lines = [`Deck: ${deck.title}`, `Audience: ${deck.audience || "not set"}`];
+  for (const round of deck.rounds) {
+    lines.push(`Round: ${round.title}`);
+    for (const c of playOrder(deck as Deck).filter((x) => x.roundId === round.id)) {
+      lines.push(`- [${c.id}] ${c.kind}: ${c.title} — ${c.body}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+export function buildCritiqueHistory(deck: Deck) {
+  return [
+    { role: "system", content: RUBRIC_SYSTEM_PROMPT },
+    { role: "user", content: deckOutline(deck) },
+  ];
+}
+
+export function parseCritique(text: string, deck: Pick<Deck, "cards">): { findings: CritiqueFinding[]; dropped: number } {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("The model did not return JSON");
+  }
+  const raw = (data as { findings?: unknown })?.findings;
+  if (!Array.isArray(raw)) throw new Error("The model response has no findings array");
+  const rubricIds = new Set<string>(HOUSE_RUBRIC.map((r) => r.id));
+  const cardIds = new Set(deck.cards.map((c) => c.id));
+  const findings: CritiqueFinding[] = [];
+  for (const item of raw) {
+    const f = item as { rubricId?: unknown; cardId?: unknown; note?: unknown };
+    const note = typeof f.note === "string" ? f.note.trim() : "";
+    const cardOk = f.cardId === null || (typeof f.cardId === "string" && cardIds.has(f.cardId));
+    if (typeof f.rubricId === "string" && rubricIds.has(f.rubricId) && cardOk && note && note.length <= 200) {
+      findings.push({ rubricId: f.rubricId as RubricId, cardId: (f.cardId as string | null) ?? null, note });
+    }
+  }
+  return { findings, dropped: raw.length - findings.length };
+}
+
+export function rubricLabel(id: RubricId): string {
+  return HOUSE_RUBRIC.find((r) => r.id === id)?.label ?? id;
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/deck/house-rubric.test.ts src/features/deck/CritiquePanel.test.tsx qvac-service/server.test.ts
+```
+
+Expected result: 3 test files pass, 10 tests pass. The critique text in these tests is a fixture; the dataset test reads the real training files.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 07: Adapt critique to a house rubric with LoRA"
+```
+
+## Before continuing
+
+- [ ] Every dataset example passes the app's validator.
+- [ ] The panel says whether the adapter was applied.
+- [ ] Critique never edits the deck.
+
+Continue to [Prove it offline](/deck/08-offline-proof).

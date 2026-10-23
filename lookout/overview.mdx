@@ -6,7 +6,7 @@ description: "An event-first control room for cameras and visual sources you own
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <Info>
-**In production.** The Lookout app works today without AI. The QVAC lessons below are being built and filmed in order, and each one appears here when its checkpoint is tested.
+**Written course: 8 lessons.** Every lesson is written and tested against fixtures. Videos are being filmed in order.
 </Info>
 
 <LessonVideo title="Lookout: Tell me if the stove is left on, with no cloud" />
@@ -26,12 +26,14 @@ Motion alerts are noisy, rules are brittle, and the event you care about disappe
 
 | Lesson | You build | Status |
 |---|---|---|
-| 01 | Run the Lookout starter | In production |
-| 02 | Check one frame against a plain-language condition | In production |
-| 03 | Turn a sentence into an inspectable watcher rule | In production |
-| 04 | Add a narrow custom classifier | In production |
-| 05 | Replay events and measure false positives | In production |
-| 06 | Prove footage never leaves the machine | In production |
+| 01 | [Build the Lookout starter](/lookout/01-starter) | Written · video in production |
+| 02 | [Check one frame against a plain-language condition](/lookout/02-check-frame) | Written · video in production |
+| 03 | [Add the local service boundary](/lookout/03-local-service) | Written · video in production |
+| 04 | [Turn a sentence into an inspectable watcher rule](/lookout/04-watcher-rule) | Written · video in production |
+| 05 | [Evaluate watchers on the event tape](/lookout/05-evaluate-watchers) | Written · video in production |
+| 06 | [Measure and tune false positives](/lookout/06-tune-false-positives) | Written · video in production |
+| 07 | [Hand inference to a stronger device](/lookout/07-delegated-inference) | Written · video in production |
+| 08 | [Prove footage never leaves the machine](/lookout/08-offline-proof) | Written · video in production |
 
 ## Beyond the lessons
 
@@ -44,4 +46,6 @@ Motion alerts are noisy, rules are brittle, and the event you care about disappe
   </Card>
 </CardGroup>
 
-While Lookout is in production, start with [Redact](/redact/overview), the complete project. It teaches the same loop end to end.
+<Card title="Start lesson 01" icon="play" href="/lookout/01-starter">
+  Build the app first, then add QVAC one lesson at a time.
+</Card>

@@ -1,0 +1,341 @@
+---
+title: "05. Ingest manuals for retrieval"
+description: "We will split each filed manual by printed page, embed every chunk with a local model, and save an index that remembers where each chunk came from."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Homebook · 05. Ingest manuals for retrieval" />
+
+An answer is only trustworthy if you can open the page it came from. So we index manuals by printed page before we generate anything. Each chunk keeps its document id, title, file, and page number.
+
+**Source checkpoint:** `4633a20` · **Starting checkpoint:** `097e56d`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/homebook/manual-index.ts` | `chunkManual` splits on `=== page N ===` markers. `buildManualIndex` checks vector counts and dimensions. `searchManuals` ranks by cosine similarity |
+| `src/features/homebook/fixture-embedder.ts` | A deterministic word-count embedder for tests. It is not a model |
+| `qvac-service/ingest-manuals-smoke.mjs` | Embeds every filed manual with `GTE_LARGE_FP16` and writes `.qvac/manual-index.json` |
+
+## Build and observe
+
+### 1. Look at a manual
+
+Open `public/test-files/homebook/aquaterra-at50g-manual.txt`. It is fictional. Lines like `=== page 7 ===` mark printed pages. The preamble before page 1 is skipped.
+
+### 2. Build the index
+
+```bash
+npm run qvac:ingest-manuals
+```
+
+The command loads `GTE_LARGE_FP16` with `modelType: "embeddings"` and calls `embed({ modelId, text: texts })` once for all chunks. It prints the model, vector dimensions, the number of manuals and chunks, and where it wrote the index.
+
+### 3. Read what each chunk embeds
+
+`buildManualIndex` embeds `"<title>, page <n>: <text>"`, not the bare text. A question that names the appliance can then match the right manual.
+
+### 4. Why a fixture embedder
+
+Tests must not need a downloaded model. `fixture-embedder.ts` counts words into 64 buckets. It proves the plumbing: pages split correctly, vectors line up with chunks, and search returns a page. Its scores say nothing about real retrieval quality. Our first fixture test asked about "flush sediment" and the warranty page (12) won, because it also mentions sediment and the tank. A word counter is not a meaning model. The test now uses wording from page 7.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "homebook",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:identify-smoke": "node --no-warnings qvac-service/identify-photo-smoke.mjs",
+    "qvac:ingest-manuals": "node --no-warnings qvac-service/ingest-manuals-smoke.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/ingest-manuals-smoke.mjs">
+
+```javascript
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const indexPath = path.join(qvacDirectory, "manual-index.json");
+const filesDirectory = path.join(appDirectory, "public/test-files/homebook");
+
+let sdk;
+let modelId;
+try {
+  const { sampleBinder } = await import("../src/features/homebook/binder.ts");
+  const { buildManualIndex, chunkManual } = await import("../src/features/homebook/manual-index.ts");
+  const manuals = sampleBinder.documents.filter((d) => d.kind === "manual" && d.file);
+  const chunks = [];
+  for (const doc of manuals) {
+    chunks.push(...chunkManual(doc, await readFile(path.join(filesDirectory, doc.file), "utf8")));
+  }
+
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.GTE_LARGE_FP16,
+    modelType: "embeddings",
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const startedAt = Date.now();
+  const index = await buildManualIndex(chunks, "GTE_LARGE_FP16", async (texts) => {
+    const { embedding } = await sdk.embed({ modelId, text: texts });
+    return embedding;
+  });
+  await writeFile(indexPath, `${JSON.stringify(index)}\n`, "utf8");
+  process.stdout.write(
+    `${JSON.stringify(
+      { model: index.model, dimensions: index.dimensions, manuals: manuals.length, chunks: index.entries.length, elapsedMs: Date.now() - startedAt, indexPath },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`QVAC manual ingest failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/fixture-embedder.ts">
+
+```typescript
+import type { Embedder } from "./manual-index";
+
+// A deterministic bag-of-words embedder for tests only. It is not a model and
+// its scores say nothing about how GTE_LARGE_FP16 would rank these pages.
+export const FIXTURE_DIMENSIONS = 64;
+
+function hash(word: string): number {
+  let h = 0;
+  for (const ch of word) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % FIXTURE_DIMENSIONS;
+}
+
+export function fixtureVector(text: string): number[] {
+  const v = new Array(FIXTURE_DIMENSIONS).fill(0);
+  for (const word of text.toLowerCase().match(/[a-z]{4,}/g) ?? []) v[hash(word)] += 1;
+  return v;
+}
+
+export const fixtureEmbedder: Embedder = async (texts) => texts.map(fixtureVector);
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/manual-index.test.ts">
+
+```typescript
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { fixtureEmbedder, fixtureVector } from "./fixture-embedder";
+import { buildManualIndex, chunkManual, searchManuals } from "./manual-index";
+
+const manualText = readFileSync(path.join(process.cwd(), "public/test-files/homebook/aquaterra-at50g-manual.txt"), "utf8");
+const doc = { id: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt" };
+
+describe("manual ingestion", () => {
+  it("splits a manual by printed page and skips the preamble", () => {
+    const chunks = chunkManual(doc, manualText);
+    expect(chunks.map((c) => c.page)).toEqual([1, 4, 7, 9, 12]);
+    expect(chunks.find((c) => c.page === 4)?.text).toMatch(/^Lighting the pilot\./);
+    expect(chunks.some((c) => c.text.includes("FICTIONAL SAMPLE"))).toBe(false);
+  });
+
+  it("indexes chunks and finds the page about flushing (fixture embedder, not a model)", async () => {
+    const index = await buildManualIndex(chunkManual(doc, manualText), "fixture-bow", fixtureEmbedder);
+    const hits = searchManuals(index, fixtureVector("attach a hose to the drain valve and flush"), { minScore: 0.1 });
+    expect(hits[0]).toMatchObject({ docId: "doc-wh-manual", page: 7 });
+  });
+
+  it("refuses a vector count that does not match the chunks", async () => {
+    await expect(buildManualIndex(chunkManual(doc, manualText), "m", async () => [[1]])).rejects.toThrow("wrong number");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/manual-index.ts">
+
+```typescript
+// Manuals are split by printed page so every answer can cite a page number.
+
+export type ManualChunk = {
+  id: string;
+  docId: string;
+  title: string;
+  file: string;
+  page: number;
+  text: string;
+};
+
+export type ManualIndex = {
+  model: string;
+  dimensions: number;
+  entries: (ManualChunk & { vector: number[] })[];
+};
+
+export type Embedder = (texts: string[]) => Promise<number[][]>;
+
+const PAGE_MARKER = /^=== page (\d+) ===$/;
+const MAX_CHUNK_CHARS = 420;
+
+export function chunkManual(doc: { id: string; title: string; file: string }, text: string): ManualChunk[] {
+  const chunks: ManualChunk[] = [];
+  let page: number | null = null;
+  let lines: string[] = [];
+  const flush = () => {
+    if (page === null) return;
+    const sentences = lines.join(" ").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/);
+    let current = "";
+    for (const sentence of sentences) {
+      if (current && current.length + sentence.length + 1 > MAX_CHUNK_CHARS) {
+        chunks.push({ id: `${doc.id}-p${page}-${chunks.length}`, docId: doc.id, title: doc.title, file: doc.file, page, text: current });
+        current = "";
+      }
+      current = current ? `${current} ${sentence}` : sentence;
+    }
+    if (current) chunks.push({ id: `${doc.id}-p${page}-${chunks.length}`, docId: doc.id, title: doc.title, file: doc.file, page, text: current });
+  };
+  for (const line of text.split(/\r?\n/)) {
+    const marker = line.trim().match(PAGE_MARKER);
+    if (marker) {
+      flush();
+      page = Number(marker[1]);
+      lines = [];
+    } else if (page !== null && line.trim()) {
+      lines.push(line.trim());
+    }
+  }
+  flush();
+  return chunks;
+}
+
+export async function buildManualIndex(chunks: ManualChunk[], model: string, embed: Embedder): Promise<ManualIndex> {
+  if (chunks.length === 0) throw new Error("There are no manual pages to index");
+  const vectors = await embed(chunks.map((c) => `${c.title}, page ${c.page}: ${c.text}`));
+  if (vectors.length !== chunks.length) throw new Error("The embedder returned the wrong number of vectors");
+  const dimensions = vectors[0].length;
+  if (!vectors.every((v) => v.length === dimensions && dimensions > 0)) throw new Error("Vectors have inconsistent dimensions");
+  return { model, dimensions, entries: chunks.map((c, i) => ({ ...c, vector: vectors[i] })) };
+}
+
+function cosine(a: number[], b: number[]): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
+}
+
+export type ManualHit = ManualChunk & { score: number };
+
+export function searchManuals(
+  index: ManualIndex,
+  query: number[],
+  options: { limit?: number; minScore?: number; docIds?: string[] } = {},
+): ManualHit[] {
+  if (query.length !== index.dimensions) throw new Error("Query vector does not match the index");
+  const { limit = 3, minScore = 0.3, docIds } = options;
+  return index.entries
+    .filter((e) => !docIds || docIds.includes(e.docId))
+    .map(({ vector, ...chunk }) => ({ ...chunk, score: cosine(vector, query) }))
+    .filter((hit) => hit.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/homebook/manual-index.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass, using the fixture embedder.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 05: Ingest manuals for retrieval"
+```
+
+## Before continuing
+
+- [ ] `.qvac/manual-index.json` exists after ingest.
+- [ ] Each chunk keeps a page number.
+
+Continue to [Answer with citations to the manual page](/homebook/06-cited-answers).

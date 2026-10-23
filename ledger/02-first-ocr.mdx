@@ -1,0 +1,259 @@
+---
+title: "02. Read one receipt with QVAC"
+description: "We will read the fictional receipt with a local OCR model, entirely outside React. This separates install, download, and runtime problems from app problems."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Ledger · 02. Read one receipt with QVAC" />
+
+We will read the fictional receipt with a local OCR model, entirely outside React. If something breaks here, it is an install, download, or runtime problem, not an app problem.
+
+The result is text evidence with boxes. It is not a transaction.
+
+**Source checkpoint:** `90a8494` · **Starting checkpoint:** `d5d540a`
+
+## What changes
+
+- Add `@qvac/sdk` pinned to exactly **0.22.0**.
+- Add `b4a` pinned to **1.9.0** (explained below).
+- Record the SDK's Node range in `engines`: `^22.22.2 || ^24.15.0 || >=26.0.0`.
+- Add `.qvac/` to `.gitignore`. Models and config are local runtime data.
+- Add `qvac-service/ocr-smoke.mjs` and the `qvac:ocr-smoke` script.
+- Add `qvac-service/local-config.ts` with a focused test.
+
+To compare with the checkpoint: `git diff d5d540a 90a8494`.
+
+## Build and observe
+
+### 1. Install the pinned runtime
+
+```bash
+npm install --save-exact @qvac/sdk@0.22.0
+```
+
+Do not use a floating version. The course was written against 0.22.0.
+
+### 2. Set the config path before importing QVAC
+
+Open `qvac-service/ocr-smoke.mjs`. It hashes the receipt, creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`. Only then does it import the SDK with `await import("@qvac/sdk")`.
+
+The order matters. The SDK reads the config when it starts.
+
+### 3. Read the model lifecycle
+
+Find the four calls:
+
+- `loadModel({ modelSrc: sdk.OCR_LATIN, modelConfig: { langList: ["en"] } })` returns a model ID.
+- `sdk.ocr({ modelId, image, options: { paragraph: false } })` returns `blocks` and `stats` promises. We await both.
+- `unloadModel({ modelId, clearStorage: false })` frees memory but keeps the downloaded files.
+- `close()` shuts the SDK down.
+
+The last two run in `finally`, so they run even after an error.
+
+`paragraph: false` keeps each text region separate. On a receipt, that means a label like `TOTAL` and its amount `10.53` often come back as two blocks. Chapter 4 deals with that.
+
+### 4. Run it
+
+```bash
+npm run qvac:ocr-smoke
+```
+
+The first successful run downloads the OCR model into `.qvac/models`. A second run should reuse it. Read `sourceDigest`, `blockCount`, `blocks`, and `stats`. Compare a few strings with the image. Expect some imperfect reads.
+
+### 5. Classify failures before changing code
+
+These are the failures we hit while building this chapter. Each one has a different cause. None of them is "QVAC failed".
+
+**Worker did not start.** The first run said:
+
+```text
+QVAC OCR smoke failed: RPC initialization timed out after 30000ms — the worker process may have failed to start
+```
+
+The worker's stderr showed the real cause: `Cannot find module 'b4a' imported from .../node_modules/bogon/index.js`. A transitive package uses `b4a` without declaring it, and npm did not hoist a copy to the top level. This is a dependency problem. The fix is in `package.json`: depend on `b4a@1.9.0` directly so it lands in `node_modules/b4a`.
+
+**Model download could not lock its store.** The next run said:
+
+```text
+Could not download "latin_g2.gguf" from the registry on this network (File descriptor could not be locked).
+```
+
+Another QVAC process on the same machine was using the shared registry store under the home directory. This is an environment problem. Stop the other process, or run with a separate `HOME` for this test.
+
+**Download stalled.** With its own `HOME`, the download started and then stopped making progress in our build container. That is a network problem in that container. We stopped there.
+
+So, plainly: **we did not see live OCR output while writing this chapter.** The script is complete and the steps above are the ones to run on your machine. When it works, you will see real blocks from your own run. Do not compare them with any numbers in this course, because we have none from a live run.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="qvac-service/ocr-smoke.mjs">
+
+```javascript
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const defaultSource = fileURLToPath(
+  new URL("../public/test-files/ledger/receipt-corner-cafe.png", import.meta.url),
+);
+const sourcePath = path.resolve(process.argv[2] ?? defaultSource);
+const sourceName = path.basename(sourcePath);
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+let modelId;
+let sdk;
+try {
+  await access(sourcePath);
+  const sourceBytes = await readFile(sourcePath);
+  const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  // The SDK reads this path when it initializes, so set it before the import.
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.OCR_LATIN,
+    modelConfig: { langList: ["en"] },
+  });
+  const run = sdk.ocr({ modelId, image: sourcePath, options: { paragraph: false } });
+  const [blocks, stats] = await Promise.all([run.blocks, run.stats]);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        sourceName,
+        sourceDigest,
+        cacheDirectory,
+        blockCount: blocks.length,
+        blocks,
+        stats: stats ?? null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(
+    `QVAC OCR smoke failed: ${message}\nThe first successful run downloads OCR assets into ${cacheDirectory}; later runs reuse that cache.\n`,
+  );
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) {
+    await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/local-config.ts">
+
+```typescript
+import path from "node:path";
+
+export function resolveLocalQvacPaths(appDirectory: string) {
+  const qvacDirectory = path.join(appDirectory, ".qvac");
+  return {
+    qvacDirectory,
+    cacheDirectory: path.join(qvacDirectory, "models"),
+    configPath: path.join(qvacDirectory, "config.json"),
+  };
+}
+
+export type OcrBlock = {
+  text: string;
+  bbox?: [number, number, number, number];
+  confidence?: number;
+};
+
+export function buildOcrReceipt<TStats>(input: {
+  sourceName: string;
+  sourceDigest: string;
+  cacheDirectory: string;
+  blocks: OcrBlock[];
+  stats: TStats;
+}) {
+  return {
+    sourceName: input.sourceName,
+    sourceDigest: input.sourceDigest,
+    cacheDirectory: input.cacheDirectory,
+    blockCount: input.blocks.length,
+    blocks: input.blocks,
+    stats: input.stats ?? null,
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/local-config.test.ts">
+
+```typescript
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { buildOcrReceipt, resolveLocalQvacPaths } from "./local-config";
+
+describe("local QVAC configuration", () => {
+  it("keeps the model cache inside the app's ignored .qvac directory", () => {
+    const paths = resolveLocalQvacPaths("/work/ledger");
+
+    expect(paths.qvacDirectory).toBe(path.join("/work/ledger", ".qvac"));
+    expect(paths.cacheDirectory).toBe(path.join("/work/ledger", ".qvac", "models"));
+    expect(paths.configPath).toBe(path.join("/work/ledger", ".qvac", "config.json"));
+  });
+
+  it("binds a receipt to the source digest and counts blocks", () => {
+    // Hand-written fixture blocks, not live model output.
+    const receipt = buildOcrReceipt({
+      sourceName: "receipt-corner-cafe.png",
+      sourceDigest: "abc123",
+      cacheDirectory: "/work/ledger/.qvac/models",
+      blocks: [
+        { text: "CORNER CAFE", bbox: [40, 36, 210, 66], confidence: 0.9 },
+        { text: "TOTAL", bbox: [40, 388, 110, 414], confidence: 0.8 },
+      ],
+      stats: undefined,
+    });
+
+    expect(receipt.sourceDigest).toBe("abc123");
+    expect(receipt.blockCount).toBe(2);
+    expect(receipt.stats).toBeNull();
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm test -- qvac-service/local-config.test.ts
+```
+
+Expected: 2 tests pass. They check the cache path and the receipt shape with hand-written blocks. They do **not** prove live inference. Only a successful `npm run qvac:ocr-smoke` does.
+
+Then run the full set:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 3 passed (3)`, `Tests 4 passed (4)`.
+
+## Before continuing
+
+- [ ] `@qvac/sdk` is exactly 0.22.0 in `package.json`.
+- [ ] `.qvac/` is ignored by Git.
+- [ ] You ran the smoke command and either saw real blocks or classified the failure.
+
+Continue to [Add the local service boundary](/ledger/03-local-service).

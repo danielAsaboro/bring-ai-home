@@ -1,0 +1,647 @@
+---
+title: "06. Flag duplicate beats and pacing"
+description: "We will flag rounds that dominate the match, empty rounds, and overlong cards with plain rules, and flag pairs of cards that make the same point with embeddings."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Deck · 06. Flag duplicate beats and pacing" />
+
+Two cards that say the same thing waste a beat, and one round that takes most of the time unbalances the match. Pacing is arithmetic, so it needs no model. Duplicate beats need meaning, so the app asks for embeddings and applies its own threshold.
+
+**Source checkpoint:** `2434066` · **Starting checkpoint:** `593df7d`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/deck/deck-health.ts` | `pacingFlags` (round over 50% of time, empty round, card over 90 seconds) and `duplicateBeats` (cosine at least 0.9) |
+| `src/features/deck/HealthPanel.tsx` | Live pacing flags, **Check for duplicate beats**, **Discard the later card**, and **Keep as is** |
+| `src/features/deck/DeckApp.tsx` | Shows the panel and wires discard to `removeCard` |
+
+## Build and observe
+
+### 1. Break the pacing
+
+Set **Prototype trial** to 240 seconds and add an empty round. The panel flags the heavy round, the empty round, and the long card at once, without the service.
+
+### 2. Add a duplicate beat
+
+In **The problem**, add a card titled `Rushed mornings again`. Press **Check for duplicate beats**. If the embeddings put it close to **Mornings are rushed**, the panel names both cards and their similarity.
+
+### 3. Decide
+
+**Discard the later card** removes it. **Keep as is** hides the flag for this session. Nothing is removed without one of those clicks.
+
+## Read the checkpoint implementation
+
+These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+
+<AccordionGroup>
+<Accordion title="src/features/deck/DeckApp.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
+
+import {
+  activeDeck,
+  addCard,
+  addRound,
+  createDeck,
+  formatSeconds,
+  moveCard,
+  moveRound,
+  pacing,
+  playOrder,
+  removeCard,
+  updateCard,
+  type Card,
+  type CardKind,
+  type Deck,
+  type Library,
+  type Treatment,
+} from "./deck";
+import { createAssistClient, type AssistClient } from "./assist-client";
+import { EvidencePanel } from "./EvidencePanel";
+import { HealthPanel } from "./HealthPanel";
+import { NotesPanel } from "./NotesPanel";
+import { ProposalPanel } from "./ProposalPanel";
+import { createLocalStore, type LibraryStore } from "./storage";
+
+const noopSubscribe = () => () => undefined;
+
+export function DeckApp({ store, client }: { store?: LibraryStore; client?: AssistClient }) {
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!mounted) return <p className="p-6">Shuffling the deck…</p>;
+  return <DeckView store={store ?? createLocalStore()} client={client ?? createAssistClient()} />;
+}
+
+const field = "rounded border border-slate-400 bg-white px-2 py-1 text-sm text-slate-900";
+const button = "rounded bg-indigo-800 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-900";
+const ghost = "rounded border border-slate-400 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-40";
+
+function DeckView({ store, client }: { store: LibraryStore; client: AssistClient }) {
+  const [library, setLibrary] = useState<Library>(() => store.load());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
+  const deck = activeDeck(library);
+  const selected = deck.cards.find((c) => c.id === selectedId) ?? null;
+
+  function commit(next: Library) {
+    setLibrary(next);
+    store.save(next);
+  }
+
+  if (presenting) return <Match deck={deck} onExit={() => setPresenting(false)} />;
+
+  return (
+    <div className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-[220px_1fr]">
+      <aside className="space-y-4">
+        <h1 className="text-2xl font-bold">Deck</h1>
+        <nav aria-label="Decks">
+          <ul className="space-y-1">
+            {library.decks.map((d) => (
+              <li key={d.id}>
+                <button
+                  className={`w-full rounded px-2 py-1 text-left text-sm ${d.id === deck.id ? "bg-indigo-100 font-semibold" : "hover:bg-slate-100"}`}
+                  aria-current={d.id === deck.id ? "true" : undefined}
+                  onClick={() => {
+                    commit({ ...library, activeDeckId: d.id });
+                    setSelectedId(null);
+                  }}
+                >
+                  {d.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <NewDeckForm onCreate={(title, audience) => commit(createDeck(library, title, audience))} />
+        <button className={ghost} onClick={() => commit(store.reset())}>
+          Reset demo data
+        </button>
+      </aside>
+
+      <section className="space-y-4">
+        <header className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-xl font-semibold">{deck.title}</h2>
+            <p className="text-sm text-slate-600">Audience: {deck.audience || "not set"}</p>
+          </div>
+          <button className={button} onClick={() => setPresenting(true)} disabled={deck.cards.length === 0}>
+            Play the match
+          </button>
+        </header>
+
+        <PacingView deck={deck} />
+        <HealthPanel key={`health-${deck.id}`} deck={deck} client={client} onDiscard={(cardId) => commit(removeCard(library, deck.id, cardId))} />
+        <NotesPanel client={client} />
+        <ProposalPanel
+          key={deck.id}
+          deck={deck}
+          client={client}
+          onAccept={(card) => commit(addCard(library, deck.id, { kind: "claim", treatment: "headline", seconds: 40, ...card }))}
+        />
+
+        <div className="grid gap-3 lg:grid-cols-3">
+          {deck.rounds.map((round, i) => (
+            <section key={round.id} aria-label={`Round: ${round.title}`} className="rounded-lg border border-slate-300 bg-white p-3">
+              <div className="mb-2 flex items-center justify-between gap-1">
+                <h3 className="font-semibold">
+                  Round {i + 1}: {round.title}
+                </h3>
+                <span className="flex gap-1">
+                  <button className={ghost} aria-label={`Move ${round.title} earlier`} disabled={i === 0} onClick={() => commit(moveRound(library, deck.id, round.id, -1))}>
+                    ←
+                  </button>
+                  <button className={ghost} aria-label={`Move ${round.title} later`} disabled={i === deck.rounds.length - 1} onClick={() => commit(moveRound(library, deck.id, round.id, 1))}>
+                    →
+                  </button>
+                </span>
+              </div>
+              <ol className="space-y-2">
+                {deck.cards
+                  .filter((c) => c.roundId === round.id)
+                  .map((card, j, roundCards) => (
+                    <li key={card.id}>
+                      <CardTile
+                        card={card}
+                        selected={card.id === selectedId}
+                        onSelect={() => setSelectedId(card.id)}
+                        onUp={j > 0 ? () => commit(moveCard(library, deck.id, card.id, -1)) : undefined}
+                        onDown={j < roundCards.length - 1 ? () => commit(moveCard(library, deck.id, card.id, 1)) : undefined}
+                      />
+                    </li>
+                  ))}
+              </ol>
+              <AddCardForm
+                roundTitle={round.title}
+                onAdd={(title, kind) =>
+                  commit(addCard(library, deck.id, { kind, title, body: "", treatment: "headline", seconds: 30, roundId: round.id }))
+                }
+              />
+            </section>
+          ))}
+        </div>
+        <AddRoundForm onAdd={(title) => commit(addRound(library, deck.id, title))} />
+
+        {selected && (
+          <CardEditor
+            key={selected.id}
+            card={selected}
+            deck={deck}
+            onSave={(patch) => commit(updateCard(library, deck.id, selected.id, patch))}
+            onRemove={() => {
+              commit(removeCard(library, deck.id, selected.id));
+              setSelectedId(null);
+            }}
+          />
+        )}
+        {selected?.kind === "claim" && (
+          <EvidencePanel
+            key={`evidence-${selected.id}`}
+            library={library}
+            deckId={deck.id}
+            claim={selected}
+            client={client}
+            onReuse={(card) => {
+              const { id: _ignored, ...copy } = card;
+              void _ignored;
+              commit(addCard(library, deck.id, { ...copy, roundId: selected.roundId }));
+            }}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function CardTile({ card, selected, onSelect, onUp, onDown }: { card: Card; selected: boolean; onSelect: () => void; onUp?: () => void; onDown?: () => void }) {
+  const tone = card.kind === "claim" ? "border-indigo-600" : "border-amber-600";
+  return (
+    <article className={`rounded border-l-4 ${tone} bg-slate-50 p-2 ${selected ? "ring-2 ring-indigo-400" : ""}`}>
+      <button className="w-full text-left" onClick={onSelect}>
+        <span className="text-xs uppercase tracking-wide text-slate-500">
+          {card.kind} · {card.treatment} · {formatSeconds(card.seconds)}
+        </span>
+        <span className="block font-medium">{card.title}</span>
+      </button>
+      <span className="mt-1 flex gap-1">
+        <button className={ghost} aria-label={`Move ${card.title} up`} disabled={!onUp} onClick={onUp}>
+          ↑
+        </button>
+        <button className={ghost} aria-label={`Move ${card.title} down`} disabled={!onDown} onClick={onDown}>
+          ↓
+        </button>
+      </span>
+    </article>
+  );
+}
+
+function CardEditor({ card, deck, onSave, onRemove }: { card: Card; deck: Deck; onSave: (patch: Partial<Card>) => void; onRemove: () => void }) {
+  const [draft, setDraft] = useState(card);
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    onSave({ title: draft.title, body: draft.body, kind: draft.kind, treatment: draft.treatment, seconds: draft.seconds, roundId: draft.roundId, source: draft.source });
+  }
+  return (
+    <form aria-label="Edit card" onSubmit={submit} className="grid gap-2 rounded-lg border border-slate-300 bg-white p-3 md:grid-cols-2">
+      <label className="grid text-sm">
+        Title
+        <input className={field} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+      </label>
+      <label className="grid text-sm">
+        Source
+        <input className={field} value={draft.source ?? ""} onChange={(e) => setDraft({ ...draft, source: e.target.value || undefined })} />
+      </label>
+      <label className="grid text-sm md:col-span-2">
+        Body
+        <textarea className={field} rows={3} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
+      </label>
+      <label className="grid text-sm">
+        Kind
+        <select className={field} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as CardKind })}>
+          <option value="claim">claim</option>
+          <option value="evidence">evidence</option>
+        </select>
+      </label>
+      <label className="grid text-sm">
+        Treatment
+        <select className={field} value={draft.treatment} onChange={(e) => setDraft({ ...draft, treatment: e.target.value as Treatment })}>
+          <option value="headline">headline</option>
+          <option value="quiet">quiet</option>
+          <option value="data">data</option>
+        </select>
+      </label>
+      <label className="grid text-sm">
+        Seconds
+        <input className={field} type="number" min={5} max={600} value={draft.seconds} onChange={(e) => setDraft({ ...draft, seconds: Number(e.target.value) })} />
+      </label>
+      <label className="grid text-sm">
+        Round
+        <select className={field} value={draft.roundId} onChange={(e) => setDraft({ ...draft, roundId: e.target.value })}>
+          {deck.rounds.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <span className="flex gap-2 md:col-span-2">
+        <button className={button} type="submit">
+          Save card
+        </button>
+        <button className={ghost} type="button" onClick={onRemove}>
+          Discard card
+        </button>
+      </span>
+    </form>
+  );
+}
+
+function PacingView({ deck }: { deck: Deck }) {
+  const { total, rounds } = pacing(deck);
+  return (
+    <section aria-label="Pacing" className="rounded-lg border border-slate-300 bg-white p-3">
+      <h3 className="text-sm font-semibold">Pacing · {formatSeconds(total)} total</h3>
+      <ul className="mt-2 space-y-1">
+        {rounds.map((r) => (
+          <li key={r.roundId} className="grid grid-cols-[8rem_1fr_4rem] items-center gap-2 text-sm">
+            <span className="truncate">{r.title}</span>
+            <span className="h-2 rounded bg-slate-200">
+              <span className="block h-2 rounded bg-indigo-600" style={{ width: `${Math.round(r.share * 100)}%` }} />
+            </span>
+            <span>{formatSeconds(r.seconds)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Match({ deck, onExit }: { deck: Deck; onExit: () => void }) {
+  const cards = playOrder(deck);
+  const [index, setIndex] = useState(0);
+  const card = cards[Math.min(index, cards.length - 1)];
+  const round = deck.rounds.find((r) => r.id === card?.roundId);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "ArrowRight") setIndex((i) => Math.min(i + 1, cards.length - 1));
+      if (event.key === "ArrowLeft") setIndex((i) => Math.max(i - 1, 0));
+      if (event.key === "Escape") onExit();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cards.length, onExit]);
+
+  if (!card) return null;
+  return (
+    <section aria-label="Presentation" className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-900 p-8 text-white">
+      <p className="text-sm uppercase tracking-widest text-slate-400">
+        {round?.title} · card {index + 1} of {cards.length}
+      </p>
+      <h2 className={card.treatment === "headline" ? "text-5xl font-bold" : "text-3xl"}>{card.title}</h2>
+      <p className="max-w-2xl text-center text-xl text-slate-200">{card.body}</p>
+      {card.source && <p className="text-sm text-slate-400">Source: {card.source}</p>}
+      <div className="flex gap-3">
+        <button className={button} onClick={() => setIndex((i) => Math.max(i - 1, 0))} disabled={index === 0}>
+          Previous
+        </button>
+        <button className={button} onClick={() => setIndex((i) => Math.min(i + 1, cards.length - 1))} disabled={index >= cards.length - 1}>
+          Next
+        </button>
+        <button className={button} onClick={onExit}>
+          Leave the match
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function NewDeckForm({ onCreate }: { onCreate: (title: string, audience: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [audience, setAudience] = useState("");
+  return (
+    <form
+      aria-label="New deck"
+      className="grid gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onCreate(title, audience);
+        setTitle("");
+        setAudience("");
+      }}
+    >
+      <input className={field} placeholder="Deck title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input className={field} placeholder="Audience" value={audience} onChange={(e) => setAudience(e.target.value)} />
+      <button className={button}>New deck</button>
+    </form>
+  );
+}
+
+function AddCardForm({ roundTitle, onAdd }: { roundTitle: string; onAdd: (title: string, kind: CardKind) => void }) {
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<CardKind>("claim");
+  return (
+    <form
+      aria-label={`Add card to ${roundTitle}`}
+      className="mt-2 flex gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        onAdd(title.trim(), kind);
+        setTitle("");
+      }}
+    >
+      <input className={`${field} min-w-0 flex-1`} placeholder="New card" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <select className={field} aria-label="Card kind" value={kind} onChange={(e) => setKind(e.target.value as CardKind)}>
+        <option value="claim">claim</option>
+        <option value="evidence">evidence</option>
+      </select>
+      <button className={ghost}>Add</button>
+    </form>
+  );
+}
+
+function AddRoundForm({ onAdd }: { onAdd: (title: string) => void }) {
+  const [title, setTitle] = useState("");
+  return (
+    <form
+      aria-label="Add round"
+      className="flex gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAdd(title);
+        setTitle("");
+      }}
+    >
+      <input className={field} placeholder="Round title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <button className={ghost}>Add round</button>
+    </form>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/HealthPanel.test.tsx">
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import type { AssistClient } from "./assist-client";
+import { DeckApp } from "./DeckApp";
+import { createMemoryStore } from "./storage";
+
+// FIXTURE embedder: the two cards about rushed mornings share one direction and
+// every other card gets its own axis. Not model output.
+const client = {
+  embed: async (texts: string[]) => ({
+    model: "fixture",
+    vectors: texts.map((t, i) => Array.from({ length: texts.length + 1 }, (_, axis) => (axis === (/rush/i.test(t) ? 0 : i + 1) ? 1 : 0))),
+  }),
+} as unknown as AssistClient;
+
+describe("HealthPanel", () => {
+  it("flags a duplicate beat and discards only when asked", async () => {
+    const user = userEvent.setup();
+    const store = createMemoryStore();
+    render(<DeckApp store={store} client={client} />);
+    const problem = screen.getByRole("region", { name: "Round: The problem" });
+    await user.type(problem.querySelector("input")!, "Rushed mornings again");
+    await user.click(screen.getAllByRole("button", { name: "Add" })[0]);
+    await user.click(screen.getByRole("button", { name: "Check for duplicate beats" }));
+    expect(screen.getByText(/“Mornings are rushed” and “Rushed mornings again” make the same point/)).toBeInTheDocument();
+    expect(store.load().decks[0].cards).toHaveLength(9);
+    await user.click(screen.getByRole("button", { name: "Discard the later card" }));
+    expect(store.load().decks[0].cards.map((c) => c.title)).not.toContain("Rushed mornings again");
+    expect(screen.getByText("No flags.")).toBeInTheDocument();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/deck/HealthPanel.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { AssistError, type AssistClient } from "./assist-client";
+import type { Deck } from "./deck";
+import { cardsInPlayOrder, duplicateBeats, pacingFlags, type HealthFlag } from "./deck-health";
+import { cardText } from "./evidence-pool";
+
+const button = "rounded bg-indigo-800 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-900 disabled:opacity-50";
+const ghost = "rounded border border-slate-400 px-2 py-0.5 text-xs hover:bg-slate-100";
+
+export function HealthPanel({ deck, client, onDiscard }: { deck: Deck; client: AssistClient; onDiscard: (cardId: string) => void }) {
+  const [duplicates, setDuplicates] = useState<HealthFlag[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const present = new Set(deck.cards.map((c) => c.id));
+  const flags = [...pacingFlags(deck), ...duplicates.filter((f) => f.cardIds.every((id) => present.has(id)))].filter((f) => !dismissed.has(f.id));
+
+  async function checkDuplicates() {
+    setBusy(true);
+    setError(null);
+    try {
+      const cards = cardsInPlayOrder(deck);
+      if (cards.length < 2) return setDuplicates([]);
+      const { vectors } = await client.embed(cards.map(cardText));
+      setDuplicates(duplicateBeats(cards, vectors));
+    } catch (e) {
+      setError(e instanceof AssistError ? e.message : (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-label="Deck health" className="space-y-2 rounded-lg border border-slate-300 bg-white p-3">
+      <h3 className="text-sm font-semibold">Duplicate beats and pacing</h3>
+      <button className={button} disabled={busy} onClick={() => void checkDuplicates()}>
+        Check for duplicate beats
+      </button>
+      {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
+      {flags.length === 0 && <p className="text-sm">No flags.</p>}
+      <ul className="space-y-1">
+        {flags.map((f) => (
+          <li key={f.id} className="flex flex-wrap items-center gap-2 rounded bg-rose-50 p-2 text-sm">
+            <span className="flex-1">{f.message}</span>
+            {f.kind === "duplicate-beat" && (
+              <button className={ghost} onClick={() => onDiscard(f.cardIds[1])}>
+                Discard the later card
+              </button>
+            )}
+            <button className={ghost} onClick={() => setDismissed((s) => new Set(s).add(f.id))}>
+              Keep as is
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/deck-health.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { addRound, updateCard } from "./deck";
+import { duplicateBeats, pacingFlags } from "./deck-health";
+import { sampleLibrary } from "./sample-library";
+
+describe("deck health", () => {
+  it("passes the balanced sample deck and flags heavy, empty, and long", () => {
+    expect(pacingFlags(sampleLibrary.decks[0])).toEqual([]);
+    let lib = updateCard(sampleLibrary, "deck-kettle", "c-4", { seconds: 240 });
+    lib = addRound(lib, "deck-kettle", "Q&A");
+    expect(pacingFlags(lib.decks[0]).map((f) => f.kind)).toEqual(["heavy-round", "empty-round", "long-card"]);
+  });
+
+  it("pairs cards above the duplicate threshold (fixture vectors, not model output)", () => {
+    const cards = sampleLibrary.decks[0].cards.slice(0, 3);
+    const flags = duplicateBeats(cards, [[1, 0], [0, 1], [0.99, 0.05]]);
+    expect(flags.map((f) => f.cardIds)).toEqual([["c-1", "c-3"]]);
+    expect(() => duplicateBeats(cards, [[1, 0]])).toThrow("Expected 3 vectors");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/deck/deck-health.ts">
+
+```typescript
+import { pacing, playOrder, type Card, type Deck } from "./deck";
+import { cosine } from "./notes-index";
+
+// Pacing rules are plain arithmetic. Duplicate beats use embedding similarity,
+// but the app sets the threshold and a person decides what to cut.
+
+export type HealthFlag = { id: string; kind: "heavy-round" | "empty-round" | "long-card" | "duplicate-beat"; message: string; cardIds: string[] };
+
+export const HEAVY_ROUND_SHARE = 0.5;
+export const LONG_CARD_SECONDS = 90;
+export const DUPLICATE_MIN_SCORE = 0.9;
+
+export function pacingFlags(deck: Deck): HealthFlag[] {
+  const flags: HealthFlag[] = [];
+  const { rounds } = pacing(deck);
+  for (const r of rounds) {
+    if (r.cards === 0) flags.push({ id: `empty-${r.roundId}`, kind: "empty-round", message: `Round “${r.title}” has no cards.`, cardIds: [] });
+    else if (rounds.length > 1 && r.share > HEAVY_ROUND_SHARE)
+      flags.push({ id: `heavy-${r.roundId}`, kind: "heavy-round", message: `Round “${r.title}” takes ${Math.round(r.share * 100)}% of the match.`, cardIds: [] });
+  }
+  for (const c of deck.cards) {
+    if (c.seconds > LONG_CARD_SECONDS) flags.push({ id: `long-${c.id}`, kind: "long-card", message: `“${c.title}” runs ${c.seconds}s; one card should carry one beat.`, cardIds: [c.id] });
+  }
+  return flags;
+}
+
+export function duplicateBeats(cards: Card[], vectors: number[][], minScore = DUPLICATE_MIN_SCORE): HealthFlag[] {
+  if (vectors.length !== cards.length) throw new Error(`Expected ${cards.length} vectors, received ${vectors.length}`);
+  const flags: HealthFlag[] = [];
+  for (let i = 0; i < cards.length; i++) {
+    for (let j = i + 1; j < cards.length; j++) {
+      const score = cosine(vectors[i], vectors[j]);
+      if (score >= minScore) {
+        flags.push({
+          id: `dup-${cards[i].id}-${cards[j].id}`,
+          kind: "duplicate-beat",
+          message: `“${cards[i].title}” and “${cards[j].title}” make the same point (similarity ${score.toFixed(2)}).`,
+          cardIds: [cards[i].id, cards[j].id],
+        });
+      }
+    }
+  }
+  return flags;
+}
+
+export function cardsInPlayOrder(deck: Deck): Card[] {
+  return playOrder(deck);
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/deck/deck-health.test.ts src/features/deck/HealthPanel.test.tsx
+```
+
+Expected result: 2 test files pass, 3 tests pass. The duplicate pair comes from fixture vectors.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 06: Flag duplicate beats and pacing"
+```
+
+## Before continuing
+
+- [ ] The balanced sample deck has no pacing flags.
+- [ ] A duplicate is removed only by your click.
+
+Continue to [Adapt critique to a house rubric with LoRA](/deck/07-house-rubric-lora).
