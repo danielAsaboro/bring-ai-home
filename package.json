@@ -15,7 +15,8 @@
     "qvac:transcribe-smoke": "node qvac-service/transcribe-memory-smoke.mjs",
     "qvac:index-smoke": "node --no-warnings qvac-service/index-archive-smoke.mjs",
     "qvac:retrieve-smoke": "node --no-warnings qvac-service/retrieve-smoke.mjs",
-    "qvac:caption-smoke": "node --no-warnings qvac-service/caption-smoke.mjs"
+    "qvac:caption-smoke": "node --no-warnings qvac-service/caption-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",
