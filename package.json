@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs",
     "qvac:service": "node --no-warnings qvac-service/serve.mjs",
-    "qvac:identify-smoke": "node --no-warnings qvac-service/identify-photo-smoke.mjs"
+    "qvac:identify-smoke": "node --no-warnings qvac-service/identify-photo-smoke.mjs",
+    "qvac:ingest-manuals": "node --no-warnings qvac-service/ingest-manuals-smoke.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",
