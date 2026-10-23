@@ -12,6 +12,12 @@ const fixtureLabel: Capabilities["label"] = async () => ({
   ],
 });
 
+// Fixture describer. Its reply is hand-written, not model output.
+const fixtureIdentify: Capabilities["identify"] = async () => ({
+  model: "fixture-vlm",
+  text: "category: water heater; name: gas water heater",
+});
+
 let close: (() => void) | null = null;
 async function start(capabilities: Capabilities) {
   const server = createHomebookServer(capabilities);
@@ -34,7 +40,7 @@ describe("Homebook local service", () => {
   });
 
   it("turns OCR blocks into proposed label facts", async () => {
-    const base = await start({ label: fixtureLabel });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
     const res = await post(`${base}/label`, png);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -42,14 +48,20 @@ describe("Homebook local service", () => {
     expect(body.facts).toEqual([{ field: "model", value: "AT-50G", sourceText: "MODEL NO. AT-50G", confidence: 0.93 }]);
   });
 
+  it("validates a photo identification against Homebook's categories", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    const body = await (await post(`${base}/identify`, png)).json();
+    expect(body.identity).toMatchObject({ kind: "proposed-identity", category: "water-heater", name: "Gas water heater" });
+  });
+
   it("answers 503 when the model is not loaded, and 400 for a bad image", async () => {
-    const base = await start({ label: null });
+    const base = await start({ label: null, identify: null });
     expect((await post(`${base}/label`, png)).status).toBe(503);
     expect((await post(`${base}/label`, { ...png, mimeType: "image/gif" })).status).toBe(400);
   });
 
   it("refuses a foreign origin before reading the request", async () => {
-    const base = await start({ label: fixtureLabel });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
     expect((await post(`${base}/label`, png, "https://example.com")).status).toBe(403);
   });
 });

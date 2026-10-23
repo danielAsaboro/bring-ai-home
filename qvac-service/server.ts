@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 
 import type { LabelFact, OcrBlock } from "../src/features/homebook/label-facts.ts";
 import { proposeLabelFacts } from "../src/features/homebook/label-facts.ts";
+import { parseAssetIdentity } from "../src/features/homebook/asset-identity.ts";
 
 export const SERVICE_PORT = 4319;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
@@ -9,8 +10,11 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
 
 export type LabelReader = (image: Buffer) => Promise<{ blocks: OcrBlock[]; model: string }>;
 
+export type PhotoDescriber = (image: Buffer, mimeType: string) => Promise<{ text: string; model: string }>;
+
 export type Capabilities = {
   label: LabelReader | null;
+  identify: PhotoDescriber | null;
 };
 
 export type ImageRequest = { fileName: string; mimeType: string; image: Buffer };
@@ -70,6 +74,12 @@ export function createHomebookServer(capabilities: Capabilities) {
       const { blocks, model } = await capabilities.label(request.image);
       const facts: LabelFact[] = proposeLabelFacts(blocks);
       return { kind: "proposed-label-facts", fileName: request.fileName, model, blocks, facts };
+    },
+    "/identify": async (body) => {
+      const request = parseImageRequest(body);
+      if (!capabilities.identify) throw new Unavailable("Photo identification is not available");
+      const { text, model } = await capabilities.identify(request.image, request.mimeType);
+      return { fileName: request.fileName, model, identity: parseAssetIdentity(text) };
     },
   };
 

@@ -21,6 +21,16 @@ function fixtureClient(overrides: Partial<AssistClient> = {}): AssistClient {
         { field: "serial", value: "AT50-2291-0457", sourceText: "SERIAL NO. AT50-2291-0457", confidence: 0.88 },
       ],
     }),
+    identify: async () => ({
+      model: "fixture-vlm",
+      identity: {
+        kind: "proposed-identity",
+        category: "water-heater",
+        name: "Gas water heater",
+        categoryUnrecognised: false,
+        rawText: "category: water heater; name: gas water heater",
+      },
+    }),
     ...overrides,
   } as AssistClient;
 }
@@ -39,6 +49,18 @@ describe("label review", () => {
     await userEvent.click(screen.getByRole("button", { name: "Use model" }));
     expect(store.saved.at(-1)?.assets[0].model).toBe("AT-50G");
     expect(store.saved.at(-1)?.assets[0].serial).toBe("");
+  });
+
+  it("sets the category only after a person accepts the photo identification", async () => {
+    const other = cloneBinder(sampleBinder);
+    other.assets[0] = { ...other.assets[0], category: "other" };
+    const store = memoryStore(other);
+    render(<Homebook store={store} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.upload(screen.getByLabelText("Asset photo"), new File(["png"], "heater.png", { type: "image/png" }));
+    await screen.findByRole("group", { name: "Proposed identity" });
+    expect(store.saved).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Use category" }));
+    expect(store.saved.at(-1)?.assets[0].category).toBe("water-heater");
   });
 
   it("explains a stopped service and leaves the binder alone", async () => {

@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +37,7 @@ async function tryLoad(label, options) {
 
 // Listen first. Each capability switches on when its model has loaded, so the
 // binder gets a clear 503 instead of a hanging request while models download.
-const capabilities = { label: null };
+const capabilities = { label: null, identify: null };
 const server = createHomebookServer(capabilities);
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Homebook QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
@@ -53,6 +54,34 @@ if (ocrId) {
     return { blocks: await run.blocks, model: "OCR_LATIN" };
   };
   process.stderr.write("Label OCR ready\n");
+}
+
+const vlmId = await tryLoad("Photo identification", {
+  modelSrc: sdk?.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+  modelConfig: { ctx_size: 1024, projectionModelSrc: sdk?.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+});
+if (vlmId) {
+  const { IDENTIFY_PROMPT } = await import("../src/features/homebook/asset-identity.ts");
+  const inbox = path.join(qvacDirectory, "inbox");
+  await mkdir(inbox, { recursive: true });
+  capabilities.identify = async (image, mimeType) => {
+    // Attachments are read from a path, so the photo lives briefly in .qvac/inbox.
+    const file = path.join(inbox, `${randomUUID()}.${mimeType === "image/png" ? "png" : "jpg"}`);
+    await writeFile(file, image);
+    try {
+      const run = sdk.completion({
+        modelId: vlmId,
+        history: [{ role: "user", content: IDENTIFY_PROMPT, attachments: [{ path: file }] }],
+        stream: true,
+      });
+      let text = "";
+      for await (const token of run.tokenStream) text += token;
+      return { text, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" };
+    } finally {
+      await rm(file, { force: true });
+    }
+  };
+  process.stderr.write("Photo identification ready\n");
 }
 
 async function shutdown() {

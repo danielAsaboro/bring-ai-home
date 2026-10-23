@@ -3,7 +3,8 @@
 import { useState, type ChangeEvent } from "react";
 
 import { AssistError, serviceClient, type AssistClient } from "./assist-client";
-import type { Asset } from "./binder";
+import type { AssetIdentity } from "./asset-identity";
+import type { Asset, AssetCategory } from "./binder";
 import type { LabelFact, LabelField } from "./label-facts";
 
 const FIELD_NAMES: Record<LabelField, string> = {
@@ -22,7 +23,7 @@ export function AssistPanel({
 }: {
   asset: Asset;
   client?: AssistClient;
-  onAccept: (field: LabelField, value: string) => void;
+  onAccept: (field: LabelField | "category" | "name", value: string) => void;
 }) {
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const [facts, setFacts] = useState<{ assetId: string; model: string; items: LabelFact[] } | null>(null);
@@ -40,6 +41,16 @@ export function AssistPanel({
     }
   }
 
+  const [identity, setIdentity] = useState<{ assetId: string; model: string; value: AssetIdentity } | null>(null);
+
+  async function onPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await run("Looking at the photo locally…", () => client.identify(file));
+    if (result) setIdentity({ assetId: asset.id, model: result.model, value: result.identity });
+  }
+
   async function onLabel(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -48,6 +59,11 @@ export function AssistPanel({
     if (result) setFacts({ assetId: asset.id, model: result.model, items: result.facts });
   }
 
+  const visibleIdentity = identity?.assetId === asset.id ? identity : null;
+  const acceptCategory = (category: AssetCategory) => {
+    onAccept("category", category);
+    setIdentity(null);
+  };
   const visibleFacts = facts?.assetId === asset.id ? facts : null;
 
   return (
@@ -59,6 +75,32 @@ export function AssistPanel({
         <span className="font-medium">Read a rating plate</span>
         <input type="file" accept="image/png,image/jpeg" aria-label="Rating plate photo" onChange={onLabel} className="mt-1 block text-xs" />
       </label>
+
+      <label className="block">
+        <span className="font-medium">Identify from a photo</span>
+        <input type="file" accept="image/png,image/jpeg" aria-label="Asset photo" onChange={onPhoto} className="mt-1 block text-xs" />
+      </label>
+
+      {visibleIdentity ? (
+        <div aria-label="Proposed identity" role="group" className="rounded border border-stone-300 bg-white p-2">
+          <p>
+            Looks like: <strong>{visibleIdentity.value.category}</strong>
+            {visibleIdentity.value.name ? <> · “{visibleIdentity.value.name}”</> : null}
+          </p>
+          <p className="text-xs text-stone-600">
+            Proposed by {visibleIdentity.model}. Model said: “{visibleIdentity.value.rawText}”
+            {visibleIdentity.value.categoryUnrecognised ? " (not one of Homebook's categories, so it became other)" : ""}
+          </p>
+          <div className="mt-1 flex gap-2">
+            <button type="button" className="rounded border border-emerald-800 px-2 py-0.5" onClick={() => acceptCategory(visibleIdentity.value.category)}>
+              Use category
+            </button>
+            <button type="button" className="rounded border border-stone-400 px-2 py-0.5" onClick={() => setIdentity(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {status.state === "working" ? <p role="status">{status.what}</p> : null}
       {status.state === "error" ? <p role="alert" className="text-red-900">{status.message}</p> : null}
