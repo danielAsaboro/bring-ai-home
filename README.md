@@ -79,4 +79,4 @@ npm test
 npm run build
 ```
 
-The complete starter will expose a visible **Reset demo data** action. Until its product wave is implemented, this directory contains the independently verified Next.js and test foundation.
+The starter exposes a visible **Reset demo data** action. Wardrobe data lives in `localStorage` behind one adapter (`src/features/closet/closet-store.ts`). Every garment and image in `public/garments` is fictional.
