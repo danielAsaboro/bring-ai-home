@@ -37,7 +37,7 @@ async function tryLoad(label, options) {
 
 // Listen first. Each capability switches on when its model has loaded, so the
 // binder gets a clear 503 instead of a hanging request while models download.
-const capabilities = { label: null, identify: null, ask: null };
+const capabilities = { label: null, identify: null, ask: null, summary: null };
 const server = createHomebookServer(capabilities);
 server.listen(SERVICE_PORT, "127.0.0.1", () => {
   process.stderr.write(`Homebook QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
@@ -92,7 +92,21 @@ const index = await readFile(path.join(qvacDirectory, "manual-index.json"), "utf
     return null;
   });
 const embedId = index ? await tryLoad("Manual embeddings", { modelSrc: sdk?.GTE_LARGE_FP16, modelType: "embeddings" }) : null;
-const llmId = index ? await tryLoad("Answer model", { modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }) : null;
+const llmId = await tryLoad("Text model", { modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" });
+async function complete(history) {
+  const run = sdk.completion({ modelId: llmId, history, stream: true });
+  let text = "";
+  for await (const token of run.tokenStream) text += token;
+  return text;
+}
+if (llmId) {
+  const { buildSummaryHistory } = await import("../src/features/homebook/maintenance-summary.ts");
+  capabilities.summary = async (request) => ({
+    text: await complete(buildSummaryHistory(request)),
+    model: "LLAMA_3_2_1B_INST_Q4_0",
+  });
+  process.stderr.write("Summary drafting ready\n");
+}
 if (index && embedId && llmId) {
   const { searchManuals } = await import("../src/features/homebook/manual-index.ts");
   const { answerFromManuals } = await import("../src/features/homebook/cited-answer.ts");
@@ -102,12 +116,7 @@ if (index && embedId && llmId) {
       {
         embedQuery: async (text) => (await sdk.embed({ modelId: embedId, text })).embedding,
         search: (vector, ids) => searchManuals(index, vector, { limit: 3, minScore: 0.3, docIds: ids }),
-        complete: async (history) => {
-          const run = sdk.completion({ modelId: llmId, history, stream: true });
-          let text = "";
-          for await (const token of run.tokenStream) text += token;
-          return text;
-        },
+        complete,
       },
       docIds,
     );

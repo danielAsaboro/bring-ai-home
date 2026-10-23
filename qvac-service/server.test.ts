@@ -40,7 +40,7 @@ describe("Homebook local service", () => {
   });
 
   it("turns OCR blocks into proposed label facts", async () => {
-    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null, summary: null });
     const res = await post(`${base}/label`, png);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -49,7 +49,7 @@ describe("Homebook local service", () => {
   });
 
   it("validates a photo identification against Homebook's categories", async () => {
-    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null, summary: null });
     const body = await (await post(`${base}/identify`, png)).json();
     expect(body.identity).toMatchObject({ kind: "proposed-identity", category: "water-heater", name: "Gas water heater" });
   });
@@ -62,20 +62,32 @@ describe("Homebook local service", () => {
       citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
       model: "fixture-llm",
     });
-    const base = await start({ label: null, identify: null, ask });
+    const base = await start({ label: null, identify: null, ask, summary: null });
     const body = await (await post(`${base}/ask`, { question: "How do I relight the pilot?" })).json();
     expect(body.citations[0].page).toBe(4);
     expect((await post(`${base}/ask`, { question: " " })).status).toBe(400);
   });
 
+  it("returns a summary draft with unsupported dates flagged", async () => {
+    // Fixture drafter: hand-written text, not model output.
+    const summary: Capabilities["summary"] = async () => ({ model: "fixture-llm", text: "Flushed 2025-03-10 and 2019-01-01." });
+    const base = await start({ label: null, identify: null, ask: null, summary });
+    const res = await post(`${base}/summary`, {
+      asset: { id: "water-heater", name: "Water heater", installedOn: "2021-03-14" },
+      history: [{ date: "2025-03-10", summary: "Flushed tank." }],
+      tasks: [],
+    });
+    expect(await res.json()).toMatchObject({ kind: "proposed-summary", unsupportedDates: ["2019-01-01"] });
+  });
+
   it("answers 503 when the model is not loaded, and 400 for a bad image", async () => {
-    const base = await start({ label: null, identify: null, ask: null });
+    const base = await start({ label: null, identify: null, ask: null, summary: null });
     expect((await post(`${base}/label`, png)).status).toBe(503);
     expect((await post(`${base}/label`, { ...png, mimeType: "image/gif" })).status).toBe(400);
   });
 
   it("refuses a foreign origin before reading the request", async () => {
-    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null, summary: null });
     expect((await post(`${base}/label`, png, "https://example.com")).status).toBe(403);
   });
 });

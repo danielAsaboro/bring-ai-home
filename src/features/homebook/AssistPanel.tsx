@@ -4,7 +4,7 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import { AssistError, serviceClient, type AssistClient } from "./assist-client";
 import type { AssetIdentity } from "./asset-identity";
-import type { Asset, AssetCategory, FiledDocument } from "./binder";
+import type { Asset, AssetCategory, FiledDocument, MaintenanceTask, ServiceRecord } from "./binder";
 import type { CitedAnswer } from "./cited-answer";
 import type { LabelFact, LabelField } from "./label-facts";
 
@@ -20,11 +20,17 @@ type Status = { state: "idle" } | { state: "working"; what: string } | { state: 
 export function AssistPanel({
   asset,
   manuals = [],
+  history = [],
+  tasks = [],
+  onSaveNotes,
   client = serviceClient,
   onAccept,
 }: {
   asset: Asset;
   manuals?: FiledDocument[];
+  history?: ServiceRecord[];
+  tasks?: MaintenanceTask[];
+  onSaveNotes?: (notes: string) => void;
   client?: AssistClient;
   onAccept: (field: LabelField | "category" | "name", value: string) => void;
 }) {
@@ -57,6 +63,13 @@ export function AssistPanel({
     if (result) setAnswer({ assetId: asset.id, model: result.model, value: result });
   }
 
+  const [summary, setSummary] = useState<{ assetId: string; model: string; text: string; unsupportedDates: string[] } | null>(null);
+
+  async function onSummarise() {
+    const result = await run("Drafting a summary locally…", () => client.summarise({ asset, history, tasks }));
+    if (result) setSummary({ assetId: asset.id, model: result.model, text: result.draft, unsupportedDates: result.unsupportedDates });
+  }
+
   async function onPhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -73,6 +86,7 @@ export function AssistPanel({
     if (result) setFacts({ assetId: asset.id, model: result.model, items: result.facts });
   }
 
+  const visibleSummary = summary?.assetId === asset.id ? summary : null;
   const visibleAnswer = answer?.assetId === asset.id ? answer : null;
   const visibleIdentity = identity?.assetId === asset.id ? identity : null;
   const acceptCategory = (category: AssetCategory) => {
@@ -155,6 +169,47 @@ export function AssistPanel({
           ) : (
             <p>{visibleAnswer.value.message}</p>
           )}
+        </div>
+      ) : null}
+
+      {onSaveNotes ? (
+        <button type="button" onClick={onSummarise} className="rounded border border-emerald-800 px-2 py-0.5">
+          Draft maintenance summary
+        </button>
+      ) : null}
+
+      {visibleSummary && onSaveNotes ? (
+        <div aria-label="Summary draft" role="group" className="space-y-1 rounded border border-stone-300 bg-white p-2">
+          <label htmlFor="summary-draft" className="text-xs text-stone-600">
+            Draft by {visibleSummary.model}. Edit it, then save it to the asset notes.
+          </label>
+          <textarea
+            id="summary-draft"
+            value={visibleSummary.text}
+            onChange={(e) => setSummary({ ...visibleSummary, text: e.target.value })}
+            rows={4}
+            className="w-full rounded border border-stone-400 p-1"
+          />
+          {visibleSummary.unsupportedDates.length > 0 ? (
+            <p role="note" className="text-xs text-red-900">
+              Not in your records: {visibleSummary.unsupportedDates.join(", ")}. Correct or remove before saving.
+            </p>
+          ) : null}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded bg-emerald-800 px-2 py-0.5 text-white"
+              onClick={() => {
+                onSaveNotes(visibleSummary.text.trim());
+                setSummary(null);
+              }}
+            >
+              Save to notes
+            </button>
+            <button type="button" className="rounded border border-stone-400 px-2 py-0.5" onClick={() => setSummary(null)}>
+              Discard
+            </button>
+          </div>
         </div>
       ) : null}
 

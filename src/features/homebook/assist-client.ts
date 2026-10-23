@@ -1,6 +1,8 @@
 import type { AssetIdentity } from "./asset-identity";
 import type { CitedAnswer } from "./cited-answer";
+import type { MaintenanceTask, ServiceRecord, Asset } from "./binder";
 import type { LabelFact } from "./label-facts";
+import type { SummaryDraft } from "./maintenance-summary";
 
 export const SERVICE_URL = "http://127.0.0.1:4319";
 
@@ -45,6 +47,7 @@ export type AssistClient = {
   readLabel(file: File): Promise<{ facts: LabelFact[]; model: string }>;
   identify(file: File): Promise<{ identity: AssetIdentity; model: string }>;
   ask(question: string, docIds: string[]): Promise<CitedAnswer & { model: string }>;
+  summarise(request: { asset: Asset; history: ServiceRecord[]; tasks: MaintenanceTask[] }): Promise<SummaryDraft & { model: string }>;
 };
 
 export const serviceClient: AssistClient = {
@@ -56,5 +59,8 @@ export const serviceClient: AssistClient = {
   },
   async ask(question, docIds) {
     return postJson("/ask", { question, docIds });
+  },
+  async summarise(request) {
+    return postJson("/summary", request);
   },
 };

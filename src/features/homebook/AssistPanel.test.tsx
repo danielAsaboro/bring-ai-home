@@ -37,6 +37,12 @@ function fixtureClient(overrides: Partial<AssistClient> = {}): AssistClient {
       citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
       model: "fixture-llm",
     }),
+    summarise: async () => ({
+      kind: "proposed-summary",
+      draft: "Tank flushed 2025-03-10. Pilot relit 2025-08-22. Anode check due 2027-03-14.",
+      unsupportedDates: [],
+      model: "fixture-llm",
+    }),
     ...overrides,
   } as AssistClient;
 }
@@ -78,6 +84,17 @@ describe("label review", () => {
       "href",
       "/test-files/homebook/aquaterra-at50g-manual.txt",
     );
+  });
+
+  it("saves an edited summary to notes only when a person saves it", async () => {
+    const store = memoryStore();
+    render(<Homebook store={store} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Draft maintenance summary" }));
+    const draft = await screen.findByLabelText(/Draft by fixture-llm/);
+    expect(store.saved).toHaveLength(0);
+    await userEvent.type(draft, " Checked by Sam.");
+    await userEvent.click(screen.getByRole("button", { name: "Save to notes" }));
+    expect(store.saved.at(-1)?.assets[0].notes).toMatch(/Anode check due 2027-03-14\. Checked by Sam\.$/);
   });
 
   it("explains a stopped service and leaves the binder alone", async () => {

@@ -4,6 +4,11 @@ import type { LabelFact, OcrBlock } from "../src/features/homebook/label-facts.t
 import { proposeLabelFacts } from "../src/features/homebook/label-facts.ts";
 import { parseAssetIdentity } from "../src/features/homebook/asset-identity.ts";
 import type { CitedAnswer } from "../src/features/homebook/cited-answer.ts";
+import {
+  parseSummaryDraft,
+  parseSummaryRequest,
+  type SummaryRequest,
+} from "../src/features/homebook/maintenance-summary.ts";
 
 export const SERVICE_PORT = 4319;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
@@ -19,7 +24,10 @@ export type Capabilities = {
   label: LabelReader | null;
   identify: PhotoDescriber | null;
   ask: ManualAnswerer | null;
+  summary: SummaryDrafter | null;
 };
+
+export type SummaryDrafter = (request: SummaryRequest) => Promise<{ text: string; model: string }>;
 
 export function parseQuestion(value: unknown): { question: string; docIds?: string[] } {
   const v = value as { question?: unknown; docIds?: unknown } | null;
@@ -98,6 +106,12 @@ export function createHomebookServer(capabilities: Capabilities) {
       const { question, docIds } = parseQuestion(body);
       if (!capabilities.ask) throw new Unavailable("Manual answers are not available");
       return { question, ...(await capabilities.ask(question, docIds)) };
+    },
+    "/summary": async (body) => {
+      const request = parseSummaryRequest(body);
+      if (!capabilities.summary) throw new Unavailable("Summary drafting is not available");
+      const { text, model } = await capabilities.summary(request);
+      return { assetId: request.asset.id, model, ...parseSummaryDraft(text, request) };
     },
   };
 
