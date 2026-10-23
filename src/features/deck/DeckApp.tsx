@@ -20,21 +20,23 @@ import {
   type Library,
   type Treatment,
 } from "./deck";
+import { createAssistClient, type AssistClient } from "./assist-client";
+import { NotesPanel } from "./NotesPanel";
 import { createLocalStore, type LibraryStore } from "./storage";
 
 const noopSubscribe = () => () => undefined;
 
-export function DeckApp({ store }: { store?: LibraryStore }) {
+export function DeckApp({ store, client }: { store?: LibraryStore; client?: AssistClient }) {
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   if (!mounted) return <p className="p-6">Shuffling the deck…</p>;
-  return <DeckView store={store ?? createLocalStore()} />;
+  return <DeckView store={store ?? createLocalStore()} client={client ?? createAssistClient()} />;
 }
 
 const field = "rounded border border-slate-400 bg-white px-2 py-1 text-sm text-slate-900";
 const button = "rounded bg-indigo-800 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-900";
 const ghost = "rounded border border-slate-400 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-40";
 
-function DeckView({ store }: { store: LibraryStore }) {
+function DeckView({ store, client }: { store: LibraryStore; client: AssistClient }) {
   const [library, setLibrary] = useState<Library>(() => store.load());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [presenting, setPresenting] = useState(false);
@@ -88,6 +90,7 @@ function DeckView({ store }: { store: LibraryStore }) {
         </header>
 
         <PacingView deck={deck} />
+        <NotesPanel client={client} />
 
         <div className="grid gap-3 lg:grid-cols-3">
           {deck.rounds.map((round, i) => (
