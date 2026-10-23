@@ -3,20 +3,31 @@
 import { useState } from "react";
 
 import { formatTimestamp } from "./narration";
+import type { ConditionsResult } from "./conditions";
 import type { StepProposal } from "./proposals";
-import { proposeSteps, readScreenshot, transcribeRecording } from "./service-client";
+import { proposeConditions, proposeSteps, readScreenshot, transcribeRecording } from "./service-client";
 import type { ProposeStepsResponse, ReadScreenshotResponse, TranscribeResponse } from "./service-contract";
 
 type Status = { kind: "idle" } | { kind: "working"; label: string } | { kind: "error"; code: string; message: string };
 
 // Evidence from a demonstration. Nothing here changes the tape by itself.
-export function DemonstrationPanel({ onAddFrames }: { onAddFrames: (steps: StepProposal[]) => void }) {
+export type AcceptedConditions = { parameters: { name: string; example: string }[]; preconditions: string[]; stopConditions: string[] };
+
+export function DemonstrationPanel({
+  onAddFrames,
+  onAddConditions = () => {},
+}: {
+  onAddFrames: (steps: StepProposal[]) => void;
+  onAddConditions?: (accepted: AcceptedConditions) => void;
+}) {
   const [recording, setRecording] = useState<File | null>(null);
   const [narration, setNarration] = useState<TranscribeResponse | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [proposed, setProposed] = useState<ProposeStepsResponse | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [conditions, setConditions] = useState<{ model: string; result: ConditionsResult } | null>(null);
+  const [chosenConditions, setChosenConditions] = useState<Set<string>>(new Set());
   const [notes, setNotes] = useState<(ReadScreenshotResponse & { fileName: string })[]>([]);
   const btn = "rounded border border-stone-700 px-3 py-1 text-sm disabled:opacity-40";
 
@@ -58,6 +69,40 @@ export function DemonstrationPanel({ onAddFrames }: { onAddFrames: (steps: StepP
     } else {
       setStatus({ kind: "error", code: result.code, message: result.message });
     }
+  }
+
+  async function proposeInputs() {
+    if (!narration) return;
+    setStatus({ kind: "working", label: "Looking for inputs and stop conditions on this machine…" });
+    const result = await proposeConditions(narration.narration.transcript);
+    if (result.ok) {
+      setConditions(result.value);
+      setChosenConditions(new Set());
+      setStatus({ kind: "idle" });
+    } else {
+      setStatus({ kind: "error", code: result.code, message: result.message });
+    }
+  }
+
+  function addChosenConditions() {
+    if (!conditions) return;
+    const r = conditions.result;
+    onAddConditions({
+      parameters: r.parameters.filter((p) => chosenConditions.has(`param:${p.name}`)),
+      preconditions: r.preconditions.filter((c) => chosenConditions.has(`pre:${c.text}`)).map((c) => c.text),
+      stopConditions: r.stopConditions.filter((c) => chosenConditions.has(`stop:${c.text}`)).map((c) => c.text),
+    });
+    setConditions(null);
+    setChosenConditions(new Set());
+  }
+
+  function toggle(set: (fn: (s: Set<string>) => Set<string>) => void, key: string, on: boolean) {
+    set((c) => {
+      const next = new Set(c);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   }
 
   function addChosen() {
@@ -107,6 +152,47 @@ export function DemonstrationPanel({ onAddFrames }: { onAddFrames: (steps: StepP
           {status.message} <span className="font-mono text-xs">({status.code})</span>
         </p>
       )}
+      {conditions && (
+        <div className="space-y-2">
+          <p className="text-xs text-stone-400">Proposed by {conditions.model} · choose what belongs on the tape</p>
+          <ul aria-label="Proposed conditions" className="space-y-1 text-sm">
+            {[
+              ...conditions.result.parameters.map((p) => ({ key: `param:${p.name}`, label: `Parameter ${p.name} = ${p.example}`, quote: p.quote })),
+              ...conditions.result.preconditions.map((c) => ({ key: `pre:${c.text}`, label: `Before starting: ${c.text}`, quote: c.quote })),
+              ...conditions.result.stopConditions.map((c) => ({ key: `stop:${c.text}`, label: `Stop if: ${c.text}`, quote: c.quote })),
+            ].map((item) => (
+              <li key={item.key}>
+                <label className="flex gap-2">
+                  <input
+                    type="checkbox"
+                    checked={chosenConditions.has(item.key)}
+                    onChange={(e) => toggle(setChosenConditions, item.key, e.target.checked)}
+                  />
+                  <span>
+                    {item.label}
+                    <span className="block text-xs text-stone-400">“{item.quote}”</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {conditions.result.rejected.length > 0 && (
+            <details className="text-xs text-stone-400">
+              <summary>{conditions.result.rejected.length} items were held back</summary>
+              <ul>
+                {conditions.result.rejected.map((r, i) => (
+                  <li key={i}>
+                    {r.item}: {r.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <button type="button" className={btn} disabled={chosenConditions.size === 0} onClick={addChosenConditions}>
+            Add {chosenConditions.size} selected items
+          </button>
+        </div>
+      )}
       {notes.length > 0 && (
         <ul aria-label="Screen notes" className="space-y-1 text-sm">
           {notes.map((n) => (
@@ -134,6 +220,9 @@ export function DemonstrationPanel({ onAddFrames }: { onAddFrames: (steps: StepP
           </ol>
           <button type="button" className={`${btn} mt-2`} disabled={status.kind === "working"} onClick={propose}>
             Propose frames
+          </button>{" "}
+          <button type="button" className={`${btn} mt-2`} disabled={status.kind === "working"} onClick={proposeInputs}>
+            Propose inputs and stop conditions
           </button>
         </div>
       )}

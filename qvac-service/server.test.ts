@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { WEEKLY_REPORT_NARRATION_FIXTURE } from "../src/features/replay/fixtures/narration.fixture";
-import { STEPS_OUTPUT_FIXTURE } from "../src/features/replay/fixtures/model-output.fixture";
+import { CONDITIONS_OUTPUT_FIXTURE, STEPS_OUTPUT_FIXTURE } from "../src/features/replay/fixtures/model-output.fixture";
 import { createReplayServer, type ServiceModels } from "./server";
 
 const closers: (() => void)[] = [];
@@ -117,5 +117,21 @@ describe("replay QVAC service boundary", () => {
     const bad = await fetch(`${prose}/v1/propose-steps`, { method: "POST", body: JSON.stringify({ transcript }) });
     expect(bad.status).toBe(422);
     expect((await bad.json()).error.code).toBe("unusable_output");
+  });
+
+  it("proposes conditions with their own schema and gate", async () => {
+    const drafter = {
+      modelState: () => ({ kind: "llm", id: "LLAMA_3_2_1B_INST_Q4_0", state: "ready" as const }),
+      complete: async (_h: unknown, schema: { name: string }) => {
+        expect(schema.name).toBe("conditions");
+        return CONDITIONS_OUTPUT_FIXTURE; // FIXTURE string, not a model answer
+      },
+    };
+    const url = await start({ drafter });
+    const transcript = WEEKLY_REPORT_NARRATION_FIXTURE.map((s) => s.text).join(" ");
+    const res = await fetch(`${url}/v1/propose-conditions`, { method: "POST", body: JSON.stringify({ transcript }) });
+    const body = await res.json();
+    expect(body.result.parameters.map((p: { name: string }) => p.name)).toEqual(["week_start"]);
+    expect(body.result.rejected).toHaveLength(2);
   });
 });

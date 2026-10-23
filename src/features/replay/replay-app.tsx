@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { mergeConditions } from "./conditions";
 import { DemonstrationPanel } from "./demonstration-panel";
 import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
 import {
@@ -198,6 +199,7 @@ function TapeEditor({
             onChange(steps.reduce((t, s) => addStep(t, { title: s.title, detail: s.detail }, now()), tape)),
           )
         }
+        onAddConditions={(accepted) => onChange(updateTape(tape, mergeConditions(tape, accepted), now()))}
       />
       <ol aria-label="Frames" className="space-y-2">
         {tape.steps.map((s, i) => (
@@ -280,7 +282,14 @@ function TapeEditor({
   );
 }
 
-function ListField({ label, value, onCommit }: { label: string; value: string; onCommit: (text: string) => void }) {
+type ListFieldProps = { label: string; value: string; onCommit: (text: string) => void };
+
+// Remount when the saved value changes (for example after accepting proposals), so the draft follows it.
+function ListField(props: ListFieldProps) {
+  return <ListFieldDraft key={props.value} {...props} />;
+}
+
+function ListFieldDraft({ label, value, onCommit }: ListFieldProps) {
   const [draft, setDraft] = useState(value);
   return (
     <label className="block text-sm">

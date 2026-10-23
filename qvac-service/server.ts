@@ -4,10 +4,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildConditionsHistory, CONDITIONS_JSON_SCHEMA, parseConditions } from "../src/features/replay/conditions.ts";
 import { toNarration, type NarrationSegment } from "../src/features/replay/narration.ts";
 import { buildStepsHistory, parseStepProposals, STEPS_JSON_SCHEMA, type ChatMessage } from "../src/features/replay/proposals.ts";
 import { parseScreenNote, SCREEN_NOTE_PROMPT } from "../src/features/replay/screen-notes.ts";
 import {
+  parseProposeConditionsRequest,
   parseProposeStepsRequest,
   parseReadScreenshotRequest,
   parseTranscribeRequest,
@@ -136,6 +138,19 @@ export function createReplayServer(models: ServiceModels) {
       const raw = await drafter.complete(buildStepsHistory(parsed.value), { name: "steps", schema: STEPS_JSON_SCHEMA });
       try {
         return { model: drafter.modelState().id, raw, result: parseStepProposals(raw, parsed.value.transcript) };
+      } catch (cause) {
+        throw new RequestError(422, "unusable_output", (cause as Error).message);
+      }
+    });
+    routes.set("/v1/propose-conditions", async (req) => {
+      const parsed = parseProposeConditionsRequest(await readJson(req, 100_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const raw = await drafter.complete(buildConditionsHistory(parsed.value.transcript), {
+        name: "conditions",
+        schema: CONDITIONS_JSON_SCHEMA,
+      });
+      try {
+        return { model: drafter.modelState().id, raw, result: parseConditions(raw, parsed.value.transcript) };
       } catch (cause) {
         throw new RequestError(422, "unusable_output", (cause as Error).message);
       }

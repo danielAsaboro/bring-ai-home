@@ -1,5 +1,6 @@
 // Shapes that cross the loopback boundary between the browser and the QVAC service.
 // JSON from another process can be anything, so both sides validate at runtime.
+import type { ConditionsResult } from "./conditions.ts";
 import type { Narration } from "./narration.ts";
 import type { ProposalResult } from "./proposals.ts";
 import { imageExtension, type ScreenNote } from "./screen-notes.ts";
@@ -95,4 +96,19 @@ export function parseProposeStepsResponse(json: unknown): Parsed<ProposeStepsRes
     return { ok: false, message: "Proposal response is malformed" };
   }
   return { ok: true, value: json as ProposeStepsResponse };
+}
+
+export type ProposeConditionsResponse = { model: string; raw: string; result: ConditionsResult };
+
+export function parseProposeConditionsRequest(json: unknown): Parsed<{ transcript: string }> {
+  if (!isRecord(json) || !nonEmptyString(json.transcript, 20_000)) return { ok: false, message: "transcript is required" };
+  return { ok: true, value: { transcript: json.transcript } };
+}
+
+export function parseProposeConditionsResponse(json: unknown): Parsed<ProposeConditionsResponse> {
+  const r = isRecord(json) ? json.result : null;
+  if (!isRecord(r) || !Array.isArray(r.parameters) || !Array.isArray(r.preconditions) || !Array.isArray(r.stopConditions)) {
+    return { ok: false, message: "Conditions response is malformed" };
+  }
+  return { ok: true, value: json as ProposeConditionsResponse };
 }

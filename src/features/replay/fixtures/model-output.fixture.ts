@@ -11,3 +11,15 @@ export const STEPS_OUTPUT_FIXTURE = JSON.stringify({
     { title: "Publish to the team page", detail: "", quote: "publish it to the team page" },
   ],
 });
+
+export const CONDITIONS_OUTPUT_FIXTURE = JSON.stringify({
+  parameters: [
+    { name: "weekStart", example: "September 28th", quote: "the week starting September 28th" },
+    { name: "workspace", example: "Finance", quote: "pick the Operations workspace" },
+  ],
+  preconditions: [{ text: "You can open the Harbor dashboard", quote: "I open the Harbor dashboard" }],
+  stopConditions: [
+    { text: "The export comes back empty", quote: "If the export comes back empty, I stop and ask in the ops channel" },
+    { text: "The dashboard shows an error", quote: "if the dashboard shows an error I stop" },
+  ],
+});

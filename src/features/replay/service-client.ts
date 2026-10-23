@@ -1,10 +1,12 @@
 import {
+  parseProposeConditionsResponse,
   parseProposeStepsResponse,
   parseReadScreenshotResponse,
   parseServiceError,
   parseTranscribeResponse,
   SERVICE_URL,
   type Parsed,
+  type ProposeConditionsResponse,
   type ProposeStepsRequest,
   type ProposeStepsResponse,
   type ReadScreenshotResponse,
@@ -75,4 +77,8 @@ export async function readScreenshot(
 
 export function proposeSteps(body: ProposeStepsRequest, fetchImpl?: typeof fetch): Promise<ClientResult<ProposeStepsResponse>> {
   return postJson("/v1/propose-steps", body, parseProposeStepsResponse, fetchImpl);
+}
+
+export function proposeConditions(transcript: string, fetchImpl?: typeof fetch): Promise<ClientResult<ProposeConditionsResponse>> {
+  return postJson("/v1/propose-conditions", { transcript }, parseProposeConditionsResponse, fetchImpl);
 }
