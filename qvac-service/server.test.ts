@@ -2,12 +2,17 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createReceiptServer, unavailableReader, type ReceiptReader } from "./server.ts";
+import {
+  createReceiptServer,
+  unavailableReader,
+  type ReceiptReader,
+  type ServiceModels,
+} from "./server.ts";
 
 const servers: ReturnType<typeof createReceiptServer>[] = [];
 
-async function start(reader: ReceiptReader) {
-  const server = createReceiptServer(reader);
+async function start(reader: ReceiptReader, models: ServiceModels = {}) {
+  const server = createReceiptServer(reader, models);
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -64,5 +69,21 @@ describe("local receipt service", () => {
     });
 
     expect(response.status).toBe(403);
+  });
+
+  it("validates model text before returning a proposal (hand-written model text)", async () => {
+    const complete = vi.fn(async () => '{"merchant":"Corner Cafe","category":"Coffee"}');
+    const url = await start(unavailableReader, {
+      proposer: { modelState: () => ({ kind: "llm", id: "LLAMA_3_2_1B_INST_Q4_0", state: "ready" }), complete },
+    });
+    const response = await fetch(`${url}/v1/propose`, {
+      method: "POST",
+      body: JSON.stringify({ merchantText: "CORNER CAFE", lineDescriptions: ["Flat white"] }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result).toEqual({ ok: false, reason: 'Category "Coffee" is not on the list' });
+    expect(JSON.stringify(complete.mock.calls[0])).not.toMatch(/\d+\.\d{2}/);
   });
 });

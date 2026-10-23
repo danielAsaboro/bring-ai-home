@@ -7,9 +7,20 @@ import { cornerCafeOcrFixture } from "@/fixtures/corner-cafe-ocr.fixture";
 import type { ReceiptClient } from "./receipt-client";
 import { ReceiptInbox } from "./receipt-inbox";
 
-function fakeClient(read: ReceiptClient["readReceipt"]): ReceiptClient {
-  return { health: vi.fn(), readReceipt: read };
+function fakeClient(
+  read: ReceiptClient["readReceipt"],
+  propose: ReceiptClient["propose"] = vi.fn(),
+): ReceiptClient {
+  return { health: vi.fn(), readReceipt: read, propose };
 }
+
+const readFixture: ReceiptClient["readReceipt"] = async (input) => ({
+  receiptId: input.receiptId,
+  sourceDigest: "8bc01b420180f725",
+  ocrModel: "OCR_LATIN",
+  ocrMs: null,
+  blocks: cornerCafeOcrFixture,
+});
 
 afterEach(() => {
   cleanup();
@@ -49,5 +60,39 @@ describe("receipt pocket", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("OCR is not connected yet");
     expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  });
+
+  it("shows a validated proposal without applying it (hand-written model text)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]))));
+    const propose = vi.fn(async () => ({
+      model: "LLAMA_3_2_1B_INST_Q4_0",
+      raw: '{"merchant":"Corner Cafe","category":"Eating out"}',
+      result: { ok: true as const, proposal: { merchant: "Corner Cafe", category: "Eating out" } },
+    }));
+    render(<ReceiptInbox client={fakeClient(readFixture, propose)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Read sample receipt" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Propose merchant and category" }));
+
+    expect(propose).toHaveBeenCalledWith({
+      merchantText: "CORNER CAFE",
+      lineDescriptions: ["Flat white", "Croissamt", "Sparkling water"],
+    });
+    expect(await screen.findByText(/Proposal \(not applied\)/)).toHaveTextContent("Corner Cafe · Eating out");
+  });
+
+  it("shows a rejected proposal with its raw text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]))));
+    const propose = vi.fn(async () => ({
+      model: "LLAMA_3_2_1B_INST_Q4_0",
+      raw: '{"merchant":"Corner Cafe","category":"Coffee"}',
+      result: { ok: false as const, reason: 'Category "Coffee" is not on the list' },
+    }));
+    render(<ReceiptInbox client={fakeClient(readFixture, propose)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Read sample receipt" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Propose merchant and category" }));
+
+    expect(await screen.findByText(/Proposal rejected/)).toHaveTextContent("not on the list");
   });
 });

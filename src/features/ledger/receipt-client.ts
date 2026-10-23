@@ -1,5 +1,7 @@
 import {
   parseHealthResponse,
+  parseProposeResponse,
+  type ProposeResponse,
   parseReadReceiptResponse,
   parseServiceError,
   type HealthResponse,
@@ -12,6 +14,10 @@ export type ReceiptClient = {
     input: { receiptId: string; fileName: string; pngBytes: ArrayBuffer },
     signal?: AbortSignal,
   ): Promise<ReadReceiptResponse>;
+  propose(
+    input: { merchantText: string; lineDescriptions: string[] },
+    signal?: AbortSignal,
+  ): Promise<ProposeResponse>;
 };
 
 function bytesToBase64(bytes: ArrayBuffer): string {
@@ -68,6 +74,19 @@ export function createReceiptClient(
       });
       const parsed = parseReadReceiptResponse(
         await readJson(response, "Local service returned an invalid receipt response"),
+      );
+      if (!parsed.ok) throw new Error(parsed.message);
+      return parsed.value;
+    },
+    async propose(input, signal) {
+      const response = await fetchImpl(`${baseUrl}/v1/propose`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+        signal,
+      });
+      const parsed = parseProposeResponse(
+        await readJson(response, "Local service returned an invalid proposal response"),
       );
       if (!parsed.ok) throw new Error(parsed.message);
       return parsed.value;

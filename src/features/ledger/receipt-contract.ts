@@ -8,7 +8,7 @@ export type OcrBlock = {
 };
 
 export type ModelState = {
-  kind: "ocr";
+  kind: "ocr" | "llm" | "embeddings";
   id: string;
   state: "not_loaded" | "loading" | "ready" | "error";
 };
@@ -115,4 +115,39 @@ export function parseServiceError(value: unknown): ServiceError | null {
   const { code, message } = value.error;
   if (!isNonEmptyString(code) || !isNonEmptyString(message)) return null;
   return { error: { code, message } };
+}
+
+export type ProposeResponse = {
+  model: string;
+  raw: string;
+  result: { ok: true; proposal: { merchant: string; category: string } } | { ok: false; reason: string };
+};
+
+export function parseProposeRequest(
+  value: unknown,
+): Result<{ merchantText: string; lineDescriptions: string[] }> {
+  if (!isRecord(value)) return { ok: false, message: "Request body must be a JSON object" };
+  const { merchantText, lineDescriptions } = value;
+  if (typeof merchantText !== "string" || merchantText.length > 200) {
+    return { ok: false, message: "merchantText must be a string under 200 characters" };
+  }
+  if (
+    !Array.isArray(lineDescriptions) ||
+    lineDescriptions.length > 50 ||
+    !lineDescriptions.every((d) => typeof d === "string" && d.length <= 200)
+  ) {
+    return { ok: false, message: "lineDescriptions must be up to 50 short strings" };
+  }
+  return { ok: true, value: { merchantText, lineDescriptions: lineDescriptions as string[] } };
+}
+
+export function parseProposeResponse(value: unknown): Result<ProposeResponse> {
+  if (!isRecord(value) || !isNonEmptyString(value.model) || typeof value.raw !== "string") {
+    return { ok: false, message: "Invalid proposal response" };
+  }
+  const result = value.result;
+  if (!isRecord(result) || typeof result.ok !== "boolean") {
+    return { ok: false, message: "Invalid proposal result" };
+  }
+  return { ok: true, value: value as ProposeResponse };
 }

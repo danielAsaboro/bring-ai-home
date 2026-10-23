@@ -2,10 +2,18 @@
 
 import { useState } from "react";
 
+import { proposalInputFromDraft } from "./categories";
 import { draftFromOcr, formatCents, type DraftTransaction, type Evidence } from "./draft-transactions";
 import { createReceiptClient, type ReceiptClient } from "./receipt-client";
+import type { ProposeResponse } from "./receipt-contract";
 
 const SAMPLE_URL = "/test-files/ledger/receipt-corner-cafe.png";
+
+type ProposalStatus =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "error"; message: string }
+  | { kind: "done"; response: ProposeResponse };
 
 type Status =
   | { kind: "idle" }
@@ -25,13 +33,24 @@ function Source({ evidence }: { evidence: Evidence<unknown> | null }) {
 
 export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [proposal, setProposal] = useState<ProposalStatus>({ kind: "idle" });
+  const api = () => client ?? createReceiptClient();
+
+  async function propose(draft: DraftTransaction) {
+    setProposal({ kind: "working" });
+    try {
+      setProposal({ kind: "done", response: await api().propose(proposalInputFromDraft(draft)) });
+    } catch (error) {
+      setProposal({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   async function read(fileName: string, bytes: ArrayBuffer) {
     setStatus({ kind: "reading" });
+    setProposal({ kind: "idle" });
     try {
-      const api = client ?? createReceiptClient();
       const receiptId = `${Date.now()}`;
-      const result = await api.readReceipt({ receiptId, fileName, pngBytes: bytes });
+      const result = await api().readReceipt({ receiptId, fileName, pngBytes: bytes });
       setStatus({
         kind: "ready",
         draft: draftFromOcr({
@@ -123,6 +142,28 @@ export function ReceiptInbox({ client }: { client?: ReceiptClient }) {
               ))}
             </tbody>
           </table>
+          <section aria-label="Proposal">
+            <button
+              type="button"
+              onClick={() => propose(status.draft)}
+              disabled={proposal.kind === "working"}
+            >
+              Propose merchant and category
+            </button>
+            {proposal.kind === "working" && <p role="status">Asking the local model…</p>}
+            {proposal.kind === "error" && <p role="alert">Could not propose: {proposal.message}</p>}
+            {proposal.kind === "done" && proposal.response.result.ok && (
+              <p>
+                Proposal (not applied): <strong>{proposal.response.result.proposal.merchant}</strong> ·{" "}
+                {proposal.response.result.proposal.category} <small>by {proposal.response.model}</small>
+              </p>
+            )}
+            {proposal.kind === "done" && !proposal.response.result.ok && (
+              <p role="alert">
+                Proposal rejected: {proposal.response.result.reason}. Raw output: <code>{proposal.response.raw}</code>
+              </p>
+            )}
+          </section>
         </article>
       )}
     </section>

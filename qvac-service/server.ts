@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import { buildProposalHistory, parseProposal } from "../src/features/ledger/categories.ts";
 import {
+  parseProposeRequest,
   parseReadReceiptRequest,
   type ModelState,
   type OcrBlock,
@@ -14,6 +16,14 @@ export type ReceiptReader = {
   modelState(): ModelState;
   read(png: Buffer): Promise<{ blocks: OcrBlock[]; ocrMs: number | null }>;
 };
+
+// Text generation behind its own door. It returns raw text; the server validates it.
+export type Proposer = {
+  modelState(): ModelState;
+  complete(history: { role: string; content: string }[]): Promise<string>;
+};
+
+export type ServiceModels = { proposer?: Proposer };
 
 export const unavailableReader: ReceiptReader = {
   modelState: () => ({ kind: "ocr", id: "not-configured", state: "not_loaded" }),
@@ -49,7 +59,7 @@ async function readBody(req: IncomingMessage, limit: number): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export function createReceiptServer(reader: ReceiptReader) {
+export function createReceiptServer(reader: ReceiptReader, models: ServiceModels = {}) {
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (origin !== undefined && !LOOPBACK_ORIGIN.test(origin)) {
@@ -66,7 +76,9 @@ export function createReceiptServer(reader: ReceiptReader) {
       return;
     }
     if (req.method === "GET" && req.url === "/health") {
-      send(res, 200, { service: "ready", models: [reader.modelState()] }, origin);
+      const states = [reader.modelState()];
+      if (models.proposer) states.push(models.proposer.modelState());
+      send(res, 200, { service: "ready", models: states }, origin);
       return;
     }
     if (req.method === "POST" && req.url === "/v1/read-receipt") {
@@ -105,6 +117,33 @@ export function createReceiptServer(reader: ReceiptReader) {
         }
         const message = cause instanceof Error ? cause.message : String(cause);
         send(res, 500, error("ocr_failed", message), origin);
+      }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/propose" && models.proposer) {
+      let json: unknown;
+      try {
+        json = JSON.parse(await readBody(req, 100_000));
+      } catch {
+        send(res, 400, error("invalid_json", "Body must be JSON"), origin);
+        return;
+      }
+      const parsed = parseProposeRequest(json);
+      if (!parsed.ok) {
+        send(res, 400, error("invalid_request", parsed.message), origin);
+        return;
+      }
+      try {
+        const raw = await models.proposer.complete(buildProposalHistory(parsed.value));
+        send(
+          res,
+          200,
+          { model: models.proposer.modelState().id, raw, result: parseProposal(raw) },
+          origin,
+        );
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        send(res, 500, error("llm_failed", message), origin);
       }
       return;
     }
