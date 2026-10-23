@@ -21,7 +21,8 @@ export function passesPrefilter(watcher: Watcher, frame: Frame): boolean {
   return (
     frame.sourceId === watcher.sourceId &&
     inWindow(frame.at, watcher.fromHour, watcher.toHour) &&
-    frame.motion >= watcher.minMotion
+    frame.motion >= watcher.minMotion &&
+    frame.motion <= (watcher.maxMotion ?? 1)
   );
 }
 

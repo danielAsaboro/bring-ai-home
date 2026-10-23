@@ -7,6 +7,7 @@ import { ANY_SOURCE, describeRule, type Rule } from "./rules";
 import { findFrame, sampleSources } from "./sources";
 import { createStore, defaultState, type LookoutState } from "./store";
 import { checkFrame } from "./check-client";
+import { reviewedPrecision } from "./measure";
 import { decideHit, evaluateWatcher, mergeHits, type WatchHit } from "./watch-eval";
 import type { WatcherProposal } from "./watcher";
 import { proposeWatcher, type ProposeOutcome } from "./watcher-client";
@@ -268,11 +269,32 @@ export function ControlRoom() {
           </div>
         ) : null}
         <ul aria-label="Active watchers" className="space-y-1">
-          {state.watchers.map((w) => (
-            <li key={w.id} className="flex items-center gap-2">
+          {state.watchers.map((w) => {
+            const reviewed = reviewedPrecision(state.hits, w.id);
+            return (
+            <li key={w.id} className="flex flex-wrap items-center gap-2">
               <span>
                 {sourceName(w.sourceId)}: “{w.condition}”
               </span>
+              <span className="text-sm text-slate-600">
+                Reviewed: {reviewed.confirmed} confirmed, {reviewed.dismissed} dismissed, {reviewed.pending} pending
+              </span>
+              <label className="text-sm">
+                Skip frames with motion above (%)
+                <input
+                  aria-label={`Motion limit for ${w.condition}`}
+                  inputMode="numeric"
+                  className="ml-1 w-16 border"
+                  value={Math.round((w.maxMotion ?? 1) * 100)}
+                  onChange={(e) => {
+                    const pct = Math.min(Math.max(Number(e.target.value) || 0, 0), 100);
+                    update({
+                      ...state,
+                      watchers: state.watchers.map((x) => (x.id === w.id ? { ...x, maxMotion: pct / 100 } : x)),
+                    });
+                  }}
+                />
+              </label>
               <button
                 className="text-sm underline"
                 onClick={() => update({ ...state, watchers: state.watchers.filter((x) => x.id !== w.id) })}
@@ -280,7 +302,8 @@ export function ControlRoom() {
                 Remove
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       </section>
 

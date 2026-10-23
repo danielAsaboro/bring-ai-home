@@ -10,9 +10,11 @@ export type Watcher = {
   fromHour: number;
   toHour: number;
   minMotion: number;
+  // Set by a person while tuning (lesson 06). Frames moving more are skipped.
+  maxMotion?: number;
 };
 
-export type WatcherProposal = Omit<Watcher, "id">;
+export type WatcherProposal = Omit<Watcher, "id" | "maxMotion">;
 
 export const WATCHER_JSON_SCHEMA = {
   type: "object",
