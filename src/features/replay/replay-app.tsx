@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { DemonstrationPanel } from "./demonstration-panel";
 import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
 import {
   addStep,
@@ -191,6 +192,7 @@ function TapeEditor({
           onChange={(e) => onChange(updateTape(tape, { summary: e.target.value }, now()))}
         />
       </label>
+      <DemonstrationPanel />
       <ol aria-label="Frames" className="space-y-2">
         {tape.steps.map((s, i) => (
           <li key={s.id} className="rounded border border-stone-800 p-2">
