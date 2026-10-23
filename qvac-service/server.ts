@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { toNarration, type NarrationSegment } from "../src/features/replay/narration.ts";
+import { buildStepsHistory, parseStepProposals, STEPS_JSON_SCHEMA, type ChatMessage } from "../src/features/replay/proposals.ts";
 import { parseScreenNote, SCREEN_NOTE_PROMPT } from "../src/features/replay/screen-notes.ts";
 import {
+  parseProposeStepsRequest,
   parseReadScreenshotRequest,
   parseTranscribeRequest,
   type ModelState,
@@ -24,7 +26,13 @@ export type Viewer = {
   describe(imagePath: string, prompt: string): Promise<string>;
 };
 
-export type ServiceModels = { transcriber?: Transcriber; viewer?: Viewer };
+// Text generation constrained by a JSON schema. It returns raw text; the server validates it.
+export type Drafter = {
+  modelState(): ModelState;
+  complete(history: ChatMessage[], schema: { name: string; schema: Record<string, unknown> }): Promise<string>;
+};
+
+export type ServiceModels = { transcriber?: Transcriber; viewer?: Viewer; drafter?: Drafter };
 
 // Write request bytes to a private temp file for the length of one model call.
 async function withTempFile<T>(name: string, bytes: Buffer, run: (filePath: string) => Promise<T>) {
@@ -116,6 +124,20 @@ export function createReplayServer(models: ServiceModels) {
         return { sourceDigest, model: viewer.modelState().id, note: parseScreenNote(raw) };
       } catch (cause) {
         throw new RequestError(422, "empty_note", (cause as Error).message);
+      }
+    });
+  }
+
+  if (models.drafter) {
+    const drafter = models.drafter;
+    routes.set("/v1/propose-steps", async (req) => {
+      const parsed = parseProposeStepsRequest(await readJson(req, 100_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const raw = await drafter.complete(buildStepsHistory(parsed.value), { name: "steps", schema: STEPS_JSON_SCHEMA });
+      try {
+        return { model: drafter.modelState().id, raw, result: parseStepProposals(raw, parsed.value.transcript) };
+      } catch (cause) {
+        throw new RequestError(422, "unusable_output", (cause as Error).message);
       }
     });
   }

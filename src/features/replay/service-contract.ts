@@ -1,6 +1,7 @@
 // Shapes that cross the loopback boundary between the browser and the QVAC service.
 // JSON from another process can be anything, so both sides validate at runtime.
 import type { Narration } from "./narration.ts";
+import type { ProposalResult } from "./proposals.ts";
 import { imageExtension, type ScreenNote } from "./screen-notes.ts";
 
 export const SERVICE_PORT = 4319;
@@ -74,4 +75,24 @@ export function parseReadScreenshotResponse(json: unknown): Parsed<ReadScreensho
     return { ok: false, message: "Screen note is malformed" };
   }
   return { ok: true, value: json as ReadScreenshotResponse };
+}
+
+export type ProposeStepsRequest = { transcript: string; screenNotes: string[] };
+export type ProposeStepsResponse = { model: string; raw: string; result: ProposalResult };
+
+export function parseProposeStepsRequest(json: unknown): Parsed<ProposeStepsRequest> {
+  if (!isRecord(json)) return { ok: false, message: "Body must be an object" };
+  if (!nonEmptyString(json.transcript, 20_000)) return { ok: false, message: "transcript is required" };
+  const notes = json.screenNotes ?? [];
+  if (!Array.isArray(notes) || notes.length > 20 || !notes.every((n) => nonEmptyString(n, 1000))) {
+    return { ok: false, message: "screenNotes must be up to 20 strings" };
+  }
+  return { ok: true, value: { transcript: json.transcript, screenNotes: notes as string[] } };
+}
+
+export function parseProposeStepsResponse(json: unknown): Parsed<ProposeStepsResponse> {
+  if (!isRecord(json) || !isRecord(json.result) || !Array.isArray(json.result.proposals) || !Array.isArray(json.result.rejected)) {
+    return { ok: false, message: "Proposal response is malformed" };
+  }
+  return { ok: true, value: json as ProposeStepsResponse };
 }

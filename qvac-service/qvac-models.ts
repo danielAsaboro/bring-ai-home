@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { ModelState } from "../src/features/replay/service-contract.ts";
-import type { Transcriber, Viewer } from "./server.ts";
+import type { Drafter, Transcriber, Viewer } from "./server.ts";
 
 type Sdk = typeof import("@qvac/sdk");
 
@@ -92,6 +92,26 @@ export function createQvacViewer(): Viewer & { close(): Promise<void> } {
         modelId,
         history: [{ role: "user", content: prompt, attachments: [{ path: imagePath }] }],
         stream: true,
+      });
+      return (await run.final).contentText;
+    },
+    close: model.close,
+  };
+}
+
+export function createQvacDrafter(): Drafter & { close(): Promise<void> } {
+  const model = lazyModel("llm", "LLAMA_3_2_1B_INST_Q4_0", (q) =>
+    q.loadModel({ modelSrc: q.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }),
+  );
+  return {
+    modelState: model.modelState,
+    async complete(history, schema) {
+      const modelId = await model.ensure();
+      const run = (await sdk()).completion({
+        modelId,
+        history,
+        stream: true,
+        responseFormat: { type: "json_schema", json_schema: schema },
       });
       return (await run.final).contentText;
     },

@@ -2,15 +2,16 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { WEEKLY_REPORT_NARRATION_FIXTURE } from "../src/features/replay/fixtures/narration.fixture";
+import { STEPS_OUTPUT_FIXTURE } from "../src/features/replay/fixtures/model-output.fixture";
 import { createReplayServer, type ServiceModels } from "./server";
 
-let close: (() => void) | undefined;
-afterEach(() => close?.());
+const closers: (() => void)[] = [];
+afterEach(() => closers.splice(0).forEach((c) => c()));
 
 async function start(models: ServiceModels) {
   const server = createReplayServer(models);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  close = () => server.close();
+  closers.push(() => server.close());
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
@@ -93,5 +94,28 @@ describe("replay QVAC service boundary", () => {
     });
     expect(res.status).toBe(422);
     expect((await res.json()).error.code).toBe("empty_note");
+  });
+
+  it("proposes steps through the drafter door and gates them against the transcript", async () => {
+    const seen: string[] = [];
+    const drafter = {
+      modelState: () => ({ kind: "llm", id: "LLAMA_3_2_1B_INST_Q4_0", state: "ready" as const }),
+      complete: async (_history: unknown, schema: { name: string }) => {
+        seen.push(schema.name);
+        return STEPS_OUTPUT_FIXTURE; // FIXTURE string, not a model answer
+      },
+    };
+    const url = await start({ drafter });
+    const transcript = WEEKLY_REPORT_NARRATION_FIXTURE.map((s) => s.text).join(" ");
+    const res = await fetch(`${url}/v1/propose-steps`, { method: "POST", body: JSON.stringify({ transcript, screenNotes: [] }) });
+    const body = await res.json();
+    expect(seen).toEqual(["steps"]);
+    expect(body.result.proposals).toHaveLength(4);
+    expect(body.result.rejected).toHaveLength(2);
+
+    const prose = await start({ drafter: { ...drafter, complete: async () => "Here you go!" } });
+    const bad = await fetch(`${prose}/v1/propose-steps`, { method: "POST", body: JSON.stringify({ transcript }) });
+    expect(bad.status).toBe(422);
+    expect((await bad.json()).error.code).toBe("unusable_output");
   });
 });

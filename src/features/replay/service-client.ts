@@ -1,9 +1,12 @@
 import {
+  parseProposeStepsResponse,
   parseReadScreenshotResponse,
   parseServiceError,
   parseTranscribeResponse,
   SERVICE_URL,
   type Parsed,
+  type ProposeStepsRequest,
+  type ProposeStepsResponse,
   type ReadScreenshotResponse,
   type TranscribeResponse,
 } from "./service-contract.ts";
@@ -68,4 +71,8 @@ export async function readScreenshot(
 ): Promise<ClientResult<ReadScreenshotResponse>> {
   const imageBase64 = await fileToBase64(file);
   return postJson("/v1/read-screenshot", { fileName: file.name, imageBase64 }, parseReadScreenshotResponse, fetchImpl);
+}
+
+export function proposeSteps(body: ProposeStepsRequest, fetchImpl?: typeof fetch): Promise<ClientResult<ProposeStepsResponse>> {
+  return postJson("/v1/propose-steps", body, parseProposeStepsResponse, fetchImpl);
 }
