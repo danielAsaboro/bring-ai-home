@@ -80,3 +80,7 @@ npm run build
 ```
 
 The complete starter will expose a visible **Reset demo data** action. Until its product wave is implemented, this directory contains the independently verified Next.js and test foundation.
+
+## 18. Course test file
+
+`public/test-files/ledger/receipt-corner-cafe.png` is a fictional receipt for the QVAC course. It names no real business or card. Its printed total is **10.53** (subtotal 9.75 plus tax 0.78). A test pins its SHA-256 digest so later chapters read the same bytes.
