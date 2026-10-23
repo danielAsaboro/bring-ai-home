@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { CATEGORIES, type Category } from "./model";
 import { parseGarmentProposal, type ProposedFields } from "./garment-proposal";
-import { describeGarment, proposeDetails } from "./service-client";
+import { classifyGarment, describeGarment, proposeDetails } from "./service-client";
+import { describeVerdict, judgeClassification, type ClassifierVerdict } from "./wardrobe-labels";
 
 type Review = {
   image: string;
@@ -12,6 +13,7 @@ type Review = {
   models: string[];
   fields: ProposedFields;
   issues: string[];
+  classifier: { verdict: ClassifierVerdict; model: string } | { unavailable: string };
 };
 
 function readAsDataUrl(file: File) {
@@ -37,7 +39,10 @@ export function PhotoReview({ onApply }: { onApply: (fields: ProposedFields, ima
     }
     setStatus("Describing the photo locally…");
     const image = await readAsDataUrl(file);
-    const described = await describeGarment({ name: file.name, dataUrl: image });
+    const [described, classified] = await Promise.all([
+      describeGarment({ name: file.name, dataUrl: image }),
+      classifyGarment({ name: file.name, dataUrl: image }),
+    ]);
     if (!described.ok) {
       setStatus(`${described.message} You can still add the garment by hand below.`);
       return;
@@ -52,6 +57,9 @@ export function PhotoReview({ onApply }: { onApply: (fields: ProposedFields, ima
       description: described.value.description,
       models: details.ok ? [described.value.model, details.value.model] : [described.value.model],
       ...parsed,
+      classifier: classified.ok
+        ? { verdict: judgeClassification(classified.value.results), model: classified.value.model }
+        : { unavailable: classified.message },
     });
     setStatus(null);
   }
@@ -126,6 +134,24 @@ function ProposalCard({
           </select>
         </label>
       </div>
+      <p aria-label="Classifier verdict">
+        <span className="font-semibold">Wardrobe classifier:</span>{" "}
+        {"verdict" in review.classifier
+          ? `${describeVerdict(review.classifier.verdict)} · ${review.classifier.model}`
+          : `unavailable (${review.classifier.unavailable})`}
+        {"verdict" in review.classifier && review.classifier.verdict.kind === "accepted" && (
+          <button
+            type="button"
+            className="ml-2 rounded border px-2"
+            onClick={() => {
+              const v = review.classifier;
+              if ("verdict" in v && v.verdict.kind === "accepted") setFields({ ...fields, category: v.verdict.label });
+            }}
+          >
+            Use {review.classifier.verdict.label}
+          </button>
+        )}
+      </p>
       {review.issues.length > 0 && (
         <ul aria-label="Proposal issues" className="list-disc pl-5 text-amber-900">
           {review.issues.map((issue) => (

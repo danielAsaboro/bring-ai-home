@@ -40,6 +40,17 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
   const LLM_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
   const llm = () => model(LLM_MODEL, () => sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }));
 
+  // QVAC ships a small bundled classifier (food/report/other). A wardrobe
+  // classifier is a custom GGUF you point at with CLOSET_CLASSIFIER_GGUF.
+  const customClassifier = process.env.CLOSET_CLASSIFIER_GGUF;
+  const CLASSIFIER_MODEL = customClassifier ? `custom:${path.basename(customClassifier)}` : "bundled-mobilenetv3-small";
+  const classifier = () =>
+    model(CLASSIFIER_MODEL, () =>
+      customClassifier
+        ? sdk.loadModel({ modelSrc: customClassifier, modelType: "ggml-classification" })
+        : sdk.loadModel({ modelType: "ggml-classification" }),
+    );
+
   // The vision model reads attachments from disk, so stage the upload briefly.
   async function withTempImage<T>(image: GarmentImage, work: (file: string) => Promise<T>) {
     const dir = await mkdtemp(path.join(tmpdir(), "closet-"));
@@ -81,6 +92,11 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
       });
       const final = await run.final;
       return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async classify(image) {
+      const modelId = await classifier();
+      const results = await sdk.classify({ modelId, image: image.bytes });
+      return { results, model: CLASSIFIER_MODEL };
     },
     async close() {
       for (const pending of loaded.values()) {

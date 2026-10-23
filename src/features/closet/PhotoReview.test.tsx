@@ -26,10 +26,27 @@ beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("reviewed garment details", () => {
+  it("offers a confident wardrobe label as a choice, not a decision", async () => {
+    mockService({
+      "/describe": json(200, { description: FIXTURE_DESCRIPTION, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" }),
+      "/details": json(200, { raw: JSON.stringify({ name: "Coat", category: "jacket", colour: "yellow", material: "" }), model: "LLAMA_3_2_1B_INST_Q4_0" }),
+      "/classify": json(200, { results: [{ label: "outerwear", confidence: 0.84 }], model: "custom:fixture.gguf" }),
+    });
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.upload(screen.getByLabelText("Add from photo"), photo());
+    const card = await screen.findByRole("group", { name: "Proposed details" });
+    expect(within(card).getByLabelText("Proposed category")).toHaveValue("");
+    await user.click(within(card).getByRole("button", { name: "Use outerwear" }));
+    expect(within(card).getByLabelText("Proposed category")).toHaveValue("outerwear");
+  });
+
   it("shows a proposal, drops ungrounded fields, and saves only after the person adds it", async () => {
     mockService({
       "/describe": json(200, { description: FIXTURE_DESCRIPTION, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" }),
       "/details": json(200, { raw: FIXTURE_DETAILS, model: "LLAMA_3_2_1B_INST_Q4_0" }),
+      "/classify": json(200, { results: [{ label: "other", confidence: 0.91 }], model: "bundled-mobilenetv3-small" }),
     });
     const user = userEvent.setup();
     render(<ClosetApp />);
@@ -40,6 +57,8 @@ describe("reviewed garment details", () => {
     expect(within(card).getByLabelText("Proposed colour")).toHaveValue("yellow");
     expect(within(card).getByLabelText("Proposed material")).toHaveValue("");
     expect(within(card).getByText(/Material "rubber" is not in the description/)).toBeInTheDocument();
+    expect(within(card).getByLabelText("Classifier verdict")).toHaveTextContent('no wardrobe label (the model said "other")');
+    expect(within(card).queryByRole("button", { name: /^Use / })).not.toBeInTheDocument();
 
     const catalogue = screen.getByRole("list", { name: "Catalogue" });
     await user.clear(within(card).getByLabelText("Proposed name"));

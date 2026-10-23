@@ -73,6 +73,15 @@ describe("Closet local service", () => {
     });
   });
 
+  it("returns every classifier label without judging it", async () => {
+    // Fixture labels, hand-written.
+    const base = await start({ classify: async () => ({ results: [{ label: "other", confidence: 0.9 }], model: "fixture" }) });
+    expect(await (await post(`${base}/classify`, pngRequest)).json()).toEqual({
+      results: [{ label: "other", confidence: 0.9 }],
+      model: "fixture",
+    });
+  });
+
   it("refuses foreign origins", async () => {
     const base = await start({});
     expect((await post(`${base}/describe`, pngRequest, { origin: "https://example.com" })).status).toBe(403);

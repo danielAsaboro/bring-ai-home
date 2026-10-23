@@ -87,3 +87,20 @@ export function proposeDetails(description: string, fetchFn?: Fetch) {
     fetchFn,
   );
 }
+
+export function classifyGarment(image: { name: string; dataUrl: string }, fetchFn?: Fetch) {
+  return callService(
+    "/classify",
+    image,
+    (json) => {
+      const v = json as { results?: unknown; model?: unknown };
+      if (!Array.isArray(v.results) || typeof v.model !== "string") throw new Error("Malformed classification");
+      const results = v.results.filter(
+        (r): r is { label: string; confidence: number } =>
+          typeof r?.label === "string" && typeof r?.confidence === "number",
+      );
+      return { results, model: v.model };
+    },
+    fetchFn,
+  );
+}

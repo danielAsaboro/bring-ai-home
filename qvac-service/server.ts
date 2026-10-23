@@ -11,6 +11,8 @@ export type ClosetEngine = {
   describe?: (image: GarmentImage) => Promise<{ description: string; model: string }>;
   // Returns the model's raw JSON text. The browser validates it.
   details?: (description: string) => Promise<{ raw: string; model: string }>;
+  // Returns every label and confidence. The browser decides whether one is usable.
+  classify?: (image: GarmentImage) => Promise<{ results: { label: string; confidence: number }[]; model: string }>;
 };
 
 function requireText(body: unknown, key: string, max = 2000): string {
@@ -80,6 +82,10 @@ const ROUTES: Record<string, Route> = {
   "/details": (body, engine) => {
     if (!engine.details) return null;
     return engine.details(requireText(body, "description"));
+  },
+  "/classify": (body, engine) => {
+    if (!engine.classify) return null;
+    return engine.classify(parseGarmentImage(body));
   },
 };
 
