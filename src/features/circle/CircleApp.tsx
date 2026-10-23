@@ -11,6 +11,8 @@ import {
   peopleByLetter,
   toggleCircle,
 } from "./state";
+import { RecapPanel } from "./RecapPanel";
+import { createServiceClient, type ServiceClient } from "./service-client";
 import { browserStore, type CircleStore } from "./storage";
 import type { CircleState, EntryKind, Person } from "./types";
 
@@ -21,8 +23,15 @@ export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function CircleApp({ store: injected }: { store?: CircleStore }) {
+export function CircleApp({
+  store: injected,
+  client: injectedClient,
+}: {
+  store?: CircleStore;
+  client?: ServiceClient;
+}) {
   const store = useMemo(() => injected ?? browserStore(), [injected]);
+  const client = useMemo(() => injectedClient ?? createServiceClient(), [injectedClient]);
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const loaded = useMemo(() => (mounted ? store.load() : null), [mounted, store]);
   const [edited, setEdited] = useState<CircleState | null>(null);
@@ -65,6 +74,8 @@ export function CircleApp({ store: injected }: { store?: CircleStore }) {
           Reset demo data
         </button>
       </header>
+
+      <RecapPanel state={state} onChange={commit} client={client} today={today()} />
 
       <nav aria-label="Alphabet" role="tablist" className="my-4 flex flex-wrap gap-1">
         {LETTERS.map((l) => {

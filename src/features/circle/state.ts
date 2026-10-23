@@ -98,3 +98,40 @@ export function openReminders(state: CircleState, personId?: string): Reminder[]
     (r) => !r.done && (personId === undefined || r.personId === personId),
   );
 }
+
+export type ConfirmedProposal = {
+  type: "memory" | "promise" | "date";
+  personId: string;
+  text: string;
+  date?: string;
+};
+
+// Only proposals a person ticked reach this function. It is plain code:
+// the model never writes to the book.
+export function applyConfirmed(
+  state: CircleState,
+  confirmed: ConfirmedProposal[],
+  recapDate: string,
+): CircleState {
+  return confirmed.reduce((next, item) => {
+    if (item.type === "memory") {
+      return logEntry(next, item.personId, { kind: "memory", date: recapDate, text: item.text });
+    }
+    if (item.type === "promise") {
+      return addReminder(next, {
+        personId: item.personId,
+        due: item.date ?? recapDate,
+        text: `Promised: ${item.text.trim()}`,
+      });
+    }
+    if (!item.date) throw new Error("An important date needs a date");
+    return addReminder(
+      logEntry(next, item.personId, {
+        kind: "memory",
+        date: recapDate,
+        text: `Important date ${item.date}: ${item.text.trim()}`,
+      }),
+      { personId: item.personId, due: item.date, text: item.text },
+    );
+  }, state);
+}
