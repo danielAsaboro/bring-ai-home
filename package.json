@@ -16,7 +16,9 @@
     "qvac:index-smoke": "node --no-warnings qvac-service/index-archive-smoke.mjs",
     "qvac:retrieve-smoke": "node --no-warnings qvac-service/retrieve-smoke.mjs",
     "qvac:caption-smoke": "node --no-warnings qvac-service/caption-smoke.mjs",
-    "qvac:service": "node --no-warnings qvac-service/serve.mjs"
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:service:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/serve.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",
