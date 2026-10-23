@@ -11,6 +11,7 @@ import {
   peopleByLetter,
   toggleCircle,
 } from "./state";
+import { BeforeWeMeet } from "./BeforeWeMeet";
 import { RecapPanel } from "./RecapPanel";
 import { createServiceClient, type ServiceClient } from "./service-client";
 import { browserStore, type CircleStore } from "./storage";
@@ -125,6 +126,7 @@ export function CircleApp({
             person={person}
             state={state}
             onChange={commit}
+            client={client}
           />
         ) : (
           <p>No one under {letter} yet.</p>
@@ -171,10 +173,12 @@ function PersonCard({
   person,
   state,
   onChange,
+  client,
 }: {
   person: Person;
   state: CircleState;
   onChange: (next: CircleState) => void;
+  client: ServiceClient;
 }) {
   const [kind, setKind] = useState<EntryKind>("interaction");
   const [date, setDate] = useState(today());
@@ -286,6 +290,8 @@ function PersonCard({
         </button>
       </form>
       {error && <p role="alert">{error}</p>}
+
+      <BeforeWeMeet person={person} state={state} client={client} />
 
       <h3 className="font-serif text-lg">Timeline</h3>
       <ol aria-label="Timeline" className="space-y-1">

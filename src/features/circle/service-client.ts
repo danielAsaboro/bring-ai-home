@@ -1,3 +1,4 @@
+import type { ContextMatch, Passage } from "./context";
 import type { ExtractionResult, KnownPerson } from "./extraction";
 
 // The browser never imports @qvac/sdk. It talks to the loopback service.
@@ -74,6 +75,19 @@ export function createServiceClient(
       const body = (await post("/recap/extract", { transcript, people, today })) as ExtractionResult;
       if (body.status !== "proposed" || !Array.isArray(body.proposals)) {
         throw new ServiceError("Unexpected extraction response", "bad-response");
+      }
+      return body;
+    },
+    async retrieve(
+      query: string,
+      passages: Passage[],
+    ): Promise<{ model: string; matches: ContextMatch[] }> {
+      const body = (await post("/context/retrieve", { query, passages })) as {
+        model: string;
+        matches: ContextMatch[];
+      };
+      if (!Array.isArray(body.matches)) {
+        throw new ServiceError("Unexpected retrieval response", "bad-response");
       }
       return body;
     },

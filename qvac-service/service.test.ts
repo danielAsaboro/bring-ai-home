@@ -11,7 +11,7 @@ describe("local service boundary", () => {
     const res = await handle("GET", "/health", undefined);
     expect(res).toEqual({
       status: 200,
-      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false } },
+      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false, retrieve: false } },
     });
   });
 
@@ -73,5 +73,14 @@ describe("local service boundary", () => {
       today: "2026-10-23",
     });
     expect(ok).toMatchObject({ status: 200, body: { model: "FIXTURE 2026-10-23" } });
+  });
+
+  it("returns no context for a person with an empty timeline without calling a model", async () => {
+    const res = await createService({
+      retrieve: async () => {
+        throw new Error("should not run");
+      },
+    })("POST", "/context/retrieve", { query: "coffee", passages: [] });
+    expect(res).toEqual({ status: 200, body: { model: "none", matches: [] } });
   });
 });

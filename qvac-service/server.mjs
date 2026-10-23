@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { rankContext } from "../src/features/circle/context.ts";
 import {
   buildExtractionPrompt,
   parseExtraction,
@@ -78,6 +79,22 @@ capabilities.extract = async ({ transcript, people, today }) => {
     today,
     model: "LLAMA_3_2_1B_INST_Q4_0",
   });
+};
+
+capabilities.retrieve = async ({ query, passages }) => {
+  const modelId = await model("GTE_LARGE_FP16", {
+    modelSrc: sdk.GTE_LARGE_FP16,
+    modelType: "embeddings",
+  });
+  const { embedding } = await sdk.embed({
+    modelId,
+    text: [query, ...passages.map((p) => p.text)],
+  });
+  const [queryVector, ...vectors] = embedding;
+  return {
+    model: "GTE_LARGE_FP16",
+    matches: rankContext(queryVector, passages, vectors, { limit: 3, minScore: 0.3 }),
+  };
 };
 
 const handle = createService(capabilities);

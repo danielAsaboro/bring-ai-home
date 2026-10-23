@@ -1,3 +1,4 @@
+import type { ContextMatch, Passage } from "../src/features/circle/context";
 import type { ExtractionResult, KnownPerson } from "../src/features/circle/extraction";
 import type { RecapDraft } from "./recap";
 
@@ -10,6 +11,10 @@ export type Capabilities = {
     people: KnownPerson[];
     today: string;
   }) => Promise<ExtractionResult>;
+  retrieve?: (input: {
+    query: string;
+    passages: Passage[];
+  }) => Promise<{ model: string; matches: ContextMatch[] }>;
 };
 
 export type ServiceResponse = { status: number; body: unknown };
@@ -74,6 +79,19 @@ const routes: Record<string, Route> = {
         people: people(body),
         today: isoDay(body, "today"),
       }),
+  },
+  "/context/retrieve": {
+    capability: "retrieve",
+    run: (caps, body) => {
+      const list = body.passages;
+      if (!Array.isArray(list) || list.length > 200) throw new BadRequest("Missing passages");
+      const passages = list.map((p) => {
+        const r = record(p);
+        return { id: text(r, "id", 200), text: text(r, "text", 2000) };
+      });
+      if (passages.length === 0) return Promise.resolve({ model: "none", matches: [] });
+      return caps.retrieve({ query: text(body, "query", 500), passages });
+    },
   },
 };
 
