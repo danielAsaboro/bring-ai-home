@@ -1,0 +1,453 @@
+---
+title: "05. Propose merchants and categories"
+description: "We will ask a small local language model to propose a merchant name and one category from a fixed list. Code validates every answer, and the model never sees an amount."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Ledger · 05. Propose merchants and categories" />
+
+We will ask a small local language model to propose a clean merchant name and one category for a draft. Code owns the category list and checks every answer. The model never sees an amount and never does a sum.
+
+**Source checkpoint:** `57829cc` · **Starting checkpoint:** `5eae853`
+
+## What changes
+
+- `src/features/ledger/categories.ts`: the fixed category list, the prompt, a JSON schema, and `parseProposal`.
+- `qvac-service/qvac-proposer.ts`: loads `LLAMA_3_2_1B_INST_Q4_0` with `modelType: "llm"` on first use and runs `completion`.
+- `qvac-service/server.ts`: a new `POST /v1/propose` route. Health now lists the LLM too.
+- `src/features/ledger/receipt-client.ts`: a `propose` call.
+- `src/features/ledger/receipt-inbox.tsx`: a **Propose merchant and category** button.
+
+To compare with the checkpoint: `git diff 5eae853 57829cc`.
+
+## Build and observe
+
+### 1. Fix the list in code
+
+Open `categories.ts`. `CATEGORIES` has nine entries, ending with `Other`. The model may pick one of them. It may not add one.
+
+### 2. Send words, not money
+
+`proposalInputFromDraft` takes the raw merchant text and the item descriptions. That is all. No date, no amounts, no total. The model cannot get the arithmetic wrong if it never sees it.
+
+`buildProposalHistory` turns that into a system message and a user message. The system message asks for JSON with `merchant` and `category`.
+
+### 3. Constrain, then still validate
+
+`qvac-proposer.ts` calls:
+
+```typescript
+sdk.completion({
+  modelId,
+  history,
+  stream: true,
+  responseFormat: { type: "json_schema", json_schema: { name: "proposal", schema: PROPOSAL_JSON_SCHEMA } },
+});
+```
+
+and reads `(await run.final).contentText`.
+
+The schema limits what the model can produce. We do not trust it alone. The server runs `parseProposal` on the raw text. Not JSON? Rejected. Category not on the list? Rejected, with the reason. We never map "Coffee" to "Eating out" for the model. Extra fields, like a `total`, are dropped.
+
+The response carries the raw text and the result, so the UI can show exactly what the model said when it is wrong.
+
+### 4. Try it
+
+```bash
+npm run qvac:service
+npm run dev
+```
+
+Read the sample receipt, then select **Propose merchant and category**. The first call downloads and loads the LLM. On success you see **Proposal (not applied)** with the merchant, the category, and the model name. On a bad answer you see **Proposal rejected** and the raw output.
+
+Nothing is applied. The draft and the book are unchanged. Accepting is Chapter 7.
+
+We could not download models in the environment used to write this course (see Chapter 2). Every model answer in the tests below is hand-written and labelled as such.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="src/features/ledger/categories.ts">
+
+```typescript
+import type { DraftTransaction } from "./draft-transactions";
+
+// The model may only choose from this list. Code owns the list.
+export const CATEGORIES = [
+  "Groceries",
+  "Eating out",
+  "Transport",
+  "Housing",
+  "Utilities",
+  "Health",
+  "Shopping",
+  "Entertainment",
+  "Other",
+] as const;
+export type Category = (typeof CATEGORIES)[number];
+
+export type ProposalInput = { merchantText: string; lineDescriptions: string[] };
+
+export type Proposal = { merchant: string; category: Category };
+
+export type ProposalResult =
+  | { ok: true; proposal: Proposal }
+  | { ok: false; reason: string };
+
+/** Only words go to the model. Amounts, dates and totals stay out of the prompt. */
+export function proposalInputFromDraft(draft: DraftTransaction): ProposalInput {
+  return {
+    merchantText: draft.merchant?.value ?? "",
+    lineDescriptions: draft.lines.map((line) => line.description),
+  };
+}
+
+export const PROPOSAL_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    merchant: { type: "string", maxLength: 60 },
+    category: { type: "string", enum: [...CATEGORIES] },
+  },
+  required: ["merchant", "category"],
+  additionalProperties: false,
+} as const;
+
+export function buildProposalHistory(input: ProposalInput) {
+  return [
+    {
+      role: "system",
+      content:
+        "You tidy receipt text for a personal ledger. Reply with JSON only: " +
+        '{"merchant": short clean merchant name, "category": one of ' +
+        CATEGORIES.join(", ") +
+        "}. Do not do arithmetic. Do not invent amounts.",
+    },
+    {
+      role: "user",
+      content: `Merchant text: ${input.merchantText}\nItems: ${input.lineDescriptions.join("; ")}`,
+    },
+  ];
+}
+
+/** Validate model text. Anything off-list or malformed is rejected, never repaired. */
+export function parseProposal(raw: string): ProposalResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw.trim());
+  } catch {
+    return { ok: false, reason: "Model output was not JSON" };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, reason: "Model output was not a JSON object" };
+  }
+  const { merchant, category } = value as Record<string, unknown>;
+  if (typeof merchant !== "string" || merchant.trim().length === 0 || merchant.length > 60) {
+    return { ok: false, reason: "Merchant must be a short non-empty string" };
+  }
+  if (!CATEGORIES.includes(category as Category)) {
+    return { ok: false, reason: `Category "${String(category)}" is not on the list` };
+  }
+  return { ok: true, proposal: { merchant: merchant.trim(), category: category as Category } };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-proposer.ts">
+
+```typescript
+import { PROPOSAL_JSON_SCHEMA } from "../src/features/ledger/categories.ts";
+import type { ModelState } from "../src/features/ledger/receipt-contract.ts";
+import { resolveLocalQvacPaths } from "./local-config.ts";
+import type { Proposer } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+// A small local LLM that proposes a merchant name and a category. Loaded on first use.
+export function createQvacProposer(appDirectory: string): Proposer & { close(): Promise<void> } {
+  const { configPath } = resolveLocalQvacPaths(appDirectory);
+  let sdk: Sdk | undefined;
+  let modelId: string | undefined;
+  let state: ModelState["state"] = "not_loaded";
+  let loading: Promise<string> | undefined;
+
+  async function ensureModel() {
+    if (modelId) return modelId;
+    loading ??= (async () => {
+      state = "loading";
+      // qvac-reader.ts writes this config; both readers share one cache.
+      process.env.QVAC_CONFIG_PATH = configPath;
+      sdk = await import("@qvac/sdk");
+      const id = await sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" });
+      modelId = id;
+      state = "ready";
+      return id;
+    })().catch((error: unknown) => {
+      state = "error";
+      loading = undefined;
+      throw error;
+    });
+    return loading;
+  }
+
+  return {
+    modelState: () => ({ kind: "llm", id: "LLAMA_3_2_1B_INST_Q4_0", state }),
+    async complete(history) {
+      const id = await ensureModel();
+      const run = sdk!.completion({
+        modelId: id,
+        history,
+        stream: true,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: { name: "proposal", schema: PROPOSAL_JSON_SCHEMA },
+        },
+      });
+      const final = await run.final;
+      return final.contentText;
+    },
+    async close() {
+      if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createHash } from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import { buildProposalHistory, parseProposal } from "../src/features/ledger/categories.ts";
+import {
+  parseProposeRequest,
+  parseReadReceiptRequest,
+  type ModelState,
+  type OcrBlock,
+} from "../src/features/ledger/receipt-contract.ts";
+
+export class ReaderUnavailableError extends Error {}
+
+// The only door to QVAC. Lesson 03 injects a reader that always refuses.
+export type ReceiptReader = {
+  modelState(): ModelState;
+  read(png: Buffer): Promise<{ blocks: OcrBlock[]; ocrMs: number | null }>;
+};
+
+// Text generation behind its own door. It returns raw text; the server validates it.
+export type Proposer = {
+  modelState(): ModelState;
+  complete(history: { role: string; content: string }[]): Promise<string>;
+};
+
+export type ServiceModels = { proposer?: Proposer };
+
+export const unavailableReader: ReceiptReader = {
+  modelState: () => ({ kind: "ocr", id: "not-configured", state: "not_loaded" }),
+  async read() {
+    throw new ReaderUnavailableError("OCR is not connected yet");
+  },
+};
+
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (origin) {
+    headers["access-control-allow-origin"] = origin;
+    headers["vary"] = "Origin";
+  }
+  res.writeHead(status, headers);
+  res.end(JSON.stringify(body));
+}
+
+function error(code: string, message: string) {
+  return { error: { code, message } };
+}
+
+async function readBody(req: IncomingMessage, limit: number): Promise<string> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new Error("too_large");
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export function createReceiptServer(reader: ReceiptReader, models: ServiceModels = {}) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (origin !== undefined && !LOOPBACK_ORIGIN.test(origin)) {
+      send(res, 403, error("origin_rejected", "Only loopback origins may call this service"));
+      return;
+    }
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": origin ?? "",
+        "access-control-allow-methods": "GET, POST",
+        "access-control-allow-headers": "content-type",
+      });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/health") {
+      const states = [reader.modelState()];
+      if (models.proposer) states.push(models.proposer.modelState());
+      send(res, 200, { service: "ready", models: states }, origin);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/read-receipt") {
+      let json: unknown;
+      try {
+        json = JSON.parse(await readBody(req, 10_000_000));
+      } catch {
+        send(res, 400, error("invalid_json", "Body must be JSON under 10 MB"), origin);
+        return;
+      }
+      const parsed = parseReadReceiptRequest(json);
+      if (!parsed.ok) {
+        send(res, 400, error("invalid_request", parsed.message), origin);
+        return;
+      }
+      const png = Buffer.from(parsed.value.pngBase64, "base64");
+      const sourceDigest = createHash("sha256").update(png).digest("hex");
+      try {
+        const { blocks, ocrMs } = await reader.read(png);
+        send(
+          res,
+          200,
+          {
+            receiptId: parsed.value.receiptId,
+            sourceDigest,
+            ocrModel: reader.modelState().id,
+            ocrMs,
+            blocks,
+          },
+          origin,
+        );
+      } catch (cause) {
+        if (cause instanceof ReaderUnavailableError) {
+          send(res, 503, error("ocr_unavailable", cause.message), origin);
+          return;
+        }
+        const message = cause instanceof Error ? cause.message : String(cause);
+        send(res, 500, error("ocr_failed", message), origin);
+      }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/propose" && models.proposer) {
+      let json: unknown;
+      try {
+        json = JSON.parse(await readBody(req, 100_000));
+      } catch {
+        send(res, 400, error("invalid_json", "Body must be JSON"), origin);
+        return;
+      }
+      const parsed = parseProposeRequest(json);
+      if (!parsed.ok) {
+        send(res, 400, error("invalid_request", parsed.message), origin);
+        return;
+      }
+      try {
+        const raw = await models.proposer.complete(buildProposalHistory(parsed.value));
+        send(
+          res,
+          200,
+          { model: models.proposer.modelState().id, raw, result: parseProposal(raw) },
+          origin,
+        );
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        send(res, 500, error("llm_failed", message), origin);
+      }
+      return;
+    }
+    send(res, 404, error("not_found", "Unknown route"), origin);
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/categories.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { cornerCafeOcrFixture } from "@/fixtures/corner-cafe-ocr.fixture";
+
+import { buildProposalHistory, parseProposal, proposalInputFromDraft } from "./categories";
+import { draftFromOcr } from "./draft-transactions";
+
+// All model text below is HAND-WRITTEN, not recorded output.
+describe("merchant and category proposals", () => {
+  const draft = draftFromOcr({ receiptId: "r1", sourceDigest: "d", blocks: cornerCafeOcrFixture });
+
+  it("sends words only, never amounts, to the model", () => {
+    const input = proposalInputFromDraft(draft);
+    const prompt = JSON.stringify(buildProposalHistory(input));
+
+    expect(input).toEqual({
+      merchantText: "CORNER CAFE",
+      lineDescriptions: ["Flat white", "Croissamt", "Sparkling water"],
+    });
+    expect(prompt).not.toMatch(/10\.53|9\.75|0\.78|4\.50/);
+  });
+
+  it("accepts a well-formed proposal on the fixed list", () => {
+    expect(parseProposal('{"merchant":"Corner Cafe","category":"Eating out"}')).toEqual({
+      ok: true,
+      proposal: { merchant: "Corner Cafe", category: "Eating out" },
+    });
+  });
+
+  it("rejects an off-list category instead of mapping it", () => {
+    expect(parseProposal('{"merchant":"Corner Cafe","category":"Coffee"}')).toEqual({
+      ok: false,
+      reason: 'Category "Coffee" is not on the list',
+    });
+  });
+
+  it("rejects prose and empty merchants", () => {
+    expect(parseProposal("Sure! It is a cafe.").ok).toBe(false);
+    expect(parseProposal('{"merchant":"  ","category":"Other"}').ok).toBe(false);
+  });
+
+  it("ignores any amount the model adds", () => {
+    const result = parseProposal('{"merchant":"Corner Cafe","category":"Eating out","total":99}');
+    expect(result).toEqual({ ok: true, proposal: { merchant: "Corner Cafe", category: "Eating out" } });
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm test -- src/features/ledger/categories.test.ts
+```
+
+Expected: 5 tests pass. They prove the prompt holds no amounts, a good answer passes, an off-list category is rejected, prose is rejected, and an extra `total` is ignored.
+
+Full set:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 8 passed (8)`, `Tests 27 passed (27)`.
+
+## Before continuing
+
+- [ ] The prompt contains no amounts.
+- [ ] An off-list category is shown as rejected, not fixed up.
+- [ ] A proposal changes nothing until a person accepts it.
+
+Continue to [Find similar past entries](/docs/ledger/06-similar-entries).

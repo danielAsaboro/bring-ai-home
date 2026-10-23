@@ -1,0 +1,1238 @@
+---
+title: "06. Answer with citations to the manual page"
+description: "We will answer a question from the asset's own manuals with a local language model, and show the answer only if it cites a page Homebook actually retrieved."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Homebook · 06. Answer with citations to the manual page" />
+
+Warranty and safety answers must point at their source. The model gets numbered manual excerpts and must cite them. Homebook then removes any citation that points at nothing, and refuses to show an answer with no valid citation.
+
+**Source checkpoint:** `4f6641a` · **Starting checkpoint:** `4633a20`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/homebook/cited-answer.ts` | Numbered prompt, citation checking, and `answerFromManuals` which skips the model when retrieval finds nothing |
+| `qvac-service/server.ts`, `serve.mjs` | `POST /ask`. Loads the index, `GTE_LARGE_FP16`, and `LLAMA_3_2_1B_INST_Q4_0` |
+| `src/features/homebook/AssistPanel.tsx` | **Ask this asset's manuals**, with each citation linking to the manual file and page |
+| `src/features/homebook/Homebook.tsx` | Pass the asset's filed manuals to the panel |
+
+## Build and observe
+
+### 1. Start the service after ingest
+
+```bash
+npm run qvac:ingest-manuals
+npm run qvac:service
+```
+
+`/health` shows `"ask": true` only when the index, the embedder, and the LLM have all loaded.
+
+### 2. Ask a question
+
+On the water heater, ask `How do I relight the pilot?`. Homebook sends the question with this asset's manual ids, so the dishwasher manual cannot answer for the heater. The answer lists sources like `Aquaterra AT-50G owner's manual, page 4`. Open it and check.
+
+### 3. Read the three outcomes
+
+- `answered`: the draft cites at least one retrieved excerpt. Citation numbers outside the list, like `[7]` when there are three excerpts, are removed.
+- `not-in-manuals`: retrieval found nothing above the score floor, or the model replied `NOT IN MANUALS`. With no excerpts, the model is never called.
+- `unsupported`: the model wrote prose with no valid citation. Homebook does not show it as an answer.
+
+### 4. Ask something the manuals do not cover
+
+Ask `What colour is the roof?`. You should get the `not-in-manuals` message, which points you to the original document or a professional.
+
+The LLM and embedding downloads stalled in our build container. We have no live answer to show.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+
+<AccordionGroup>
+<Accordion title="qvac-service/serve.mjs">
+
+```javascript
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+const { createHomebookServer, SERVICE_PORT } = await import("./server.ts");
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+
+const loaded = [];
+let sdk = null;
+try {
+  sdk = await import("@qvac/sdk");
+} catch (error) {
+  process.stderr.write(`QVAC SDK unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+}
+
+// Load one model, or report why not and leave that capability off.
+async function tryLoad(label, options) {
+  if (!sdk) return null;
+  try {
+    const modelId = await sdk.loadModel(options);
+    loaded.push(modelId);
+    return modelId;
+  } catch (error) {
+    process.stderr.write(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+    return null;
+  }
+}
+
+// Listen first. Each capability switches on when its model has loaded, so the
+// binder gets a clear 503 instead of a hanging request while models download.
+const capabilities = { label: null, identify: null, ask: null };
+const server = createHomebookServer(capabilities);
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stderr.write(`Homebook QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+const ocrId = await tryLoad("Label OCR", {
+  modelSrc: sdk?.OCR_LATIN,
+  modelType: sdk?.MODEL_TYPES.ggmlOcr,
+  modelConfig: { langList: ["en"], magRatio: 1.5, contrastRetry: false, lowConfidenceThreshold: 0.5 },
+});
+if (ocrId) {
+  capabilities.label = async (image) => {
+    const run = sdk.ocr({ modelId: ocrId, image, options: { paragraph: false } });
+    return { blocks: await run.blocks, model: "OCR_LATIN" };
+  };
+  process.stderr.write("Label OCR ready\n");
+}
+
+const vlmId = await tryLoad("Photo identification", {
+  modelSrc: sdk?.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+  modelConfig: { ctx_size: 1024, projectionModelSrc: sdk?.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+});
+if (vlmId) {
+  const { IDENTIFY_PROMPT } = await import("../src/features/homebook/asset-identity.ts");
+  const inbox = path.join(qvacDirectory, "inbox");
+  await mkdir(inbox, { recursive: true });
+  capabilities.identify = async (image, mimeType) => {
+    // Attachments are read from a path, so the photo lives briefly in .qvac/inbox.
+    const file = path.join(inbox, `${randomUUID()}.${mimeType === "image/png" ? "png" : "jpg"}`);
+    await writeFile(file, image);
+    try {
+      const run = sdk.completion({
+        modelId: vlmId,
+        history: [{ role: "user", content: IDENTIFY_PROMPT, attachments: [{ path: file }] }],
+        stream: true,
+      });
+      let text = "";
+      for await (const token of run.tokenStream) text += token;
+      return { text, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" };
+    } finally {
+      await rm(file, { force: true });
+    }
+  };
+  process.stderr.write("Photo identification ready\n");
+}
+
+// Manual answers need the index from qvac:ingest-manuals, an embedder, and an LLM.
+const index = await readFile(path.join(qvacDirectory, "manual-index.json"), "utf8")
+  .then((text) => JSON.parse(text))
+  .catch(() => {
+    process.stderr.write("No manual index yet. Run npm run qvac:ingest-manuals first.\n");
+    return null;
+  });
+const embedId = index ? await tryLoad("Manual embeddings", { modelSrc: sdk?.GTE_LARGE_FP16, modelType: "embeddings" }) : null;
+const llmId = index ? await tryLoad("Answer model", { modelSrc: sdk?.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }) : null;
+if (index && embedId && llmId) {
+  const { searchManuals } = await import("../src/features/homebook/manual-index.ts");
+  const { answerFromManuals } = await import("../src/features/homebook/cited-answer.ts");
+  capabilities.ask = async (question, docIds) => {
+    const result = await answerFromManuals(
+      question,
+      {
+        embedQuery: async (text) => (await sdk.embed({ modelId: embedId, text })).embedding,
+        search: (vector, ids) => searchManuals(index, vector, { limit: 3, minScore: 0.3, docIds: ids }),
+        complete: async (history) => {
+          const run = sdk.completion({ modelId: llmId, history, stream: true });
+          let text = "";
+          for await (const token of run.tokenStream) text += token;
+          return text;
+        },
+      },
+      docIds,
+    );
+    return { ...result, model: "LLAMA_3_2_1B_INST_Q4_0 + GTE_LARGE_FP16" };
+  };
+  process.stderr.write("Manual answers ready\n");
+}
+
+async function shutdown() {
+  server.close();
+  for (const modelId of loaded) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createHomebookServer, isAllowedOrigin, type Capabilities } from "./server";
+
+// Fixture OCR reader. It returns hand-written blocks, not model output.
+const fixtureLabel: Capabilities["label"] = async () => ({
+  model: "fixture-ocr",
+  blocks: [
+    { text: "MODEL NO.", bbox: [50, 166, 240, 194], confidence: 0.98 },
+    { text: "AT-50G", bbox: [330, 167, 436, 193], confidence: 0.93 },
+  ],
+});
+
+// Fixture describer. Its reply is hand-written, not model output.
+const fixtureIdentify: Capabilities["identify"] = async () => ({
+  model: "fixture-vlm",
+  text: "category: water heater; name: gas water heater",
+});
+
+let close: (() => void) | null = null;
+async function start(capabilities: Capabilities) {
+  const server = createHomebookServer(capabilities);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+afterEach(() => close?.());
+
+const png = { fileName: "label.png", mimeType: "image/png", imageBase64: Buffer.from("png").toString("base64") };
+const post = (url: string, body: unknown, origin = "http://localhost:3000") =>
+  fetch(url, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify(body) });
+
+describe("Homebook local service", () => {
+  it("accepts only loopback browser origins", () => {
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
+    expect(isAllowedOrigin("http://127.0.0.1:3000")).toBe(true);
+    expect(isAllowedOrigin("https://example.com")).toBe(false);
+    expect(isAllowedOrigin(undefined)).toBe(true);
+  });
+
+  it("turns OCR blocks into proposed label facts", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
+    const res = await post(`${base}/label`, png);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kind).toBe("proposed-label-facts");
+    expect(body.facts).toEqual([{ field: "model", value: "AT-50G", sourceText: "MODEL NO. AT-50G", confidence: 0.93 }]);
+  });
+
+  it("validates a photo identification against Homebook's categories", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
+    const body = await (await post(`${base}/identify`, png)).json();
+    expect(body.identity).toMatchObject({ kind: "proposed-identity", category: "water-heater", name: "Gas water heater" });
+  });
+
+  it("passes a question to the answerer and returns its citations", async () => {
+    // Fixture answerer: a hand-written reply, not model output.
+    const ask: Capabilities["ask"] = async () => ({
+      status: "answered",
+      answer: "Wait five minutes before relighting [1].",
+      citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
+      model: "fixture-llm",
+    });
+    const base = await start({ label: null, identify: null, ask });
+    const body = await (await post(`${base}/ask`, { question: "How do I relight the pilot?" })).json();
+    expect(body.citations[0].page).toBe(4);
+    expect((await post(`${base}/ask`, { question: " " })).status).toBe(400);
+  });
+
+  it("answers 503 when the model is not loaded, and 400 for a bad image", async () => {
+    const base = await start({ label: null, identify: null, ask: null });
+    expect((await post(`${base}/label`, png)).status).toBe(503);
+    expect((await post(`${base}/label`, { ...png, mimeType: "image/gif" })).status).toBe(400);
+  });
+
+  it("refuses a foreign origin before reading the request", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify, ask: null });
+    expect((await post(`${base}/label`, png, "https://example.com")).status).toBe(403);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import type { LabelFact, OcrBlock } from "../src/features/homebook/label-facts.ts";
+import { proposeLabelFacts } from "../src/features/homebook/label-facts.ts";
+import { parseAssetIdentity } from "../src/features/homebook/asset-identity.ts";
+import type { CitedAnswer } from "../src/features/homebook/cited-answer.ts";
+
+export const SERVICE_PORT = 4319;
+const MAX_BODY_BYTES = 6 * 1024 * 1024;
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
+
+export type LabelReader = (image: Buffer) => Promise<{ blocks: OcrBlock[]; model: string }>;
+
+export type PhotoDescriber = (image: Buffer, mimeType: string) => Promise<{ text: string; model: string }>;
+
+export type ManualAnswerer = (question: string, docIds?: string[]) => Promise<CitedAnswer & { model: string }>;
+
+export type Capabilities = {
+  label: LabelReader | null;
+  identify: PhotoDescriber | null;
+  ask: ManualAnswerer | null;
+};
+
+export function parseQuestion(value: unknown): { question: string; docIds?: string[] } {
+  const v = value as { question?: unknown; docIds?: unknown } | null;
+  if (!v || typeof v.question !== "string" || !v.question.trim() || v.question.length > 500) {
+    throw new Error("Request must contain a question of at most 500 characters");
+  }
+  const docIds = Array.isArray(v.docIds) && v.docIds.every((d) => typeof d === "string") ? (v.docIds as string[]) : undefined;
+  return { question: v.question.trim(), docIds };
+}
+
+export type ImageRequest = { fileName: string; mimeType: string; image: Buffer };
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and other local tools send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseImageRequest(value: unknown): ImageRequest {
+  const v = value as { fileName?: unknown; mimeType?: unknown; imageBase64?: unknown } | null;
+  if (!v || typeof v.fileName !== "string" || typeof v.imageBase64 !== "string" || typeof v.mimeType !== "string") {
+    throw new Error("Request must contain fileName, mimeType, and imageBase64");
+  }
+  if (!IMAGE_TYPES.has(v.mimeType)) throw new Error("Only PNG and JPEG images are accepted");
+  const image = Buffer.from(v.imageBase64, "base64");
+  if (image.length === 0) throw new Error("The image is empty");
+  return { fileName: v.fileName, mimeType: v.mimeType, image };
+}
+
+export function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+type Route = (body: unknown) => Promise<unknown>;
+
+export class Unavailable extends Error {}
+
+// The service proposes. It never writes to the binder. The browser decides.
+export function createHomebookServer(capabilities: Capabilities) {
+  const routes: Record<string, Route> = {
+    "/label": async (body) => {
+      const request = parseImageRequest(body);
+      if (!capabilities.label) throw new Unavailable("Label reading is not available");
+      const { blocks, model } = await capabilities.label(request.image);
+      const facts: LabelFact[] = proposeLabelFacts(blocks);
+      return { kind: "proposed-label-facts", fileName: request.fileName, model, blocks, facts };
+    },
+    "/identify": async (body) => {
+      const request = parseImageRequest(body);
+      if (!capabilities.identify) throw new Unavailable("Photo identification is not available");
+      const { text, model } = await capabilities.identify(request.image, request.mimeType);
+      return { fileName: request.fileName, model, identity: parseAssetIdentity(text) };
+    },
+    "/ask": async (body) => {
+      const { question, docIds } = parseQuestion(body);
+      if (!capabilities.ask) throw new Unavailable("Manual answers are not available");
+      return { question, ...(await capabilities.ask(question, docIds)) };
+    },
+  };
+
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      const available = Object.fromEntries(Object.entries(capabilities).map(([k, v]) => [k, v !== null]));
+      return send(res, 200, { ok: true, capabilities: available }, origin);
+    }
+    const route = req.method === "POST" && req.url ? routes[req.url] : undefined;
+    if (!route) return send(res, 404, { error: "Not found" }, origin);
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    try {
+      return send(res, 200, await route(body), origin);
+    } catch (error) {
+      if (error instanceof Unavailable) return send(res, 503, { error: error.message }, origin);
+      const message = (error as Error).message;
+      const status = /^(Request|Only|The image)/.test(message) ? 400 : 502;
+      return send(res, status, { error: message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/AssistPanel.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { AssistError, type AssistClient } from "./assist-client";
+import { cloneBinder, sampleBinder } from "./binder";
+import { Homebook } from "./Homebook";
+import { memoryStore } from "./test-store";
+
+// A blank water heater, registered by hand, waiting for its plate details.
+const blank = cloneBinder(sampleBinder);
+blank.assets[0] = { ...blank.assets[0], brand: "", model: "", serial: "" };
+
+// Fixture client. Its facts are hand-written, not model output.
+function fixtureClient(overrides: Partial<AssistClient> = {}): AssistClient {
+  return {
+    readLabel: async () => ({
+      model: "fixture-ocr",
+      facts: [
+        { field: "model", value: "AT-50G", sourceText: "MODEL NO. AT-50G", confidence: 0.93 },
+        { field: "serial", value: "AT50-2291-0457", sourceText: "SERIAL NO. AT50-2291-0457", confidence: 0.88 },
+      ],
+    }),
+    identify: async () => ({
+      model: "fixture-vlm",
+      identity: {
+        kind: "proposed-identity",
+        category: "water-heater",
+        name: "Gas water heater",
+        categoryUnrecognised: false,
+        rawText: "category: water heater; name: gas water heater",
+      },
+    }),
+    ask: async () => ({
+      status: "answered",
+      answer: "Turn the knob to OFF and wait five minutes before relighting [1].",
+      citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
+      model: "fixture-llm",
+    }),
+    ...overrides,
+  } as AssistClient;
+}
+
+const plate = new File(["png"], "water-heater-label.png", { type: "image/png" });
+
+describe("label review", () => {
+  it("shows proposals and changes the plate only when a person accepts one", async () => {
+    const store = memoryStore(blank);
+    render(<Homebook store={store} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.upload(screen.getByLabelText("Rating plate photo"), plate);
+    const proposals = await screen.findByRole("list", { name: "Proposed label facts" });
+    expect(within(proposals).getByText("AT50-2291-0457")).toBeInTheDocument();
+    expect(store.saved).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Use model" }));
+    expect(store.saved.at(-1)?.assets[0].model).toBe("AT-50G");
+    expect(store.saved.at(-1)?.assets[0].serial).toBe("");
+  });
+
+  it("sets the category only after a person accepts the photo identification", async () => {
+    const other = cloneBinder(sampleBinder);
+    other.assets[0] = { ...other.assets[0], category: "other" };
+    const store = memoryStore(other);
+    render(<Homebook store={store} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.upload(screen.getByLabelText("Asset photo"), new File(["png"], "heater.png", { type: "image/png" }));
+    await screen.findByRole("group", { name: "Proposed identity" });
+    expect(store.saved).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Use category" }));
+    expect(store.saved.at(-1)?.assets[0].category).toBe("water-heater");
+  });
+
+  it("shows an answer with a link to the cited manual page", async () => {
+    render(<Homebook store={memoryStore()} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.type(screen.getByLabelText("Ask this asset's manuals"), "How do I relight the pilot?");
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+    const answer = await screen.findByRole("group", { name: "Manual answer" });
+    expect(within(answer).getByRole("link", { name: "Aquaterra AT-50G owner's manual, page 4" })).toHaveAttribute(
+      "href",
+      "/test-files/homebook/aquaterra-at50g-manual.txt",
+    );
+  });
+
+  it("explains a stopped service and leaves the binder alone", async () => {
+    const store = memoryStore(blank);
+    const client = fixtureClient({
+      readLabel: async () => {
+        throw new AssistError("service-offline", "The local QVAC service is not running. Start it with npm run qvac:service.");
+      },
+    });
+    render(<Homebook store={store} today="2026-10-23" client={client} />);
+    await userEvent.upload(screen.getByLabelText("Rating plate photo"), plate);
+    expect(await screen.findByRole("alert")).toHaveTextContent("npm run qvac:service");
+    expect(store.saved).toHaveLength(0);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/AssistPanel.tsx">
+
+```tsx
+"use client";
+
+import { useState, type ChangeEvent, type FormEvent } from "react";
+
+import { AssistError, serviceClient, type AssistClient } from "./assist-client";
+import type { AssetIdentity } from "./asset-identity";
+import type { Asset, AssetCategory, FiledDocument } from "./binder";
+import type { CitedAnswer } from "./cited-answer";
+import type { LabelFact, LabelField } from "./label-facts";
+
+const FIELD_NAMES: Record<LabelField, string> = {
+  brand: "Brand",
+  model: "Model",
+  serial: "Serial",
+  installedOn: "Installed",
+};
+
+type Status = { state: "idle" } | { state: "working"; what: string } | { state: "error"; message: string };
+
+export function AssistPanel({
+  asset,
+  manuals = [],
+  client = serviceClient,
+  onAccept,
+}: {
+  asset: Asset;
+  manuals?: FiledDocument[];
+  client?: AssistClient;
+  onAccept: (field: LabelField | "category" | "name", value: string) => void;
+}) {
+  const [status, setStatus] = useState<Status>({ state: "idle" });
+  const [facts, setFacts] = useState<{ assetId: string; model: string; items: LabelFact[] } | null>(null);
+
+  async function run<T>(what: string, job: () => Promise<T>): Promise<T | null> {
+    setStatus({ state: "working", what });
+    try {
+      const result = await job();
+      setStatus({ state: "idle" });
+      return result;
+    } catch (error) {
+      const message = error instanceof AssistError ? error.message : "Something went wrong. The binder is unchanged.";
+      setStatus({ state: "error", message });
+      return null;
+    }
+  }
+
+  const [identity, setIdentity] = useState<{ assetId: string; model: string; value: AssetIdentity } | null>(null);
+
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<{ assetId: string; model: string; value: CitedAnswer } | null>(null);
+
+  async function onAsk(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!question.trim()) return;
+    const docIds = manuals.map((m) => m.id);
+    const result = await run("Searching your manuals locally…", () => client.ask(question, docIds));
+    if (result) setAnswer({ assetId: asset.id, model: result.model, value: result });
+  }
+
+  async function onPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await run("Looking at the photo locally…", () => client.identify(file));
+    if (result) setIdentity({ assetId: asset.id, model: result.model, value: result.identity });
+  }
+
+  async function onLabel(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await run("Reading the label locally…", () => client.readLabel(file));
+    if (result) setFacts({ assetId: asset.id, model: result.model, items: result.facts });
+  }
+
+  const visibleAnswer = answer?.assetId === asset.id ? answer : null;
+  const visibleIdentity = identity?.assetId === asset.id ? identity : null;
+  const acceptCategory = (category: AssetCategory) => {
+    onAccept("category", category);
+    setIdentity(null);
+  };
+  const visibleFacts = facts?.assetId === asset.id ? facts : null;
+
+  return (
+    <section aria-label="Local assistant" className="space-y-3 rounded border border-emerald-800/40 bg-emerald-50/50 p-3 text-sm">
+      <h3 className="font-serif text-lg">Local assistant</h3>
+      <p className="text-xs text-stone-600">Runs on this computer through QVAC. It proposes; you decide what goes in the binder.</p>
+
+      <label className="block">
+        <span className="font-medium">Read a rating plate</span>
+        <input type="file" accept="image/png,image/jpeg" aria-label="Rating plate photo" onChange={onLabel} className="mt-1 block text-xs" />
+      </label>
+
+      <label className="block">
+        <span className="font-medium">Identify from a photo</span>
+        <input type="file" accept="image/png,image/jpeg" aria-label="Asset photo" onChange={onPhoto} className="mt-1 block text-xs" />
+      </label>
+
+      {visibleIdentity ? (
+        <div aria-label="Proposed identity" role="group" className="rounded border border-stone-300 bg-white p-2">
+          <p>
+            Looks like: <strong>{visibleIdentity.value.category}</strong>
+            {visibleIdentity.value.name ? <> · “{visibleIdentity.value.name}”</> : null}
+          </p>
+          <p className="text-xs text-stone-600">
+            Proposed by {visibleIdentity.model}. Model said: “{visibleIdentity.value.rawText}”
+            {visibleIdentity.value.categoryUnrecognised ? " (not one of Homebook's categories, so it became other)" : ""}
+          </p>
+          <div className="mt-1 flex gap-2">
+            <button type="button" className="rounded border border-emerald-800 px-2 py-0.5" onClick={() => acceptCategory(visibleIdentity.value.category)}>
+              Use category
+            </button>
+            <button type="button" className="rounded border border-stone-400 px-2 py-0.5" onClick={() => setIdentity(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {manuals.length > 0 ? (
+        <form onSubmit={onAsk} aria-label="Ask the manuals" className="space-y-1">
+          <label className="block font-medium" htmlFor="manual-question">Ask this asset&apos;s manuals</label>
+          <div className="flex gap-2">
+            <input
+              id="manual-question"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="How do I relight the pilot?"
+              className="flex-1 rounded border border-stone-400 bg-white px-2 py-1"
+            />
+            <button type="submit" className="rounded bg-emerald-800 px-3 py-1 text-white">Ask</button>
+          </div>
+        </form>
+      ) : (
+        <p className="text-xs text-stone-600">File a manual for this asset to ask questions about it.</p>
+      )}
+
+      {visibleAnswer ? (
+        <div aria-label="Manual answer" role="group" className="rounded border border-stone-300 bg-white p-2">
+          {visibleAnswer.value.status === "answered" ? (
+            <>
+              <p>{visibleAnswer.value.answer}</p>
+              <ol className="mt-1 text-xs">
+                {visibleAnswer.value.citations.map((c) => (
+                  <li key={c.n}>
+                    [{c.n}]{" "}
+                    <a className="underline" href={`/test-files/homebook/${c.file}`} target="_blank" rel="noreferrer">
+                      {c.title}, page {c.page}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-1 text-xs text-stone-600">Drafted by {visibleAnswer.model}. The manual page is the authority; check it before acting.</p>
+            </>
+          ) : (
+            <p>{visibleAnswer.value.message}</p>
+          )}
+        </div>
+      ) : null}
+
+      {status.state === "working" ? <p role="status">{status.what}</p> : null}
+      {status.state === "error" ? <p role="alert" className="text-red-900">{status.message}</p> : null}
+
+      {visibleFacts ? (
+        <div>
+          <p className="text-xs text-stone-600">Proposed by {visibleFacts.model}. Check each value against the plate.</p>
+          {visibleFacts.items.length === 0 ? <p>No label fields were recognised. Enter them by hand.</p> : null}
+          <ul aria-label="Proposed label facts" className="divide-y">
+            {visibleFacts.items.map((fact) => (
+              <li key={fact.field} className="flex flex-wrap items-center justify-between gap-2 py-1">
+                <span>
+                  <strong>{FIELD_NAMES[fact.field]}:</strong> <code>{fact.value}</code>{" "}
+                  <span className="text-xs text-stone-600">
+                    from “{fact.sourceText}”{fact.confidence !== null ? ` · ${Math.round(fact.confidence * 100)}%` : ""}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="rounded border border-emerald-800 px-2 py-0.5"
+                  onClick={() => {
+                    onAccept(fact.field, fact.value);
+                    setFacts({ ...visibleFacts, items: visibleFacts.items.filter((f) => f.field !== fact.field) });
+                  }}
+                >
+                  Use {FIELD_NAMES[fact.field].toLowerCase()}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/Homebook.tsx">
+
+```tsx
+"use client";
+
+import { useState, useSyncExternalStore, type FormEvent } from "react";
+
+import type { AssistClient } from "./assist-client";
+import { AssistPanel } from "./AssistPanel";
+import {
+  ASSET_CATEGORIES,
+  completeTask,
+  dueState,
+  fileDocument,
+  historyFor,
+  recordProject,
+  registerAsset,
+  type AssetCategory,
+  type Binder,
+  type DocumentKind,
+  updateAsset,
+} from "./binder";
+import { browserStore, type BinderStore } from "./storage";
+
+const noopSubscribe = () => () => undefined;
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function Homebook({ store, today, client }: { store?: BinderStore; today?: string; client?: AssistClient }) {
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!mounted) return <p className="p-6">Opening the binder…</p>;
+  return <BinderView store={store ?? browserStore()} today={today ?? todayIso()} client={client} />;
+}
+
+const field = "rounded border border-stone-400 bg-white px-2 py-1 text-sm";
+const button = "rounded bg-emerald-800 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-900";
+
+function BinderView({ store, today, client }: { store: BinderStore; today: string; client?: AssistClient }) {
+  const [binder, setBinder] = useState<Binder>(() => store.load());
+  const [roomId, setRoomId] = useState<string>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(binder.assets[0]?.id ?? null);
+  const [error, setError] = useState<string | null>(null);
+
+  function commit(next: Binder) {
+    setBinder(next);
+    store.save(next);
+    setError(null);
+  }
+
+  function attempt(change: () => Binder) {
+    try {
+      commit(change());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const assets = binder.assets.filter((a) => roomId === "all" || a.roomId === roomId);
+  const selected = binder.assets.find((a) => a.id === selectedId) ?? null;
+  const roomName = (id: string) => binder.rooms.find((r) => r.id === id)?.name ?? id;
+
+  function onRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const text = (k: string) => String(form.get(k) ?? "");
+    const id = `asset-${binder.assets.length + 1}-${Date.now().toString(36)}`;
+    attempt(() =>
+      registerAsset(
+        binder,
+        {
+          name: text("name"),
+          roomId: text("roomId"),
+          category: text("category") as AssetCategory,
+          brand: text("brand"),
+          model: text("model"),
+          serial: text("serial"),
+          installedOn: text("installedOn"),
+          notes: "",
+        },
+        id,
+      ),
+    );
+    if (text("name").trim()) {
+      setSelectedId(id);
+      event.currentTarget.reset();
+    }
+  }
+
+  function onFile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    attempt(() =>
+      fileDocument(binder, {
+        assetId: selected.id,
+        kind: String(form.get("kind")) as DocumentKind,
+        title: String(form.get("title") ?? ""),
+        file: null,
+        expiresOn: String(form.get("expiresOn") ?? "") || null,
+      }),
+    );
+    event.currentTarget.reset();
+  }
+
+  function onProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    attempt(() =>
+      recordProject(binder, {
+        roomId: roomId === "all" ? binder.rooms[0].id : roomId,
+        title: String(form.get("title") ?? ""),
+        before: String(form.get("before") ?? ""),
+        after: String(form.get("after") ?? ""),
+        finishedOn: null,
+      }),
+    );
+    event.currentTarget.reset();
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-4 text-stone-900 sm:p-6">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b-4 border-double border-stone-500 pb-3">
+        <div>
+          <h1 className="font-serif text-3xl">Homebook</h1>
+          <p className="text-sm text-stone-600">{binder.home}</p>
+        </div>
+        <button type="button" className="rounded border border-stone-500 px-3 py-1 text-sm" onClick={() => commit(store.reset())}>
+          Reset demo data
+        </button>
+      </header>
+
+      {error ? (
+        <p role="alert" className="rounded bg-red-100 px-3 py-2 text-sm text-red-900">
+          {error}
+        </p>
+      ) : null}
+
+      <nav aria-label="Rooms" className="flex flex-wrap gap-1">
+        {[{ id: "all", name: "Whole home" }, ...binder.rooms].map((room) => (
+          <button
+            key={room.id}
+            type="button"
+            aria-pressed={roomId === room.id}
+            onClick={() => setRoomId(room.id)}
+            className={`rounded-t border border-b-0 px-3 py-1 text-sm ${roomId === room.id ? "bg-amber-100 font-semibold" : "bg-stone-100"}`}
+          >
+            {room.name}
+          </button>
+        ))}
+      </nav>
+
+      <div className="grid gap-6 md:grid-cols-[16rem_1fr]">
+        <section aria-labelledby="register-heading" className="space-y-3">
+          <h2 id="register-heading" className="font-serif text-xl">Asset register</h2>
+          <ul className="space-y-2">
+            {assets.map((asset) => (
+              <li key={asset.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(asset.id)}
+                  aria-current={asset.id === selectedId}
+                  className={`w-full rounded border px-3 py-2 text-left ${asset.id === selectedId ? "border-emerald-800 bg-emerald-50" : "border-stone-300"}`}
+                >
+                  <span className="block font-medium">{asset.name}</span>
+                  <span className="text-xs text-stone-600">{roomName(asset.roomId)}</span>
+                </button>
+              </li>
+            ))}
+            {assets.length === 0 ? <li className="text-sm text-stone-600">No assets in this room yet.</li> : null}
+          </ul>
+
+          <form onSubmit={onRegister} aria-label="Register an asset" className="space-y-2 rounded border border-dashed border-stone-400 p-3">
+            <h3 className="font-medium">Register an asset</h3>
+            <input name="name" aria-label="Asset name" placeholder="Name" className={`${field} w-full`} />
+            <select name="roomId" aria-label="Room" className={`${field} w-full`} defaultValue={roomId === "all" ? binder.rooms[0]?.id : roomId}>
+              {binder.rooms.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+            <select name="category" aria-label="Category" className={`${field} w-full`} defaultValue="other">
+              {ASSET_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input name="brand" aria-label="Brand" placeholder="Brand" className={`${field} w-full`} />
+            <input name="model" aria-label="Model" placeholder="Model" className={`${field} w-full`} />
+            <input name="serial" aria-label="Serial" placeholder="Serial" className={`${field} w-full`} />
+            <input name="installedOn" aria-label="Installed on" type="date" className={`${field} w-full`} />
+            <button type="submit" className={button}>Register</button>
+          </form>
+        </section>
+
+        {selected ? (
+          <section aria-label={`${selected.name} record`} className="space-y-4">
+            <div className="rounded border-2 border-stone-700 bg-stone-50 p-4 font-mono text-sm">
+              <h2 className="mb-2 font-serif text-2xl">{selected.name}</h2>
+              <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1">
+                <dt>Room</dt><dd>{roomName(selected.roomId)}</dd>
+                <dt>Category</dt><dd>{selected.category}</dd>
+                <dt>Brand</dt><dd>{selected.brand || "—"}</dd>
+                <dt>Model</dt><dd>{selected.model || "—"}</dd>
+                <dt>Serial</dt><dd>{selected.serial || "—"}</dd>
+                <dt>Installed</dt><dd>{selected.installedOn || "—"}</dd>
+              </dl>
+              {selected.notes ? <p className="mt-2 font-sans">{selected.notes}</p> : null}
+            </div>
+
+            <AssistPanel
+              asset={selected}
+              manuals={binder.documents.filter((d) => d.assetId === selected.id && d.kind === "manual" && d.file)}
+              client={client}
+              onAccept={(field, value) => attempt(() => updateAsset(binder, { ...selected, [field]: value }))}
+            />
+
+            <div>
+              <h3 className="font-serif text-lg">Maintenance schedule</h3>
+              <ul className="divide-y">
+                {binder.tasks.filter((t) => t.assetId === selected.id).map((task) => {
+                  const state = dueState(task, today);
+                  return (
+                    <li key={task.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                      <span>
+                        {task.title} <span className="text-xs text-stone-600">every {task.everyMonths} mo · due {task.nextDue}</span>{" "}
+                        <span className={`rounded px-1 text-xs ${state === "overdue" ? "bg-red-200" : state === "due-soon" ? "bg-amber-200" : "bg-stone-200"}`}>{state}</span>
+                      </span>
+                      <button type="button" className={button} onClick={() => attempt(() => completeTask(binder, task.id, today, ""))}>
+                        Stamp done: {task.title}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="font-serif text-lg">Service history</h3>
+              <ol aria-label="Service history" className="space-y-1 text-sm">
+                {historyFor(binder, selected.id).map((r) => (
+                  <li key={r.id}><time className="font-mono">{r.date}</time> · {r.summary}</li>
+                ))}
+              </ol>
+            </div>
+
+            <div>
+              <h3 className="font-serif text-lg">Filed documents</h3>
+              <ul aria-label="Filed documents" className="space-y-1 text-sm">
+                {binder.documents.filter((d) => d.assetId === selected.id).map((d) => (
+                  <li key={d.id}>
+                    <span className="rounded bg-stone-200 px-1 text-xs uppercase">{d.kind}</span> {d.title}
+                    {d.expiresOn ? <span className="text-stone-600"> · expires {d.expiresOn}</span> : null}
+                  </li>
+                ))}
+              </ul>
+              <form onSubmit={onFile} aria-label="File a document" className="mt-2 flex flex-wrap gap-2">
+                <select name="kind" aria-label="Document kind" className={field} defaultValue="manual">
+                  <option value="manual">manual</option>
+                  <option value="receipt">receipt</option>
+                  <option value="warranty">warranty</option>
+                </select>
+                <input name="title" aria-label="Document title" placeholder="Title" className={field} />
+                <input name="expiresOn" aria-label="Expires on" type="date" className={field} />
+                <button type="submit" className={button}>File</button>
+              </form>
+            </div>
+          </section>
+        ) : (
+          <p>Select or register an asset.</p>
+        )}
+      </div>
+
+      <section aria-labelledby="projects-heading" className="space-y-2">
+        <h2 id="projects-heading" className="font-serif text-xl">Before and after</h2>
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {binder.projects.filter((p) => roomId === "all" || p.roomId === roomId).map((p) => (
+            <li key={p.id} className="rounded border border-stone-300 p-3 text-sm">
+              <p className="font-medium">{p.title} <span className="text-xs text-stone-600">· {roomName(p.roomId)} · {p.finishedOn ?? "in progress"}</span></p>
+              <p><strong>Before:</strong> {p.before || "—"}</p>
+              <p><strong>After:</strong> {p.after || "—"}</p>
+            </li>
+          ))}
+        </ul>
+        <form onSubmit={onProject} aria-label="Record a project" className="flex flex-wrap gap-2">
+          <input name="title" aria-label="Project title" placeholder="Project" className={field} />
+          <input name="before" aria-label="Before" placeholder="Before" className={field} />
+          <input name="after" aria-label="After" placeholder="After" className={field} />
+          <button type="submit" className={button}>Record project</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/assist-client.ts">
+
+```typescript
+import type { AssetIdentity } from "./asset-identity";
+import type { CitedAnswer } from "./cited-answer";
+import type { LabelFact } from "./label-facts";
+
+export const SERVICE_URL = "http://127.0.0.1:4319";
+
+export type AssistErrorKind = "service-offline" | "model-unavailable" | "rejected" | "failed";
+export class AssistError extends Error {
+  constructor(public kind: AssistErrorKind, message: string) {
+    super(message);
+  }
+}
+
+export async function postJson<T>(path: string, body: unknown, fetcher: typeof fetch = fetch): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetcher(`${SERVICE_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new AssistError("service-offline", "The local QVAC service is not running. Start it with npm run qvac:service.");
+  }
+  const payload = (await res.json().catch(() => ({}))) as { error?: string } & T;
+  if (res.ok) return payload;
+  const message = payload.error ?? `Service answered ${res.status}`;
+  if (res.status === 503) throw new AssistError("model-unavailable", message);
+  if (res.status === 400) throw new AssistError("rejected", message);
+  throw new AssistError("failed", message);
+}
+
+async function toBase64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+export async function imageBody(file: File) {
+  return { fileName: file.name, mimeType: file.type, imageBase64: await toBase64(file) };
+}
+
+export type AssistClient = {
+  readLabel(file: File): Promise<{ facts: LabelFact[]; model: string }>;
+  identify(file: File): Promise<{ identity: AssetIdentity; model: string }>;
+  ask(question: string, docIds: string[]): Promise<CitedAnswer & { model: string }>;
+};
+
+export const serviceClient: AssistClient = {
+  async readLabel(file) {
+    return postJson("/label", await imageBody(file));
+  },
+  async identify(file) {
+    return postJson("/identify", await imageBody(file));
+  },
+  async ask(question, docIds) {
+    return postJson("/ask", { question, docIds });
+  },
+};
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/cited-answer.test.ts">
+
+```typescript
+import { describe, expect, it, vi } from "vitest";
+
+import { answerFromManuals, buildAnswerHistory, parseCitedAnswer } from "./cited-answer";
+import type { ManualHit } from "./manual-index";
+
+const hits: ManualHit[] = [
+  { id: "a", docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4, text: "Lighting the pilot. Turn the gas control knob to OFF and wait five minutes.", score: 0.8 },
+  { id: "b", docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 12, text: "Warranty. The tank is covered for six years.", score: 0.5 },
+];
+
+// Every model reply below is a hand-written fixture, not model output.
+describe("cited answers", () => {
+  it("numbers each excerpt with its page in the prompt", () => {
+    const [, user] = buildAnswerHistory("How do I relight the pilot?", hits);
+    expect(user.content).toContain("[1] Aquaterra AT-50G owner's manual, page 4:");
+    expect(user.content).toContain("[2] Aquaterra AT-50G owner's manual, page 12:");
+  });
+
+  it("keeps only citations that point at retrieved pages", () => {
+    const result = parseCitedAnswer("Turn the knob to OFF and wait five minutes [1] [7].", hits);
+    expect(result).toEqual({
+      status: "answered",
+      answer: "Turn the knob to OFF and wait five minutes [1].",
+      citations: [{ n: 1, docId: "doc-wh-manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", page: 4 }],
+    });
+  });
+
+  it("refuses to present an uncited draft as an answer", () => {
+    expect(parseCitedAnswer("Just call someone.", hits).status).toBe("unsupported");
+    expect(parseCitedAnswer("NOT IN MANUALS", hits).status).toBe("not-in-manuals");
+  });
+
+  it("does not call the model when retrieval finds nothing", async () => {
+    const complete = vi.fn();
+    const result = await answerFromManuals("What colour is the roof?", { embedQuery: async () => [1], search: () => [], complete });
+    expect(result.status).toBe("not-in-manuals");
+    expect(complete).not.toHaveBeenCalled();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/cited-answer.ts">
+
+```typescript
+import type { ManualHit } from "./manual-index.ts";
+
+export type ChatMessage = { role: "system" | "user"; content: string };
+
+export type Citation = { n: number; docId: string; title: string; file: string; page: number };
+
+export type CitedAnswer =
+  | { status: "answered"; answer: string; citations: Citation[] }
+  | { status: "not-in-manuals"; message: string }
+  | { status: "unsupported"; message: string; rawText: string };
+
+export function buildAnswerHistory(question: string, hits: ManualHit[]): ChatMessage[] {
+  const sources = hits.map((h, i) => `[${i + 1}] ${h.title}, page ${h.page}: ${h.text}`).join("\n");
+  return [
+    {
+      role: "system",
+      content:
+        "You answer questions about home appliances using only the numbered manual excerpts. " +
+        "Cite every claim with its number in square brackets, like [1]. " +
+        "If the excerpts do not contain the answer, reply exactly: NOT IN MANUALS.",
+    },
+    { role: "user", content: `Manual excerpts:\n${sources}\n\nQuestion: ${question}` },
+  ];
+}
+
+// The model drafts prose. Homebook decides which citations are real.
+export function parseCitedAnswer(rawText: string, hits: ManualHit[]): CitedAnswer {
+  const text = rawText.replace(/\s+/g, " ").trim();
+  if (!text || /NOT IN MANUALS/i.test(text)) {
+    return { status: "not-in-manuals", message: "Your filed manuals do not answer this. Check the original document or ask a professional." };
+  }
+  const cited = new Set<number>();
+  for (const match of text.matchAll(/\[(\d+)\]/g)) cited.add(Number(match[1]));
+  const citations = [...cited]
+    .filter((n) => n >= 1 && n <= hits.length)
+    .sort((a, b) => a - b)
+    .map((n) => ({ n, docId: hits[n - 1].docId, title: hits[n - 1].title, file: hits[n - 1].file, page: hits[n - 1].page }));
+  if (citations.length === 0) {
+    return { status: "unsupported", message: "The draft answer did not cite a manual page, so Homebook will not show it as an answer.", rawText: text };
+  }
+  // Remove citation numbers that point at nothing the model was given.
+  const answer = text.replace(/\[(\d+)\]/g, (m, n) => (citations.some((c) => c.n === Number(n)) ? m : "")).replace(/\s+([.,])/g, "$1");
+  return { status: "answered", answer, citations };
+}
+
+export type AskDeps = {
+  embedQuery: (text: string) => Promise<number[]>;
+  search: (vector: number[], docIds?: string[]) => ManualHit[];
+  complete: (history: ChatMessage[]) => Promise<string>;
+};
+
+export async function answerFromManuals(question: string, deps: AskDeps, docIds?: string[]): Promise<CitedAnswer> {
+  const trimmed = question.trim();
+  if (!trimmed) throw new Error("Request must contain a question");
+  const hits = deps.search(await deps.embedQuery(trimmed), docIds);
+  // No retrieved page means no model call: nothing to ground an answer in.
+  if (hits.length === 0) return parseCitedAnswer("NOT IN MANUALS", hits);
+  return parseCitedAnswer(await deps.complete(buildAnswerHistory(trimmed, hits)), hits);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/fixture-embedder.ts">
+
+```typescript
+import type { Embedder } from "./manual-index.ts";
+
+// A deterministic bag-of-words embedder for tests only. It is not a model and
+// its scores say nothing about how GTE_LARGE_FP16 would rank these pages.
+export const FIXTURE_DIMENSIONS = 64;
+
+function hash(word: string): number {
+  let h = 0;
+  for (const ch of word) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % FIXTURE_DIMENSIONS;
+}
+
+export function fixtureVector(text: string): number[] {
+  const v = new Array(FIXTURE_DIMENSIONS).fill(0);
+  for (const word of text.toLowerCase().match(/[a-z]{4,}/g) ?? []) v[hash(word)] += 1;
+  return v;
+}
+
+export const fixtureEmbedder: Embedder = async (texts) => texts.map(fixtureVector);
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/homebook/cited-answer.test.ts
+```
+
+Expected result: 1 test file passes, 4 tests pass. Every model reply is a hand-written fixture.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 06: Answer with citations to the manual page"
+```
+
+## Before continuing
+
+- [ ] A citation links to a real manual page.
+- [ ] An uncited draft is not shown as an answer.
+
+Continue to [Draft maintenance summaries](/docs/homebook/07-maintenance-summaries).

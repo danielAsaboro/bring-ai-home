@@ -1,0 +1,565 @@
+---
+title: "07. Hand inference to a stronger device"
+description: "We will let a small Lookout machine hand vision tensors to a stronger machine on the home network with QVAC's ggml RPC, and refuse any endpoint that is not on a private network."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 07. Hand inference to a stronger device" />
+
+A small box near the door may be too weak to run a vision model quickly. A Mac in the next room is not. We will let Lookout hand the heavy work to that Mac, and keep everything inside the home network.
+
+We checked the installed `@qvac/sdk` 0.22.0 types first. There is no function called "delegate". There is ggml RPC: `startRpcServer`, `stopRpcServer`, `discoverRpcServers`, `getRpcDeviceMap`, and the llama.cpp `rpc-servers` model option. That is what this chapter uses.
+
+**Source checkpoint:** `3e3ecdc` · **Starting checkpoint:** `3cb1fa6`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `qvac-service/delegate.ts` | Parse a private-network endpoint and build the RPC model config |
+| `qvac-service/delegate.test.ts` | Accept private IPv4, refuse public hosts and names |
+| `qvac-service/rpc-host.mjs` | Run on the stronger machine: `startRpcServer` |
+| `qvac-service/serve.mjs` | Reads `LOOKOUT_DELEGATE` and passes the RPC config to vision |
+| `qvac-service/server.ts` | `/health` reports where vision runs |
+
+To compare with the starting checkpoint: `git diff 3cb1fa6 3e3ecdc`.
+
+## Build and observe
+
+### 1. Understand what moves
+
+With ggml RPC, the Lookout machine still owns the frame and still runs the service. The model's tensor work runs on the other machine. Tensors derived from the frame cross your home network. The PNG file does not leave this machine, but derived data does. Be honest about that.
+
+The RPC link is not encrypted and not authenticated. So `delegate.ts` accepts only a private IPv4 address and a port. It refuses public addresses and host names to resolve.
+
+### 2. Start the RPC host on the stronger machine
+
+On the Mac, from the same checkout:
+
+```bash
+git checkout 3e3ecdc
+npm ci
+npm run qvac:rpc-host -- 192.168.1.20 50052
+```
+
+Use that machine's real private address. The script writes a worker config that registers the SDK's RPC provider, as the SDK's own `rpc-server` example says to, and prints the URL to use. We could not run this in our build container, which has one machine and no access to the model registry.
+
+### 3. Point Lookout at it
+
+On the Lookout machine:
+
+```bash
+LOOKOUT_DELEGATE=192.168.1.20:50052 npm run qvac:service
+curl http://127.0.0.1:4319/health
+```
+
+`vision.placement` reads `delegated to 192.168.1.20:50052`. The browser still talks only to `127.0.0.1`. Try `LOOKOUT_DELEGATE=8.8.8.8:1`: the service refuses to start.
+
+For one server, Lookout uses the device alias `RPC0`. For several servers or devices, use `discoverRpcServers` and `getRpcDeviceMap` to build `rpc-servers` and `devices`, as the SDK's `rpc-inference` example does.
+
+## Read the checkpoint implementation
+
+These are complete files from `3e3ecdc`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "lookout",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:check-smoke": "node --no-warnings qvac-service/check-frame-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:measure": "node --no-warnings qvac-service/measure.mjs",
+    "qvac:rpc-host": "node --no-warnings qvac-service/rpc-host.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/delegate.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { delegateModelConfig, describePlacement, parseDelegateEndpoint } from "./delegate";
+
+describe("delegate endpoint", () => {
+  it("accepts private-network IPv4 endpoints", () => {
+    expect(parseDelegateEndpoint("192.168.1.20:50052")).toEqual({ host: "192.168.1.20", port: 50052 });
+    expect(parseDelegateEndpoint("10.0.0.2:50052")).toEqual({ host: "10.0.0.2", port: 50052 });
+    expect(parseDelegateEndpoint("172.20.4.9:9000")?.host).toBe("172.20.4.9");
+    expect(parseDelegateEndpoint(undefined)).toBeNull();
+  });
+
+  it("refuses public hosts, names, and bad ports", () => {
+    expect(() => parseDelegateEndpoint("8.8.8.8:50052")).toThrow("not on a private network");
+    expect(() => parseDelegateEndpoint("172.32.0.1:50052")).toThrow("not on a private network");
+    expect(() => parseDelegateEndpoint("gpu-box.local:50052")).toThrow("<private-ipv4>:<port>");
+    expect(() => parseDelegateEndpoint("192.168.1.20:70000")).toThrow("out of range");
+    expect(() => parseDelegateEndpoint("192.168..20:5")).toThrow("not on a private network");
+  });
+
+  it("builds the llama.cpp RPC model config", () => {
+    expect(delegateModelConfig(parseDelegateEndpoint("192.168.1.20:50052"))).toEqual({
+      "rpc-servers": "192.168.1.20:50052",
+      devices: "RPC0",
+    });
+    expect(delegateModelConfig(null)).toEqual({});
+    expect(describePlacement(null)).toBe("this machine");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/delegate.ts">
+
+```typescript
+// Delegated inference with QVAC 0.22.0.
+// The SDK has no "delegate" call. It has ggml RPC: a stronger machine runs
+// startRpcServer, and this machine loads the model with modelConfig
+// "rpc-servers" so the heavy tensor work runs over there.
+// The RPC link is not encrypted or authenticated, so Lookout only accepts a
+// private-network IPv4 endpoint and never a public host or a name to resolve.
+
+export type DelegateEndpoint = { host: string; port: number };
+
+function isPrivateIpv4(host: string): boolean {
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n, i) => !Number.isInteger(n) || n < 0 || n > 255 || host.split(".")[i] === "")) return false;
+  const [a, b] = parts;
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 127;
+}
+
+export function parseDelegateEndpoint(value: string | undefined): DelegateEndpoint | null {
+  if (!value) return null;
+  const match = /^([0-9.]+):(\d{1,5})$/.exec(value.trim());
+  if (!match) throw new Error(`Delegate must be <private-ipv4>:<port>, got "${value}"`);
+  const [, host, portText] = match;
+  const port = Number(portText);
+  if (!isPrivateIpv4(host)) throw new Error(`Delegate ${host} is not on a private network`);
+  if (port < 1 || port > 65535) throw new Error(`Delegate port ${port} is out of range`);
+  return { host, port };
+}
+
+// The modelConfig keys QVAC passes to llama.cpp. One server exposes its first
+// device as RPC0. For several servers or devices, use discoverRpcServers and
+// getRpcDeviceMap to build these strings instead.
+export function delegateModelConfig(endpoint: DelegateEndpoint | null): Record<string, string> {
+  if (!endpoint) return {};
+  return { "rpc-servers": `${endpoint.host}:${endpoint.port}`, devices: "RPC0" };
+}
+
+export function describePlacement(endpoint: DelegateEndpoint | null): string {
+  return endpoint ? `delegated to ${endpoint.host}:${endpoint.port}` : "this machine";
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/rpc-host.mjs">
+
+```javascript
+// Run this on the stronger machine (for example a Mac on the same home network).
+// Usage: npm run qvac:rpc-host -- <this-machine-private-ipv4> [port]
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { createInterface } from "node:readline/promises";
+import { fileURLToPath } from "node:url";
+
+const { parseDelegateEndpoint } = await import("./delegate.ts");
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const configPath = path.join(qvacDirectory, "rpc-host-config.json");
+
+let sdk;
+let serverId;
+try {
+  const host = process.argv[2];
+  const port = Number(process.argv[3] ?? 50052);
+  // Same rule as the client: private IPv4 only.
+  parseDelegateEndpoint(`${host}:${port}`);
+
+  // The SDK's rpc-server example registers the RPC provider in the worker config.
+  await mkdir(qvacDirectory, { recursive: true });
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ rpcServerProvider: "@qvac/sdk/ggml-rpc-server/provider" }, null, 2)}\n`,
+  );
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  const server = await sdk.startRpcServer({ host, port, allowNonLoopbackHost: true });
+  serverId = server.serverId;
+  process.stderr.write(`Serving ggml RPC at ${server.url}. Set LOOKOUT_DELEGATE=${server.url} on the Lookout machine.\n`);
+  const input = createInterface({ input: process.stdin, output: process.stderr });
+  await input.question("Press Enter to stop after Lookout unloads its model.\n");
+  input.close();
+} catch (error) {
+  process.stderr.write(`RPC host failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && serverId) await sdk.stopRpcServer({ serverId }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/serve.mjs">
+
+```javascript
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+const { createLookoutServer, SERVICE_PORT } = await import("./server.ts");
+const { createQvacChecker } = await import("./qvac-checker.ts");
+const { createQvacProposer } = await import("./qvac-proposer.ts");
+const { delegateModelConfig, describePlacement, parseDelegateEndpoint } = await import("./delegate.ts");
+
+// LOOKOUT_DELEGATE=192.168.1.20:50052 hands vision tensors to a stronger
+// machine on the home network. Unset, everything runs here.
+const delegate = parseDelegateEndpoint(process.env.LOOKOUT_DELEGATE);
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+
+// LOOKOUT_VISION=off starts the boundary without a model, to see the 503 path.
+const checker = process.env.LOOKOUT_VISION === "off" ? null : createQvacChecker(appDirectory, delegateModelConfig(delegate));
+const proposer = process.env.LOOKOUT_LANGUAGE === "off" ? null : createQvacProposer();
+const placement = describePlacement(delegate);
+const server = createLookoutServer({ checker, proposer, placement });
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stderr.write(`Lookout QVAC service on http://127.0.0.1:${SERVICE_PORT} (vision: ${placement})\n`);
+});
+
+async function shutdown() {
+  server.close();
+  await proposer?.close();
+  await checker?.close();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createLookoutServer, isAllowedOrigin, type FrameChecker, type WatcherProposer } from "./server";
+
+// A fixture checker with a fixed reply. It is not a model.
+const fixtureChecker: FrameChecker = { model: "fixture-checker", check: async () => "YES. A box by the gate." };
+
+let close: (() => void) | undefined;
+afterEach(() => close?.());
+
+async function start(checker: FrameChecker | null, proposer: WatcherProposer | null = null) {
+  const server = createLookoutServer({ checker, proposer });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+const body = JSON.stringify({ frameId: "front-gate-3", condition: "a parcel by the gate", pngBase64: "aGk=" });
+
+describe("Lookout service boundary", () => {
+  it("reports health without claiming a loaded model", async () => {
+    const url = await start(null);
+    expect(await (await fetch(`${url}/health`)).json()).toEqual({
+      service: "ready",
+      vision: { state: "not_configured" },
+      language: { state: "not_configured" },
+    });
+  });
+
+  it("answers 503 when vision is not configured instead of inventing a verdict", async () => {
+    const url = await start(null);
+    const res = await fetch(`${url}/v1/check-frame`, { method: "POST", body });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("vision_unavailable");
+  });
+
+  it("rejects bad requests and foreign origins", async () => {
+    const url = await start(fixtureChecker);
+    expect((await fetch(`${url}/v1/check-frame`, { method: "POST", body: "{}" })).status).toBe(400);
+    expect(isAllowedOrigin("https://evil.example")).toBe(false);
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
+  });
+
+  it("returns the digest of the bytes it received and a parsed verdict", async () => {
+    const url = await start(fixtureChecker);
+    const json = await (await fetch(`${url}/v1/check-frame`, { method: "POST", body })).json();
+    expect(json.frameDigest).toBe("8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4");
+    expect(json.verdict).toEqual({ answer: "yes", reason: "A box by the gate." });
+    expect(json.model).toBe("fixture-checker");
+  });
+
+  it("validates a proposed watcher and keeps the raw reply when it is rejected", async () => {
+    // Fixture proposers with fixed replies, not a model.
+    const good: WatcherProposer = {
+      model: "fixture-proposer",
+      complete: async () => '{"sourceId":"front-gate","condition":"a parcel left by the gate","fromHour":0,"toHour":0,"minMotion":0}',
+    };
+    let url = await start(null, good);
+    const sentence = JSON.stringify({ sentence: "tell me when a parcel is left by the gate" });
+    const ok = await (await fetch(`${url}/v1/propose-watcher`, { method: "POST", body: sentence })).json();
+    expect(ok.proposal.sourceId).toBe("front-gate");
+    close?.();
+
+    const invented: WatcherProposer = { model: "fixture-proposer", complete: async () => '{"sourceId":"driveway"}' };
+    url = await start(null, invented);
+    const res = await fetch(`${url}/v1/propose-watcher`, { method: "POST", body: sentence });
+    expect(res.status).toBe(422);
+    expect((await res.json()).raw).toBe('{"sourceId":"driveway"}');
+  });
+});
+
+describe("placement", () => {
+  it("reports where vision runs", async () => {
+    const server = createLookoutServer({ checker: fixtureChecker, placement: "delegated to 192.168.1.20:50052" });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const health = await (await fetch(`${url}/health`)).json();
+    server.close();
+    expect(health.vision).toEqual({ model: "fixture-checker", state: "configured", placement: "delegated to 192.168.1.20:50052" });
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createHash } from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import { parseCheckFrameRequest } from "../src/features/lookout/check-contract.ts";
+import { sampleSources } from "../src/features/lookout/sources.ts";
+import { buildConditionPrompt, parseVerdict } from "../src/features/lookout/verdict.ts";
+import { buildWatcherHistory, parseWatcherJson } from "../src/features/lookout/watcher.ts";
+
+export const SERVICE_PORT = 4319;
+const MAX_BODY_BYTES = 2_100_000;
+
+// The only thing the server knows about inference. QVAC lives behind it.
+export type FrameChecker = {
+  model: string;
+  check(png: Buffer, prompt: string): Promise<string>;
+};
+
+export type WatcherProposer = {
+  model: string;
+  complete(history: ReturnType<typeof buildWatcherHistory>): Promise<string>;
+};
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and local scripts send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function fail(res: ServerResponse, status: number, code: string, message: string, origin?: string) {
+  send(res, status, { error: { code, message } }, origin);
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("too_large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function createLookoutServer({
+  checker,
+  proposer = null,
+  placement = "this machine",
+}: {
+  checker: FrameChecker | null;
+  proposer?: WatcherProposer | null;
+  placement?: string;
+}) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return fail(res, 403, "origin_denied", "Only local pages may call Lookout's service");
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+
+    if (req.method === "GET" && req.url === "/health") {
+      return send(
+        res,
+        200,
+        {
+          service: "ready",
+          vision: checker ? { model: checker.model, state: "configured", placement } : { state: "not_configured" },
+          language: proposer ? { model: proposer.model, state: "configured" } : { state: "not_configured" },
+        },
+        origin,
+      );
+    }
+
+    if (req.method === "POST" && req.url === "/v1/check-frame") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch (error) {
+        const tooLarge = error instanceof Error && error.message === "too_large";
+        return fail(res, tooLarge ? 413 : 400, tooLarge ? "too_large" : "bad_json", tooLarge ? "Frame is too large" : "Body must be JSON", origin);
+      }
+      const parsed = parseCheckFrameRequest(body);
+      if (!parsed.ok) return fail(res, 400, "bad_request", parsed.message, origin);
+      let prompt: string;
+      try {
+        prompt = buildConditionPrompt(parsed.value.condition);
+      } catch (error) {
+        return fail(res, 400, "bad_condition", (error as Error).message, origin);
+      }
+      if (!checker) return fail(res, 503, "vision_unavailable", "The local vision model is not configured", origin);
+
+      const png = Buffer.from(parsed.value.pngBase64, "base64");
+      const frameDigest = createHash("sha256").update(png).digest("hex");
+      const startedAt = Date.now();
+      try {
+        const raw = await checker.check(png, prompt);
+        return send(
+          res,
+          200,
+          { frameId: parsed.value.frameId, frameDigest, model: checker.model, raw, verdict: parseVerdict(raw), ms: Date.now() - startedAt },
+          origin,
+        );
+      } catch (error) {
+        return fail(res, 503, "vision_failed", error instanceof Error ? error.message : "Vision check failed", origin);
+      }
+    }
+
+    if (req.method === "POST" && req.url === "/v1/propose-watcher") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch {
+        return fail(res, 400, "bad_json", "Body must be JSON", origin);
+      }
+      const sentence = (body as { sentence?: unknown } | null)?.sentence;
+      if (typeof sentence !== "string" || !sentence.trim() || sentence.length > 300) {
+        return fail(res, 400, "bad_request", "sentence is required (300 characters or fewer)", origin);
+      }
+      if (!proposer) return fail(res, 503, "language_unavailable", "The local language model is not configured", origin);
+      let raw: string;
+      try {
+        raw = await proposer.complete(buildWatcherHistory(sentence, sampleSources));
+      } catch (error) {
+        return fail(res, 503, "language_failed", error instanceof Error ? error.message : "Proposal failed", origin);
+      }
+      const parsed = parseWatcherJson(raw, sampleSources.map((s) => s.id));
+      // A rejected proposal still returns the raw text, so a person can see why.
+      if (!parsed.ok) return send(res, 422, { error: { code: "invalid_proposal", message: parsed.message }, raw }, origin);
+      return send(res, 200, { proposal: parsed.value, raw, model: proposer.model }, origin);
+    }
+
+    return fail(res, 404, "not_found", "Unknown route", origin);
+  });
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- qvac-service/delegate.test.ts qvac-service/server.test.ts
+```
+
+Expected result: 2 test files pass, 9 tests pass. They test parsing and the health report, not a live RPC link.
+
+These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 07: Hand inference to a stronger device"
+```
+
+## Before continuing
+
+- [ ] You can say which data crosses the network when delegating, and which does not.
+- [ ] A public address was refused.
+
+Next: [08. Prove footage never leaves the machine](/docs/lookout/08-offline-proof)

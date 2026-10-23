@@ -1,6 +1,6 @@
 # Bring AI Home
 
-Ten small apps that move everyday AI work onto your own machine with [QVAC](https://docs.qvac.tether.io). The lessons live at [bringaihome.xyz](https://bringaihome.xyz).
+Ten small apps that move everyday AI work onto your own machine with [QVAC](https://docs.qvac.tether.io). The lessons live at [bringaihome.xyz/docs](https://bringaihome.xyz/docs).
 
 `main` is the site. Each app lives on its own branch, one commit per lesson.
 
@@ -27,13 +27,22 @@ npm ci
 npm run dev
 ```
 
-Check out the branch instead of a hash to get the finished app. Redact's lessons use the starter zip and patches in `downloads/redact/`.
+Check out the branch instead of a hash to get the finished app. Redact's lessons use the starter zip and patches in `docs/downloads/redact/`.
 
 ## Run the site
+
+Lessons are Mintlify pages under `docs/`; `docs.json` is the config. The landing page is `landing/index.html`.
 
 ```bash
 npm install -g mint
 mint dev
 ```
 
-Mintlify connects to this repository at its root; `docs.json` is the config.
+## Deploy
+
+`scripts/build-site.sh` exports the docs to `dist/`, puts the landing page at `/` and the docs at `/docs`. Deploy `dist/` to the Vercel project `bring-ai-home`:
+
+```bash
+scripts/build-site.sh
+cd dist && vercel deploy --prod --scope harmonia-b4a76411
+```

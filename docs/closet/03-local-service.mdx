@@ -1,0 +1,526 @@
+---
+title: "03. Add the local service boundary"
+description: "We will put a small loopback HTTP service between the browser and QVAC, with typed failures the app can show honestly. The UI does not change yet."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Closet · 03. Add the local service boundary" />
+
+A browser cannot load a native model runtime, and React is the wrong place to own a model's lifecycle. We put a small HTTP service on `127.0.0.1` between Closet and QVAC.
+
+At the end of this chapter the service can describe a photo, rejects bad requests, and says plainly when a model is not loaded. The Closet UI does not change yet.
+
+**Source checkpoint:** `6e855f3` · **Starting checkpoint:** `6193b20`
+
+## What changes
+
+| File | Change |
+| --- | --- |
+| `qvac-service/server.ts` | The loopback HTTP server: health, origin check, image validation, route table |
+| `qvac-service/qvac-engine.ts` | Loads QVAC once and each model on first use; stages uploads in a temp folder |
+| `qvac-service/serve.mjs` | Starts the service; if QVAC cannot start it still serves `503` |
+| `src/features/closet/service-client.ts` | The browser's only door to the service, with classified failures |
+| `package.json` | Add `qvac:service` |
+
+To compare with the previous checkpoint: `git diff 6193b20 6e855f3`.
+
+## Build and observe
+
+### 1. Read the route table
+
+Open `server.ts`. Each capability is an optional function on `ClosetEngine`. A route whose function is missing returns `null`, and the server answers `503`. The service never saves anything; it returns a proposal and the browser decides.
+
+### 2. Validate the image, not the file name
+
+`parseGarmentImage` accepts only `data:image/png` or `data:image/jpeg` URLs, then checks the first bytes. A JPEG label on PNG bytes is rejected with `400`. The service never accepts a file path from the browser.
+
+### 3. Start the service
+
+```bash
+npm run qvac:service
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:4320/health
+curl -X POST http://127.0.0.1:4320/describe -d '{"name":"x"}'
+```
+
+Health lists `["describe"]`. The second call returns `400` with `Request must contain name and dataUrl`. Health says the process is up. It does not say the model has downloaded; the first `/describe` call loads it.
+
+### 4. Keep failures apart
+
+Open `service-client.ts`. A refused connection is `service-unreachable`. `503` is `model-unavailable`. `400` is `rejected-request`. `502` is `inference-failed`. A wrong JSON shape is `bad-response`. These are different problems with different fixes, and the UI will say which one happened.
+
+### 5. Check the local boundary
+
+The service binds to `127.0.0.1`. Requests from any browser origin other than `localhost` or `127.0.0.1` get `403`, so a website you visit cannot call your wardrobe service.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+export const SERVICE_PORT = 4320;
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+export type GarmentImage = { name: string; bytes: Uint8Array; mime: "image/png" | "image/jpeg" };
+
+// Everything the local models can do for Closet. Each capability is optional:
+// a missing one answers 503 and the app keeps its manual path.
+export type ClosetEngine = {
+  describe?: (image: GarmentImage) => Promise<{ description: string; model: string }>;
+};
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and other local tools send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseGarmentImage(value: unknown): GarmentImage {
+  const v = value as { name?: unknown; dataUrl?: unknown } | null;
+  if (!v || typeof v.name !== "string" || typeof v.dataUrl !== "string") {
+    throw new Error("Request must contain name and dataUrl");
+  }
+  const match = /^data:(image\/png|image\/jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(v.dataUrl);
+  if (!match) throw new Error("Only PNG or JPEG data URLs are accepted");
+  const bytes = new Uint8Array(Buffer.from(match[2], "base64"));
+  const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const mime = match[1] as GarmentImage["mime"];
+  if ((mime === "image/png" && !isPng) || (mime === "image/jpeg" && !isJpeg)) {
+    throw new Error("Image bytes do not match the declared type");
+  }
+  return { name: v.name.slice(0, 120), bytes, mime };
+}
+
+export function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+type Route = (body: unknown, engine: ClosetEngine) => Promise<unknown> | null;
+
+// Each route returns null when its capability is not loaded.
+const ROUTES: Record<string, Route> = {
+  "/describe": (body, engine) => {
+    if (!engine.describe) return null;
+    const image = parseGarmentImage(body);
+    return engine.describe(image);
+  },
+};
+
+export function capabilities(engine: ClosetEngine) {
+  return Object.keys(ROUTES)
+    .map((route) => route.slice(1))
+    .filter((name) => typeof (engine as Record<string, unknown>)[name] === "function");
+}
+
+// The service proposes. It never saves anything. The browser decides.
+export function createClosetServer(engine: ClosetEngine) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      return send(res, 200, { ok: true, capabilities: capabilities(engine) }, origin);
+    }
+    const route = req.method === "POST" && req.url ? ROUTES[req.url] : undefined;
+    if (!route) return send(res, 404, { error: "Not found" }, origin);
+
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    let pending: Promise<unknown> | null;
+    try {
+      pending = route(body, engine);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    if (!pending) return send(res, 503, { error: "This local model is not available" }, origin);
+    try {
+      return send(res, 200, await pending, origin);
+    } catch (error) {
+      return send(res, 502, { error: (error as Error).message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-engine.ts">
+
+```typescript
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { DESCRIBE_GARMENT_PROMPT, resolveLocalQvacPaths, VISION_MODEL } from "./local-config.ts";
+import type { ClosetEngine, GarmentImage } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+// Loads QVAC once, then each model on first use. All inference stays local.
+export async function createQvacEngine(appDirectory: string): Promise<ClosetEngine & { close(): Promise<void> }> {
+  const { cacheDirectory, configPath } = resolveLocalQvacPaths(appDirectory);
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  const sdk: Sdk = await import("@qvac/sdk");
+  const loaded = new Map<string, Promise<string>>();
+
+  function model(key: string, load: () => Promise<string>) {
+    let pending = loaded.get(key);
+    if (!pending) {
+      pending = load().catch((error: unknown) => {
+        loaded.delete(key); // a failed load can be retried
+        throw error;
+      });
+      loaded.set(key, pending);
+    }
+    return pending;
+  }
+
+  const vision = () =>
+    model(VISION_MODEL, () =>
+      sdk.loadModel({
+        modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+        modelConfig: { ctx_size: 1024, projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+      }),
+    );
+
+  // The vision model reads attachments from disk, so stage the upload briefly.
+  async function withTempImage<T>(image: GarmentImage, work: (file: string) => Promise<T>) {
+    const dir = await mkdtemp(path.join(tmpdir(), "closet-"));
+    const file = path.join(dir, image.mime === "image/png" ? "garment.png" : "garment.jpg");
+    try {
+      await writeFile(file, image.bytes);
+      return await work(file);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  return {
+    async describe(image) {
+      const modelId = await vision();
+      return withTempImage(image, async (file) => {
+        const run = sdk.completion({
+          modelId,
+          history: [{ role: "user", content: DESCRIBE_GARMENT_PROMPT, attachments: [{ path: file }] }],
+          stream: true,
+        });
+        let text = "";
+        for await (const token of run.tokenStream) text += token;
+        const description = text.replace(/\s+/g, " ").trim();
+        if (!description) throw new Error("The model returned an empty description");
+        return { description, model: VISION_MODEL };
+      });
+    },
+    async close() {
+      for (const pending of loaded.values()) {
+        const modelId = await pending.catch(() => null);
+        if (modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+      }
+      await sdk.close().catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/serve.mjs">
+
+```javascript
+import { fileURLToPath } from "node:url";
+
+const { createClosetServer, SERVICE_PORT } = await import("./server.ts");
+const { createQvacEngine } = await import("./qvac-engine.ts");
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+
+let engine = {};
+try {
+  engine = await createQvacEngine(appDirectory);
+} catch (error) {
+  process.stderr.write(
+    `QVAC unavailable: ${error instanceof Error ? error.message : String(error)}\n` +
+      "The service will answer 503 and Closet keeps working manually.\n",
+  );
+}
+
+// Loopback only: the browser on this machine is the only client.
+const server = createClosetServer(engine);
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stderr.write(`Closet QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+async function shutdown() {
+  server.close();
+  if (typeof engine.close === "function") await engine.close();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="src/features/closet/service-client.ts">
+
+```typescript
+// The browser's only door to local AI. Every failure is classified so the UI
+// can say what went wrong and keep the manual path open.
+
+export const SERVICE_URL = "http://127.0.0.1:4320";
+
+export type ServiceFailure =
+  | "service-unreachable" // nothing listening: run `npm run qvac:service`
+  | "model-unavailable" // 503: the service is up, this model is not loaded
+  | "rejected-request" // 400: the app sent something the service refused
+  | "inference-failed" // 502: the model ran and failed
+  | "bad-response"; // the service answered with something we cannot read
+
+export type ServiceResult<T> = { ok: true; value: T } | { ok: false; failure: ServiceFailure; message: string };
+
+type Fetch = typeof fetch;
+
+export async function callService<T>(
+  path: string,
+  body: unknown,
+  read: (json: unknown) => T,
+  fetchFn: Fetch = fetch,
+): Promise<ServiceResult<T>> {
+  let res: Response;
+  try {
+    res = await fetchFn(`${SERVICE_URL}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    return { ok: false, failure: "service-unreachable", message: "The local Closet service is not running." };
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    return { ok: false, failure: "bad-response", message: "The local service answered with unreadable data." };
+  }
+  if (!res.ok) {
+    const message = (json as { error?: string } | null)?.error ?? `HTTP ${res.status}`;
+    const failure: ServiceFailure =
+      res.status === 503 ? "model-unavailable" : res.status === 400 ? "rejected-request" : "inference-failed";
+    return { ok: false, failure, message };
+  }
+  try {
+    return { ok: true, value: read(json) };
+  } catch (error) {
+    return { ok: false, failure: "bad-response", message: (error as Error).message };
+  }
+}
+
+export function checkHealth(fetchFn?: Fetch) {
+  return callService(
+    "/health",
+    undefined,
+    (json) => {
+      const caps = (json as { capabilities?: unknown }).capabilities;
+      if (!Array.isArray(caps) || !caps.every((c) => typeof c === "string")) throw new Error("Malformed health");
+      return caps as string[];
+    },
+    fetchFn,
+  );
+}
+
+export function describeGarment(image: { name: string; dataUrl: string }, fetchFn?: Fetch) {
+  return callService(
+    "/describe",
+    image,
+    (json) => {
+      const v = json as { description?: unknown; model?: unknown };
+      if (typeof v.description !== "string" || typeof v.model !== "string") throw new Error("Malformed description");
+      return { description: v.description, model: v.model };
+    },
+    fetchFn,
+  );
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createClosetServer, isAllowedOrigin, parseGarmentImage, type ClosetEngine } from "./server";
+
+// A 1x1 PNG header is enough for the type check. Fixture bytes, not a photo.
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
+const pngRequest = { name: "raincoat.png", dataUrl: `data:image/png;base64,${PNG}` };
+
+let close: (() => void) | undefined;
+afterEach(() => close?.());
+
+async function start(engine: ClosetEngine) {
+  const server = createClosetServer(engine);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+  fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+describe("Closet local service", () => {
+  it("only accepts loopback browser origins", () => {
+    expect(isAllowedOrigin(undefined)).toBe(true);
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
+    expect(isAllowedOrigin("https://example.com")).toBe(false);
+  });
+
+  it("checks that image bytes match the declared type", () => {
+    expect(parseGarmentImage(pngRequest).mime).toBe("image/png");
+    expect(() => parseGarmentImage({ name: "x", dataUrl: `data:image/jpeg;base64,${PNG}` })).toThrow("do not match");
+    expect(() => parseGarmentImage({ name: "x", dataUrl: "data:text/plain;base64,aGk=" })).toThrow("PNG or JPEG");
+  });
+
+  it("reports which capabilities are loaded", async () => {
+    const base = await start({ describe: async () => ({ description: "", model: "m" }) });
+    expect(await (await fetch(`${base}/health`)).json()).toEqual({ ok: true, capabilities: ["describe"] });
+  });
+
+  it("answers 503 when the model is not loaded, so the app falls back", async () => {
+    const base = await start({});
+    expect((await post(`${base}/describe`, pngRequest)).status).toBe(503);
+  });
+
+  it("separates a bad request (400) from an inference failure (502)", async () => {
+    const base = await start({
+      describe: async () => {
+        throw new Error("native runtime failed");
+      },
+    });
+    expect((await post(`${base}/describe`, { name: "x" })).status).toBe(400);
+    const failed = await post(`${base}/describe`, pngRequest);
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({ error: "native runtime failed" });
+  });
+
+  it("returns the proposal from the engine", async () => {
+    // Fixture engine: returns hand-written text, never presented as model output.
+    const base = await start({ describe: async () => ({ description: "fixture text", model: "fixture" }) });
+    const res = await post(`${base}/describe`, pngRequest, { origin: "http://localhost:3000" });
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(await res.json()).toEqual({ description: "fixture text", model: "fixture" });
+  });
+
+  it("refuses foreign origins", async () => {
+    const base = await start({});
+    expect((await post(`${base}/describe`, pngRequest, { origin: "https://example.com" })).status).toBe(403);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/closet/service-client.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { checkHealth, describeGarment } from "./service-client";
+
+const image = { name: "x.png", dataUrl: "data:image/png;base64,AAAA" };
+const reply = (status: number, body: unknown) => async () =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+describe("service client", () => {
+  it("classifies a refused connection as an unreachable service", async () => {
+    const result = await checkHealth(async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(result).toMatchObject({ ok: false, failure: "service-unreachable" });
+  });
+
+  it("keeps 503, 400, and 502 apart", async () => {
+    expect(await describeGarment(image, reply(503, { error: "x" }))).toMatchObject({ failure: "model-unavailable" });
+    expect(await describeGarment(image, reply(400, { error: "x" }))).toMatchObject({ failure: "rejected-request" });
+    expect(await describeGarment(image, reply(502, { error: "x" }))).toMatchObject({ failure: "inference-failed" });
+  });
+
+  it("rejects a response with the wrong shape", async () => {
+    expect(await describeGarment(image, reply(200, { text: "hi" }))).toMatchObject({ failure: "bad-response" });
+  });
+
+  it("returns a well-formed proposal", async () => {
+    // Fixture reply written by hand. It is not model output.
+    const result = await describeGarment(image, reply(200, { description: "fixture", model: "fixture" }));
+    expect(result).toEqual({ ok: true, value: { description: "fixture", model: "fixture" } });
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/server.test.ts src/features/closet/service-client.test.ts
+```
+
+Expected result: 2 test files pass, 11 tests pass. The service tests start a real HTTP server on a random loopback port with a hand-written engine. They do not load a model.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 03: Add the local service boundary"
+```
+
+## Before continuing
+
+- [ ] `/health` answered from `127.0.0.1:4320`.
+- [ ] You can name the failure behind each status code.
+
+Continue to [Turn descriptions into reviewed garment details](/docs/closet/04-reviewed-details).

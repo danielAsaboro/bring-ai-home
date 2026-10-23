@@ -1,0 +1,703 @@
+---
+title: "07. Review, accept, and keep the arithmetic deterministic"
+description: "We will let a person accept or reject each draft. Only accepted drafts reach the book, totals are recomputed in code, and every acceptance is audited."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Ledger · 07. Review, accept, and keep the arithmetic deterministic" />
+
+We will let a person accept or reject a draft. Only an accepted draft becomes a ledger entry. Totals are recomputed by code, and every acceptance leaves an audit record.
+
+**Source checkpoint:** `1532ea0` · **Starting checkpoint:** `7ee6547`
+
+## What changes
+
+- `src/features/ledger/book.ts`: `acceptDraft`, `rejectDraft`, `suggestedValues`, and `totals`.
+- `src/features/ledger/ledger-app.tsx`: holds the book, shows entries, totals, and the receipt audit.
+- `src/features/ledger/receipt-inbox.tsx`: a review form with date, merchant, category, and amount, plus **Accept into ledger** and **Reject draft**.
+- `src/app/page.tsx`: renders `LedgerApp`.
+
+To compare with the checkpoint: `git diff 7ee6547 1532ea0`.
+
+## Build and observe
+
+### 1. Start from suggestions, not decisions
+
+`suggestedValues` fills the form. Merchant and category come from a valid proposal if there is one. Otherwise the raw OCR merchant text and `Other`. The amount comes from the OCR total in cents.
+
+The person can change any field. The category is a select box built from `CATEGORIES`, so it can only hold a listed value.
+
+### 2. Accept in one place
+
+`acceptDraft` is the only way a receipt reaches the book. It checks:
+
+- the draft was not already decided;
+- the amount is a positive whole number of cents;
+- the date is `YYYY-MM-DD`;
+- the merchant is not empty;
+- the category is on the list.
+
+It returns a new book. It does not change the old one.
+
+The amount field is text. On submit, `parseAmountCents` turns `"10.50"` into `1050`. If that fails, the form says so and nothing is added.
+
+### 3. Record what the person changed
+
+Each acceptance adds an audit record: the entry ID, the draft ID, the source digest, the time, the OCR total, the model's proposal, and `changedByReviewer`. That last field lists every value the person changed from the suggestion.
+
+### 4. Recompute totals in code
+
+`totals` adds whole cents. It returns a grand total and a total for each category. The model is not involved.
+
+The sample book starts at **160.04**. Accept the course receipt at 10.53 and it becomes **170.57**. Change the amount to 10.50 first and it becomes **170.54**, and the audit shows `amountCents` as changed, next to the OCR total of 10.53.
+
+Reject the draft instead and the total stays at 160.04.
+
+### 5. Try it
+
+With the service and app running, read the sample receipt, optionally propose a category, then accept or reject. A decided draft cannot be accepted again: the form is replaced by **This draft has been decided.**
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="src/features/ledger/book.ts">
+
+```typescript
+import { CATEGORIES, type Category } from "./categories";
+import type { DraftTransaction } from "./draft-transactions";
+import type { LedgerEntry } from "./sample-book";
+
+export type ReviewedValues = { date: string; merchant: string; category: Category; amountCents: number };
+
+export type AuditRecord = {
+  entryId: string;
+  draftId: string;
+  sourceDigest: string;
+  acceptedAt: string;
+  ocrTotalCents: number | null;
+  proposal: { merchant: string; category: Category } | null;
+  changedByReviewer: (keyof ReviewedValues)[];
+};
+
+export type Book = { entries: LedgerEntry[]; audit: AuditRecord[]; decided: string[] };
+
+export function createBook(entries: LedgerEntry[]): Book {
+  return { entries: [...entries], audit: [], decided: [] };
+}
+
+/** The suggested starting values for a reviewer. A suggestion, not a decision. */
+export function suggestedValues(
+  draft: DraftTransaction,
+  proposal: { merchant: string; category: Category } | null,
+): ReviewedValues {
+  return {
+    date: draft.date?.value ?? "",
+    merchant: proposal?.merchant ?? draft.merchant?.value ?? "",
+    category: proposal?.category ?? "Other",
+    amountCents: draft.totalCents?.value ?? 0,
+  };
+}
+
+/** Only this function adds a receipt entry, and only with values a person confirmed. */
+export function acceptDraft(
+  book: Book,
+  draft: DraftTransaction,
+  reviewed: ReviewedValues,
+  proposal: { merchant: string; category: Category } | null,
+  now: Date,
+): Book {
+  if (book.decided.includes(draft.id)) throw new Error("This draft was already decided");
+  if (!Number.isInteger(reviewed.amountCents) || reviewed.amountCents <= 0) {
+    throw new Error("Amount must be a positive number of cents");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewed.date)) throw new Error("Date must be YYYY-MM-DD");
+  if (reviewed.merchant.trim() === "") throw new Error("Merchant is required");
+  if (!CATEGORIES.includes(reviewed.category)) throw new Error("Unknown category");
+
+  const suggested = suggestedValues(draft, proposal);
+  const changedByReviewer = (Object.keys(suggested) as (keyof ReviewedValues)[]).filter(
+    (key) => suggested[key] !== reviewed[key],
+  );
+  const entryId = `r-${draft.receiptId}`;
+  return {
+    entries: [
+      ...book.entries,
+      { id: entryId, ...reviewed, merchant: reviewed.merchant.trim(), source: "receipt" },
+    ],
+    audit: [
+      ...book.audit,
+      {
+        entryId,
+        draftId: draft.id,
+        sourceDigest: draft.sourceDigest,
+        acceptedAt: now.toISOString(),
+        ocrTotalCents: draft.totalCents?.value ?? null,
+        proposal,
+        changedByReviewer,
+      },
+    ],
+    decided: [...book.decided, draft.id],
+  };
+}
+
+export function rejectDraft(book: Book, draft: DraftTransaction): Book {
+  if (book.decided.includes(draft.id)) return book;
+  return { ...book, decided: [...book.decided, draft.id] };
+}
+
+/** Totals are integer sums in code. No model is involved. */
+export function totals(entries: LedgerEntry[]) {
+  const byCategory = new Map<Category, number>();
+  let all = 0;
+  for (const entry of entries) {
+    byCategory.set(entry.category, (byCategory.get(entry.category) ?? 0) + entry.amountCents);
+    all += entry.amountCents;
+  }
+  return {
+    allCents: all,
+    byCategory: CATEGORIES.filter((c) => byCategory.has(c)).map((c) => ({ category: c, cents: byCategory.get(c)! })),
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/ledger-app.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { acceptDraft, createBook, rejectDraft, totals, type Book } from "./book";
+import { formatCents } from "./draft-transactions";
+import type { ReceiptClient } from "./receipt-client";
+import { ReceiptInbox } from "./receipt-inbox";
+import { SAMPLE_BOOK } from "./sample-book";
+
+export function LedgerApp({ client, now = () => new Date() }: { client?: ReceiptClient; now?: () => Date }) {
+  const [book, setBook] = useState<Book>(() => createBook(SAMPLE_BOOK));
+  const sums = totals(book.entries);
+
+  return (
+    <>
+      <ReceiptInbox
+        client={client}
+        review={{
+          decided: book.decided,
+          accept: (draft, reviewed, proposal) => setBook((b) => acceptDraft(b, draft, reviewed, proposal, now())),
+          reject: (draft) => setBook((b) => rejectDraft(b, draft)),
+        }}
+      />
+      <section aria-labelledby="book">
+        <h2 id="book">Book</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Merchant</th>
+              <th>Category</th>
+              <th>Amount</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {book.entries.map((entry) => (
+              <tr key={entry.id}>
+                <td>{entry.date}</td>
+                <td>{entry.merchant}</td>
+                <td>{entry.category}</td>
+                <td>{formatCents(entry.amountCents)}</td>
+                <td>{entry.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p aria-label="Book total">Total: {formatCents(sums.allCents)}</p>
+        <ul aria-label="Totals by category">
+          {sums.byCategory.map((row) => (
+            <li key={row.category}>
+              {row.category}: {formatCents(row.cents)}
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section aria-labelledby="audit">
+        <h2 id="audit">Receipt audit</h2>
+        {book.audit.length === 0 ? (
+          <p>No receipts accepted yet.</p>
+        ) : (
+          <ul>
+            {book.audit.map((record) => (
+              <li key={record.entryId}>
+                {record.entryId} from draft {record.draftId} · source {record.sourceDigest.slice(0, 12)} · OCR total{" "}
+                {record.ocrTotalCents === null ? "none" : formatCents(record.ocrTotalCents)} · proposal{" "}
+                {record.proposal ? `${record.proposal.merchant} / ${record.proposal.category}` : "none"} · changed by
+                reviewer: {record.changedByReviewer.length ? record.changedByReviewer.join(", ") : "nothing"}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/receipt-inbox.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { suggestedValues, type ReviewedValues } from "./book";
+import { CATEGORIES, proposalInputFromDraft, type Category } from "./categories";
+import { draftFromOcr, parseAmountCents, formatCents, type DraftTransaction, type Evidence } from "./draft-transactions";
+import { createReceiptClient, type ReceiptClient } from "./receipt-client";
+import type { ProposeResponse, SimilarResponse } from "./receipt-contract";
+import { SAMPLE_BOOK } from "./sample-book";
+
+const SAMPLE_URL = "/test-files/ledger/receipt-corner-cafe.png";
+
+type ProposalStatus =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "error"; message: string }
+  | { kind: "done"; response: ProposeResponse };
+
+type SimilarStatus =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "error"; message: string }
+  | { kind: "done"; response: SimilarResponse };
+
+type Status =
+  | { kind: "idle" }
+  | { kind: "reading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; draft: DraftTransaction; ocrMs: number | null; blockCount: number };
+
+function Source({ evidence }: { evidence: Evidence<unknown> | null }) {
+  if (!evidence) return <span>not found</span>;
+  const confidence = evidence.confidence === null ? "n/a" : evidence.confidence.toFixed(2);
+  return (
+    <small>
+      from blocks {evidence.blockIndexes.join(", ")}: “{evidence.text}” · confidence {confidence}
+    </small>
+  );
+}
+
+export type ReviewDecision = {
+  accept(draft: DraftTransaction, reviewed: ReviewedValues, proposal: { merchant: string; category: Category } | null): void;
+  reject(draft: DraftTransaction): void;
+  decided: string[];
+};
+
+function ReviewForm({
+  draft,
+  proposal,
+  review,
+}: {
+  draft: DraftTransaction;
+  proposal: { merchant: string; category: Category } | null;
+  review: ReviewDecision;
+}) {
+  const start = suggestedValues(draft, proposal);
+  const [date, setDate] = useState(start.date);
+  const [merchant, setMerchant] = useState(start.merchant);
+  const [category, setCategory] = useState<Category>(start.category);
+  const [amount, setAmount] = useState(start.amountCents ? formatCents(start.amountCents) : "");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  if (review.decided.includes(draft.id)) return <p role="status">This draft has been decided.</p>;
+
+  return (
+    <form
+      aria-label="Review draft"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const amountCents = parseAmountCents(amount);
+        if (amountCents === null) {
+          setProblem("Enter the amount with two decimals, for example 10.53");
+          return;
+        }
+        try {
+          review.accept(draft, { date, merchant, category, amountCents }, proposal);
+        } catch (error) {
+          setProblem(error instanceof Error ? error.message : String(error));
+        }
+      }}
+    >
+      <label>
+        Date <input value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <label>
+        Merchant <input value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+      </label>
+      <label>
+        Category
+        <select value={category} onChange={(e) => setCategory(e.target.value as Category)}>
+          {CATEGORIES.map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Amount <input value={amount} onChange={(e) => setAmount(e.target.value)} />
+      </label>
+      {problem && <p role="alert">{problem}</p>}
+      <button type="submit">Accept into ledger</button>
+      <button type="button" onClick={() => review.reject(draft)}>
+        Reject draft
+      </button>
+    </form>
+  );
+}
+
+export function ReceiptInbox({ client, review }: { client?: ReceiptClient; review?: ReviewDecision }) {
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [proposal, setProposal] = useState<ProposalStatus>({ kind: "idle" });
+  const [similar, setSimilar] = useState<SimilarStatus>({ kind: "idle" });
+  const api = () => client ?? createReceiptClient();
+
+  async function findSimilar(draft: DraftTransaction) {
+    const proposed = proposal.kind === "done" && proposal.response.result.ok ? proposal.response.result.proposal : null;
+    const text = proposed ? `${proposed.merchant} (${proposed.category})` : (draft.merchant?.value ?? "");
+    setSimilar({ kind: "working" });
+    try {
+      setSimilar({ kind: "done", response: await api().similar({ text }) });
+    } catch (error) {
+      setSimilar({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function propose(draft: DraftTransaction) {
+    setProposal({ kind: "working" });
+    try {
+      setProposal({ kind: "done", response: await api().propose(proposalInputFromDraft(draft)) });
+    } catch (error) {
+      setProposal({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function read(fileName: string, bytes: ArrayBuffer) {
+    setStatus({ kind: "reading" });
+    setProposal({ kind: "idle" });
+    setSimilar({ kind: "idle" });
+    try {
+      const receiptId = `${Date.now()}`;
+      const result = await api().readReceipt({ receiptId, fileName, pngBytes: bytes });
+      setStatus({
+        kind: "ready",
+        draft: draftFromOcr({
+          receiptId: result.receiptId,
+          sourceDigest: result.sourceDigest,
+          blocks: result.blocks,
+        }),
+        ocrMs: result.ocrMs,
+        blockCount: result.blocks.length,
+      });
+    } catch (error) {
+      setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function readSample() {
+    const response = await fetch(SAMPLE_URL);
+    await read("receipt-corner-cafe.png", await response.arrayBuffer());
+  }
+
+  return (
+    <section aria-labelledby="receipt-inbox">
+      <h2 id="receipt-inbox">Receipt pocket</h2>
+      <p>Receipts are read on this computer. Results are drafts and never change your balances.</p>
+      <label>
+        Receipt image (PNG)
+        <input
+          type="file"
+          accept="image/png"
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            if (file) await read(file.name, await file.arrayBuffer());
+          }}
+        />
+      </label>
+      <button type="button" onClick={readSample} disabled={status.kind === "reading"}>
+        Read sample receipt
+      </button>
+
+      {status.kind === "reading" && <p role="status">Reading receipt locally…</p>}
+      {status.kind === "error" && <p role="alert">Could not read receipt: {status.message}</p>}
+      {status.kind === "ready" && (
+        <article aria-label="Draft transaction">
+          <h3>Draft transaction (not in the ledger)</h3>
+          <p>
+            {status.blockCount} OCR blocks · {status.ocrMs === null ? "time unknown" : `${status.ocrMs} ms`} · source{" "}
+            <code>{status.draft.sourceDigest.slice(0, 12)}</code>
+          </p>
+          <dl>
+            <dt>Merchant text</dt>
+            <dd>
+              {status.draft.merchant?.value ?? "—"} <Source evidence={status.draft.merchant} />
+            </dd>
+            <dt>Date</dt>
+            <dd>
+              {status.draft.date?.value ?? "—"} <Source evidence={status.draft.date} />
+            </dd>
+            <dt>Printed total</dt>
+            <dd>
+              {status.draft.totalCents ? formatCents(status.draft.totalCents.value) : "—"}{" "}
+              <Source evidence={status.draft.totalCents} />
+            </dd>
+          </dl>
+          <p>
+            Arithmetic check:{" "}
+            {status.draft.checks.totalMatchesSubtotalPlusTax === null
+              ? "not enough evidence"
+              : status.draft.checks.totalMatchesSubtotalPlusTax
+                ? "subtotal + tax equals total"
+                : "subtotal + tax does NOT equal total, review the amounts"}
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Line</th>
+                <th>Amount</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status.draft.lines.map((line) => (
+                <tr key={line.evidence.blockIndexes.join("-")}>
+                  <td>{line.description}</td>
+                  <td>{formatCents(line.amountCents)}</td>
+                  <td>
+                    <Source evidence={line.evidence} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <section aria-label="Proposal">
+            <button
+              type="button"
+              onClick={() => propose(status.draft)}
+              disabled={proposal.kind === "working"}
+            >
+              Propose merchant and category
+            </button>
+            {proposal.kind === "working" && <p role="status">Asking the local model…</p>}
+            {proposal.kind === "error" && <p role="alert">Could not propose: {proposal.message}</p>}
+            {proposal.kind === "done" && proposal.response.result.ok && (
+              <p>
+                Proposal (not applied): <strong>{proposal.response.result.proposal.merchant}</strong> ·{" "}
+                {proposal.response.result.proposal.category} <small>by {proposal.response.model}</small>
+              </p>
+            )}
+            {proposal.kind === "done" && !proposal.response.result.ok && (
+              <p role="alert">
+                Proposal rejected: {proposal.response.result.reason}. Raw output: <code>{proposal.response.raw}</code>
+              </p>
+            )}
+          </section>
+          <section aria-label="Similar past entries">
+            <button type="button" onClick={() => findSimilar(status.draft)} disabled={similar.kind === "working"}>
+              Find similar past entries
+            </button>
+            {similar.kind === "working" && <p role="status">Comparing with your book…</p>}
+            {similar.kind === "error" && <p role="alert">Could not compare: {similar.message}</p>}
+            {similar.kind === "done" && similar.response.matches.length === 0 && <p>No close past entries.</p>}
+            {similar.kind === "done" && similar.response.matches.length > 0 && (
+              <ul>
+                {similar.response.matches.map((match) => {
+                  const entry = SAMPLE_BOOK.find((e) => e.id === match.entryId);
+                  return (
+                    <li key={match.entryId}>
+                      {entry ? `${entry.date} ${entry.merchant} · ${entry.category}` : match.entryId} · similarity{" "}
+                      {match.score.toFixed(3)}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+          {review && (
+            <ReviewForm
+              key={`${status.draft.id}-${proposal.kind}`}
+              draft={status.draft}
+              proposal={proposal.kind === "done" && proposal.response.result.ok ? (proposal.response.result.proposal as { merchant: string; category: Category }) : null}
+              review={review}
+            />
+          )}
+        </article>
+      )}
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/book.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { cornerCafeOcrFixture } from "@/fixtures/corner-cafe-ocr.fixture";
+
+import { acceptDraft, createBook, rejectDraft, suggestedValues, totals } from "./book";
+import { draftFromOcr } from "./draft-transactions";
+import { SAMPLE_BOOK } from "./sample-book";
+
+const draft = draftFromOcr({ receiptId: "r1", sourceDigest: "8bc01b42", blocks: cornerCafeOcrFixture });
+const proposal = { merchant: "Corner Cafe", category: "Eating out" as const };
+const now = new Date("2026-03-14T12:00:00Z");
+
+describe("review and deterministic totals", () => {
+  it("sums the sample book in integer cents", () => {
+    expect(totals(SAMPLE_BOOK).allCents).toBe(16004);
+  });
+
+  it("adds exactly the reviewed amount and recomputes totals in code", () => {
+    const book = acceptDraft(createBook(SAMPLE_BOOK), draft, suggestedValues(draft, proposal), proposal, now);
+
+    expect(book.entries.at(-1)).toMatchObject({ merchant: "Corner Cafe", category: "Eating out", amountCents: 1053 });
+    expect(totals(book.entries).allCents).toBe(16004 + 1053);
+    expect(totals(book.entries).byCategory.find((c) => c.category === "Eating out")?.cents).toBe(640 + 520 + 1053);
+  });
+
+  it("records what the reviewer changed in the audit", () => {
+    const reviewed = { ...suggestedValues(draft, proposal), category: "Groceries" as const };
+    const book = acceptDraft(createBook(SAMPLE_BOOK), draft, reviewed, proposal, now);
+
+    expect(book.audit).toEqual([
+      {
+        entryId: "r-r1",
+        draftId: "draft-r1",
+        sourceDigest: "8bc01b42",
+        acceptedAt: "2026-03-14T12:00:00.000Z",
+        ocrTotalCents: 1053,
+        proposal,
+        changedByReviewer: ["category"],
+      },
+    ]);
+  });
+
+  it("refuses to accept the same draft twice", () => {
+    const once = acceptDraft(createBook([]), draft, suggestedValues(draft, null), null, now);
+    expect(() => acceptDraft(once, draft, suggestedValues(draft, null), null, now)).toThrow("already decided");
+  });
+
+  it("rejecting leaves the book and totals unchanged", () => {
+    const book = rejectDraft(createBook(SAMPLE_BOOK), draft);
+    expect(book.entries).toHaveLength(SAMPLE_BOOK.length);
+    expect(totals(book.entries).allCents).toBe(16004);
+  });
+
+  it("refuses invalid reviewed values", () => {
+    expect(() =>
+      acceptDraft(createBook([]), draft, { ...suggestedValues(draft, null), amountCents: 0 }, null, now),
+    ).toThrow("positive");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/ledger-app.test.tsx">
+
+```tsx
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { cornerCafeOcrFixture } from "@/fixtures/corner-cafe-ocr.fixture";
+
+import { LedgerApp } from "./ledger-app";
+import type { ReceiptClient } from "./receipt-client";
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+// Fixture OCR and hand-written model text. No live inference.
+const client: ReceiptClient = {
+  health: vi.fn(),
+  readReceipt: async (input) => ({
+    receiptId: "r1",
+    sourceDigest: "8bc01b420180f725",
+    ocrModel: "OCR_LATIN",
+    ocrMs: null,
+    blocks: input ? cornerCafeOcrFixture : [],
+  }),
+  propose: async () => ({
+    model: "LLAMA_3_2_1B_INST_Q4_0",
+    raw: '{"merchant":"Corner Cafe","category":"Eating out"}',
+    result: { ok: true, proposal: { merchant: "Corner Cafe", category: "Eating out" } },
+  }),
+  similar: vi.fn(),
+};
+
+describe("Ledger review", () => {
+  it("adds only the reviewed entry and recomputes totals in code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]))));
+    render(<LedgerApp client={client} now={() => new Date("2026-03-14T12:00:00Z")} />);
+    expect(screen.getByLabelText("Book total")).toHaveTextContent("160.04");
+
+    await userEvent.click(screen.getByRole("button", { name: "Read sample receipt" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Propose merchant and category" }));
+    await screen.findByText(/Proposal \(not applied\)/);
+    expect(screen.getByLabelText("Book total")).toHaveTextContent("160.04");
+
+    const amount = screen.getByLabelText("Amount");
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "10.50");
+    await userEvent.click(screen.getByRole("button", { name: "Accept into ledger" }));
+
+    expect(screen.getByLabelText("Book total")).toHaveTextContent("170.54");
+    expect(screen.getByText(/changed by reviewer: amountCents/)).toHaveTextContent("OCR total 10.53");
+    expect(screen.getByRole("status")).toHaveTextContent("This draft has been decided.");
+  });
+
+  it("rejecting a draft leaves the totals alone", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]))));
+    render(<LedgerApp client={client} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Read sample receipt" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Reject draft" }));
+
+    expect(screen.getByLabelText("Book total")).toHaveTextContent("160.04");
+    expect(screen.getByText("No receipts accepted yet.")).toBeInTheDocument();
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm test -- src/features/ledger/book.test.ts src/features/ledger/ledger-app.test.tsx
+```
+
+Expected: 8 tests pass. They prove the sample book total, that only the reviewed amount is added, the audit record, duplicate refusal, rejection leaving totals alone, invalid values refused, and the same rules in the UI. They use the hand-written OCR fixture and hand-written model text.
+
+Full set:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 11 passed (11)`, `Tests 41 passed (41)`.
+
+## Before continuing
+
+- [ ] Totals only change after **Accept into ledger**.
+- [ ] The audit shows what the reviewer changed.
+- [ ] The same draft cannot be accepted twice.
+
+Continue to [Prove it offline](/docs/ledger/08-offline-proof).

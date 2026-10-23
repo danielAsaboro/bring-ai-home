@@ -1,0 +1,302 @@
+---
+title: "02. Check one frame against a plain-language condition"
+description: "We will ask a local vision model whether one stored frame shows a plain-language condition, outside the app, and parse its answer into yes, no, or unclear."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 02. Check one frame against a plain-language condition" />
+
+We will ask a local vision model one question about one stored frame: does it show "a parcel left by the gate"? The script runs outside the app. React does not change in this chapter.
+
+The model proposes an answer. A small parser decides what Lookout will believe: a leading YES or NO, or **unclear**.
+
+**Source checkpoint:** `b11ed2b` · **Starting checkpoint:** `d67fc04`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `qvac-service/check-frame-smoke.mjs` | Load SmolVLM2 with its projection model and check one frame |
+| `src/features/lookout/verdict.ts` | Build the prompt and parse the reply into yes, no, or unclear |
+| `src/features/lookout/verdict.test.ts` | Parser tests with hand-written replies |
+| `package.json` | Pin `@qvac/sdk` 0.22.0, add `b4a`, add `qvac:check-smoke` |
+
+To compare with the starting checkpoint: `git diff d67fc04 b11ed2b`.
+
+## Build and observe
+
+### 1. Install
+
+```bash
+git checkout b11ed2b
+npm ci
+```
+
+On Linux, check that the Bare binary is executable. If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x` on it. That is an install problem, not a model problem.
+
+`b4a` is a direct dependency because the SDK needs it at runtime on Linux.
+
+### 2. Read the order of operations
+
+Open `qvac-service/check-frame-smoke.mjs`. It creates `.qvac/models`, writes `.qvac/config.json`, sets `QVAC_CONFIG_PATH`, and only then imports `@qvac/sdk`. The SDK reads its config when it starts.
+
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with `projectionModelSrc: MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model lets the language model read an image. `completion` sends the prompt with `attachments: [{ path }]`. The `finally` block unloads the model and closes the SDK, even after an error.
+
+### 3. Run it
+
+```bash
+npm run qvac:check-smoke
+npm run qvac:check-smoke -- public/test-files/lookout/front-gate-4.png "a parcel left by the gate"
+```
+
+The first run downloads model files into `.qvac/models`. Read `raw`, then `verdict`. `raw` is exactly what the model said. `verdict` is what Lookout will believe. Run the cat frame too. A small model may say yes to the wrong frame; that is why it only proposes.
+
+We did not record a live run for this page. In our build container the QVAC registry is blocked, so no model output is shown here. Record your own receipt on your machine.
+
+### 4. Read the parser
+
+Open `verdict.ts`. A reply counts only if it starts with YES or NO. "It might be a parcel, yes" is **unclear**. "Yesterday a box was here" is **unclear**, because `\b` stops "yes" from matching inside "Yesterday". Unclear never raises an alert on its own.
+
+### 5. If the download stalls
+
+QVAC fetches models from its own registry, not from npm. If the log stops at a download line and the files stay at 0 bytes, the network is blocking the registry. That is a network failure. Run on a machine with normal internet. Do not change the code.
+
+## Read the checkpoint implementation
+
+These are complete files from `b11ed2b`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "lookout",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:check-smoke": "node --no-warnings qvac-service/check-frame-smoke.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/check-frame-smoke.mjs">
+
+```javascript
+// Ask a local vision model whether one stored frame shows a plain-language condition.
+// Usage: npm run qvac:check-smoke -- [frame.png] ["condition"]
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const { buildConditionPrompt, parseVerdict } = await import("../src/features/lookout/verdict.ts");
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const defaultFrame = path.join(appDirectory, "public/test-files/lookout/front-gate-3.png");
+const framePath = path.resolve(process.argv[2] ?? defaultFrame);
+const condition = process.argv[3] ?? "a parcel is left by the gate";
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const modelName = "SMOLVLM2_500M_MULTIMODAL_Q8_0";
+
+let sdk;
+let modelId;
+try {
+  await access(framePath);
+  const prompt = buildConditionPrompt(condition);
+  const frameDigest = createHash("sha256").update(await readFile(framePath)).digest("hex");
+
+  // The SDK reads its config when it starts, so write it before the import.
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+    modelConfig: { ctx_size: 1024, projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const startedAt = Date.now();
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: prompt, attachments: [{ path: framePath }] }],
+    stream: true,
+  });
+  let raw = "";
+  for await (const token of run.tokenStream) raw += token;
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        kind: "proposed-verdict",
+        frame: path.basename(framePath),
+        frameDigest,
+        condition,
+        model: modelName,
+        raw,
+        verdict: parseVerdict(raw),
+        elapsedMs: Date.now() - startedAt,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(
+    `QVAC frame check failed: ${message}\nThe first run downloads model files into ${cacheDirectory}. A stalled download is a network problem, not a code problem.\n`,
+  );
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/verdict.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { buildConditionPrompt, parseVerdict } from "./verdict";
+
+// Hand-written model replies (fixtures). They are not live model output.
+describe("parseVerdict", () => {
+  it("reads a leading yes or no", () => {
+    expect(parseVerdict("YES. A brown box sits by the gate.")).toEqual({
+      answer: "yes",
+      reason: "A brown box sits by the gate.",
+    });
+    expect(parseVerdict(" no - the path is empty")).toEqual({ answer: "no", reason: "the path is empty" });
+  });
+
+  it("treats hedges and buried answers as unclear", () => {
+    expect(parseVerdict("It might be a parcel, yes").answer).toBe("unclear");
+    expect(parseVerdict("Yesterday a box was here").answer).toBe("unclear");
+    expect(parseVerdict("").answer).toBe("unclear");
+  });
+});
+
+describe("buildConditionPrompt", () => {
+  it("rejects empty and overlong conditions", () => {
+    expect(() => buildConditionPrompt("   ")).toThrow("Write a condition first");
+    expect(() => buildConditionPrompt("x".repeat(121))).toThrow("under 120");
+    expect(buildConditionPrompt("a parcel is left by the gate")).toContain("Condition: a parcel is left by the gate");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/verdict.ts">
+
+```typescript
+// A model's answer to "does this frame show <condition>?".
+// The model proposes; this parser decides what Lookout will believe.
+
+export type Verdict = {
+  answer: "yes" | "no" | "unclear";
+  reason: string;
+};
+
+export const MAX_CONDITION_LENGTH = 120;
+
+export function buildConditionPrompt(condition: string): string {
+  const clean = condition.replace(/\s+/g, " ").trim();
+  if (!clean) throw new Error("Write a condition first");
+  if (clean.length > MAX_CONDITION_LENGTH) throw new Error("Keep the condition under 120 characters");
+  return (
+    `Condition: ${clean}\n` +
+    "Look only at this still frame. Does it show the condition? " +
+    "Start your reply with exactly YES or NO, then give one short reason based on what is visible."
+  );
+}
+
+// Anything that does not start with a clear yes or no is "unclear".
+// Unclear never raises an alert on its own.
+export function parseVerdict(raw: string): Verdict {
+  const text = raw.replace(/\s+/g, " ").trim();
+  const match = /^\W*(yes|no)\b[\s.,:;!-]*(.*)$/i.exec(text);
+  if (!match) return { answer: "unclear", reason: text.slice(0, 200) };
+  return {
+    answer: match[1].toLowerCase() as "yes" | "no",
+    reason: match[2].slice(0, 200),
+  };
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- src/features/lookout/verdict.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass. They use hand-written replies, labelled as fixtures, not model output.
+
+These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 02: Check one frame against a plain-language condition"
+```
+
+## Before continuing
+
+- [ ] `qvac:check-smoke` printed a `raw` reply and a parsed `verdict` on your machine.
+- [ ] You know why "It might be a parcel, yes" is unclear.
+
+Next: [03. Add the local service boundary](/docs/lookout/03-local-service)

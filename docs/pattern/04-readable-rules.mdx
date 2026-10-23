@@ -1,0 +1,747 @@
+---
+title: "04. Constrain proposals to readable, reversible rules"
+description: "We will gate every proposal through the closed rule vocabulary, show it in plain language, and apply it only as a revision a person can undo."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Pattern · 04. Constrain proposals to readable, reversible rules" />
+
+We will gate every proposal through the closed rule vocabulary, show it in plain language, and apply it only as a revision a person can undo.
+
+A raw reply can contain anything: a regex, a made-up `script` rule, a template with no `{value}`, or broken JSON. Showing that to a person is not enough. The app must decide whether a proposal is even a Pattern weave.
+
+The gate is `checkProposal`. It accepts only the five known kinds with their exact fields and short literal text, at most six rules, and rejects the whole proposal with readable reasons otherwise. The service runs the gate, and the browser runs it again, because the app never trusts a rule it did not check itself.
+
+**Readable** means each rule is shown as a sentence. **Reversible** means applying saves your current weave as **Before proposal** first, so one click on Restore undoes it.
+
+**Source checkpoint:** `f6ec73d` · **Starting checkpoint:** `86e219b`
+
+## What you change
+
+| File | Responsibility |
+| --- | --- |
+| `src/features/pattern/rule-schema.ts` | The closed-vocabulary gate with limits and readable reasons |
+| `qvac-service/server.ts` | Return `check` with every proposal |
+| `src/features/pattern/proposal-client.ts` | Re-check the rules in the browser |
+| `src/features/pattern/workbench.ts` | `apply-proposal`: save the old weave, apply, save the new one |
+| `src/features/pattern/ProposalPanel.tsx` | Plain-language rules, Apply as new revision, Discard, or reasons |
+
+## Build and observe
+
+### 1. Try a hostile proposal
+
+```bash
+git checkout f6ec73d
+npm test -- src/features/pattern/rule-schema.test.ts
+```
+
+The fixtures include `{"kind":"script"}`, a replace rule with a `regex` field, a template without `{value}`, and seven rules. Each is rejected with a sentence a person can read.
+
+### 2. Apply and undo
+
+With the service running, propose rules for **Vendor names**. If the proposal passes the gate, read the sentences, press **Apply as new revision**, then **Restore Before proposal**. The empty weave returns.
+
+### 3. Notice what is still missing
+
+A proposal can be perfectly readable and still wrong. Nothing yet checks that it produces the right output. That is the next chapter.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import { checkProposal, type ProposalCheck } from "../src/features/pattern/rule-schema.ts";
+import { extractProposal } from "./proposal.ts";
+
+export const SERVICE_PORT = 4319;
+const MAX_BODY_BYTES = 32_768;
+const MAX_EXAMPLES = 12;
+
+export type ExamplePair = { before: string; after: string };
+export type Proposer = (examples: ExamplePair[]) => Promise<{ raw: string; model: string }>;
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and local scripts send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseExamples(value: unknown): ExamplePair[] {
+  const examples = (value as { examples?: unknown } | null)?.examples;
+  if (
+    !Array.isArray(examples) ||
+    examples.length === 0 ||
+    examples.length > MAX_EXAMPLES ||
+    !examples.every((e) => typeof e?.before === "string" && typeof e?.after === "string")
+  ) {
+    throw new Error(`Request must contain 1 to ${MAX_EXAMPLES} examples with before and after text`);
+  }
+  return examples.map((e: ExamplePair) => ({ before: e.before, after: e.after }));
+}
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function gateReply(raw: string): ProposalCheck {
+  try {
+    return checkProposal(extractProposal(raw));
+  } catch (error) {
+    return { ok: false, reasons: [(error as Error).message] };
+  }
+}
+
+// The service proposes. It never stores patterns. The browser decides.
+export function createPatternServer(options: { proposer: Proposer | null }) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      return send(res, 200, { ok: true, proposing: options.proposer !== null }, origin);
+    }
+    if (req.method !== "POST" || req.url !== "/propose") return send(res, 404, { error: "Not found" }, origin);
+    let examples: ExamplePair[];
+    try {
+      examples = parseExamples(await readJson(req));
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    if (!options.proposer) return send(res, 503, { error: "Rule proposals are not available" }, origin);
+    try {
+      const { raw, model } = await options.proposer(examples);
+      return send(res, 200, { raw, model, check: gateReply(raw) }, origin);
+    } catch (error) {
+      return send(res, 502, { error: (error as Error).message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/pattern/ProposalPanel.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import type { Example } from "./patterns";
+import { requestProposal, type ProposalResponse } from "./proposal-client";
+import { describeRule, type Rule } from "./rules";
+
+const button = "rounded border border-stone-400 px-2 py-1 text-sm hover:bg-stone-100 disabled:opacity-40";
+
+export function ProposalPanel({
+  examples,
+  onApply,
+  request = requestProposal,
+}: {
+  examples: Example[];
+  onApply: (rules: Rule[], model: string) => void;
+  request?: (examples: Example[]) => Promise<ProposalResponse>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ProposalResponse | null>(null);
+
+  return (
+    <section aria-label="Proposal" className="space-y-2 rounded border border-dashed border-amber-400 p-3">
+      <h3 className="font-semibold">Propose a weave from examples</h3>
+      <p className="text-xs text-stone-600">Runs on this machine through the local QVAC service. A proposal never changes your weave until you apply it, and applying it saves your current weave first.</p>
+      <button
+        className={button}
+        disabled={busy || examples.length === 0}
+        onClick={async () => {
+          setBusy(true);
+          setResult(await request(examples));
+          setBusy(false);
+        }}
+      >
+        {busy ? "Proposing…" : "Propose rules"}
+      </button>
+      {result?.status === "ok" && result.check.ok && (
+        <div className="space-y-2">
+          <p className="text-sm">Proposed by {result.model}:</p>
+          <ol aria-label="Proposed rules" className="list-decimal pl-5 text-sm">
+            {result.check.rules.map((rule, i) => (
+              <li key={i}>{describeRule(rule)}</li>
+            ))}
+          </ol>
+          <div className="flex gap-2">
+            <button
+              className={button}
+              onClick={() => {
+                if (result.check.ok) onApply(result.check.rules, result.model);
+                setResult(null);
+              }}
+            >
+              Apply as new revision
+            </button>
+            <button className={button} onClick={() => setResult(null)}>Discard</button>
+          </div>
+        </div>
+      )}
+      {result?.status === "ok" && !result.check.ok && (
+        <div role="status" className="text-sm text-rose-700">
+          <p>The proposal was not readable as Pattern rules. Nothing was applied.</p>
+          <ul className="list-disc pl-5">
+            {result.check.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+          <details>
+            <summary>Raw reply</summary>
+            <pre className="overflow-x-auto bg-stone-100 p-2 text-xs">{result.raw}</pre>
+          </details>
+        </div>
+      )}
+      {result && result.status !== "ok" && <p role="status" className="text-sm text-rose-700">{result.message}</p>}
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/pattern/Workbench.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+
+import { ProposalPanel } from "./ProposalPanel";
+import { checkExamples, samplePatterns, type Pattern } from "./patterns";
+import { defaultRule, describeRule, RULE_KINDS, runWeave, type Rule, type RuleKind } from "./rules";
+import { createLocalStore, type PatternStore } from "./store";
+import { reduce } from "./workbench";
+
+const input = "rounded border border-stone-300 bg-white px-2 py-1 text-sm";
+const button = "rounded border border-stone-400 px-2 py-1 text-sm hover:bg-stone-100 disabled:opacity-40";
+
+function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => void }) {
+  switch (rule.kind) {
+    case "trim":
+      return (
+        <label className="text-sm">
+          <input
+            type="checkbox"
+            checked={rule.collapse}
+            onChange={(e) => onChange({ ...rule, collapse: e.target.checked })}
+          />{" "}
+          collapse inner spaces
+        </label>
+      );
+    case "split":
+      return (
+        <span className="flex flex-wrap gap-2 text-sm">
+          <label>
+            separator <input aria-label="separator" className={`${input} w-12`} value={rule.separator} onChange={(e) => onChange({ ...rule, separator: e.target.value })} />
+          </label>
+          <label>
+            keep parts{" "}
+            <input
+              aria-label="keep parts"
+              className={`${input} w-20`}
+              value={rule.order.map((i) => i + 1).join(",")}
+              onChange={(e) =>
+                onChange({
+                  ...rule,
+                  order: e.target.value
+                    .split(",")
+                    .map((s) => Number.parseInt(s.trim(), 10) - 1)
+                    .filter((n) => Number.isInteger(n) && n >= 0),
+                })
+              }
+            />
+          </label>
+          <label>
+            join <input aria-label="join" className={`${input} w-12`} value={rule.join} onChange={(e) => onChange({ ...rule, join: e.target.value })} />
+          </label>
+        </span>
+      );
+    case "case":
+      return (
+        <select aria-label="case" className={input} value={rule.to} onChange={(e) => onChange({ ...rule, to: e.target.value as typeof rule.to })}>
+          <option value="upper">upper</option>
+          <option value="lower">lower</option>
+          <option value="title">title</option>
+        </select>
+      );
+    case "replace":
+      return (
+        <span className="flex flex-wrap gap-2 text-sm">
+          <label>
+            find <input aria-label="find" className={`${input} w-24`} value={rule.find} onChange={(e) => onChange({ ...rule, find: e.target.value })} />
+          </label>
+          <label>
+            with <input aria-label="with" className={`${input} w-24`} value={rule.with} onChange={(e) => onChange({ ...rule, with: e.target.value })} />
+          </label>
+        </span>
+      );
+    case "format":
+      return (
+        <label className="text-sm">
+          template <input aria-label="template" className={`${input} w-40`} value={rule.template} onChange={(e) => onChange({ ...rule, template: e.target.value })} />
+        </label>
+      );
+  }
+}
+
+export function Workbench({ store }: { store?: PatternStore }) {
+  const storeRef = useRef<PatternStore | null>(store ?? null);
+  const [patterns, dispatch] = useReducer(reduce, samplePatterns);
+  const hydration = useRef<"waiting" | "loaded" | "ready">("waiting");
+  const [selectedId, setSelectedId] = useState(samplePatterns[0].id);
+  const [newKind, setNewKind] = useState<RuleKind>("replace");
+  const [draftBefore, setDraftBefore] = useState("");
+  const [draftAfter, setDraftAfter] = useState("");
+  const [sample, setSample] = useState("");
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    storeRef.current ??= createLocalStore(window.localStorage);
+    dispatch({ type: "replace-all", patterns: storeRef.current.load() });
+    hydration.current = "loaded";
+  }, []);
+
+  useEffect(() => {
+    // Skip the render that still shows the built-in samples, then save every change.
+    if (hydration.current === "loaded") hydration.current = "ready";
+    else if (hydration.current === "ready") storeRef.current?.save(patterns);
+  }, [patterns]);
+
+  const pattern: Pattern = patterns.find((p) => p.id === selectedId) ?? patterns[0];
+  const results = useMemo(() => checkExamples(pattern.rules, pattern.examples), [pattern]);
+  const passed = results.filter((r) => r.passed).length;
+  const trial = runWeave(pattern.rules, sample);
+  const id = pattern.id;
+
+  return (
+    <div className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-[14rem_1fr]">
+      <aside aria-label="Saved patterns" className="space-y-2">
+        <h2 className="font-semibold">Saved patterns</h2>
+        <ul className="space-y-1">
+          {patterns.map((p) => (
+            <li key={p.id}>
+              <button
+                className={`w-full rounded px-2 py-1 text-left text-sm ${p.id === id ? "bg-amber-100 font-medium" : "hover:bg-stone-100"}`}
+                aria-current={p.id === id}
+                onClick={() => setSelectedId(p.id)}
+              >
+                {p.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button
+          className={button}
+          onClick={() => {
+            const fresh = storeRef.current?.reset() ?? structuredClone(samplePatterns);
+            dispatch({ type: "replace-all", patterns: fresh });
+            setSelectedId(fresh[0].id);
+          }}
+        >
+          Reset demo data
+        </button>
+      </aside>
+
+      <main className="space-y-6">
+        <header>
+          <h2 className="text-xl font-semibold">{pattern.name}</h2>
+          <p className="text-sm text-stone-600">{pattern.description}</p>
+        </header>
+
+        <section aria-label="Weave" className="space-y-2">
+          <h3 className="font-semibold">Weave · ordered rules</h3>
+          {pattern.rules.length === 0 && <p className="text-sm text-stone-500">No rules yet. Add the first thread.</p>}
+          <ol className="space-y-2">
+            {pattern.rules.map((rule, index) => (
+              <li key={index} className="rounded border border-stone-200 bg-stone-50 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs">{index + 1}. {rule.kind}</span>
+                  <RuleFields rule={rule} onChange={(next) => dispatch({ type: "update-rule", patternId: id, index, rule: next })} />
+                  <span className="ml-auto flex gap-1">
+                    <button className={button} aria-label={`Move rule ${index + 1} up`} disabled={index === 0} onClick={() => dispatch({ type: "move-rule", patternId: id, index, by: -1 })}>↑</button>
+                    <button className={button} aria-label={`Move rule ${index + 1} down`} disabled={index === pattern.rules.length - 1} onClick={() => dispatch({ type: "move-rule", patternId: id, index, by: 1 })}>↓</button>
+                    <button className={button} aria-label={`Remove rule ${index + 1}`} onClick={() => dispatch({ type: "remove-rule", patternId: id, index })}>✕</button>
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-stone-600">{describeRule(rule)}</p>
+              </li>
+            ))}
+          </ol>
+          <div className="flex gap-2">
+            <select aria-label="New rule kind" className={input} value={newKind} onChange={(e) => setNewKind(e.target.value as RuleKind)}>
+              {RULE_KINDS.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+            <button className={button} onClick={() => dispatch({ type: "add-rule", patternId: id, rule: defaultRule(newKind) })}>Add rule</button>
+          </div>
+        </section>
+
+        <section aria-label="Examples" className="space-y-2">
+          <h3 className="font-semibold">Examples · {passed} of {results.length} match</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-stone-500">
+                <th>Before</th><th>Expected</th><th>Weave output</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map(({ example, actual, passed: ok }) => (
+                <tr key={example.id} className={ok ? "bg-emerald-50" : "bg-rose-50"}>
+                  <td className="font-mono whitespace-pre">{JSON.stringify(example.before)}</td>
+                  <td className="font-mono">{example.after}</td>
+                  <td className="font-mono">{actual} <span className="sr-only">{ok ? "match" : "mismatch"}</span>{ok ? " ✓" : " ✗"}</td>
+                  <td>
+                    <button className={button} aria-label={`Remove example ${example.before}`} onClick={() => dispatch({ type: "remove-example", patternId: id, exampleId: example.id })}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <form
+            className="flex flex-wrap gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!draftBefore) return;
+              dispatch({ type: "add-example", patternId: id, example: { id: `e-${crypto.randomUUID()}`, before: draftBefore, after: draftAfter } });
+              setDraftBefore("");
+              setDraftAfter("");
+            }}
+          >
+            <input aria-label="Example before" placeholder="before" className={input} value={draftBefore} onChange={(e) => setDraftBefore(e.target.value)} />
+            <input aria-label="Example after" placeholder="after" className={input} value={draftAfter} onChange={(e) => setDraftAfter(e.target.value)} />
+            <button className={button} type="submit">Add example</button>
+          </form>
+        </section>
+
+        <ProposalPanel
+          examples={pattern.examples}
+          onApply={(rules, model) =>
+            dispatch({
+              type: "apply-proposal",
+              patternId: id,
+              rules,
+              model,
+              ids: [`r-${crypto.randomUUID()}`, `r-${crypto.randomUUID()}`],
+              savedAt: new Date().toISOString(),
+            })
+          }
+        />
+
+        <section aria-label="Try a sample" className="space-y-2">
+          <h3 className="font-semibold">Try a sample</h3>
+          <input aria-label="Sample input" className={`${input} w-full`} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Paste one value to weave" />
+          <ol className="space-y-1 font-mono text-xs">
+            {trial.steps.map((step, i) => (
+              <li key={i}>{i + 1}. {JSON.stringify(step.before)} → {JSON.stringify(step.after)}</li>
+            ))}
+          </ol>
+          <p className="text-sm">Output: <output aria-label="Sample output" className="font-mono">{trial.output}</output></p>
+        </section>
+
+        <section aria-label="Revisions" className="space-y-2">
+          <h3 className="font-semibold">Revisions</h3>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              dispatch({ type: "save-revision", patternId: id, id: `r-${crypto.randomUUID()}`, savedAt: new Date().toISOString(), note: note || "Saved weave" });
+              setNote("");
+            }}
+          >
+            <input aria-label="Revision note" placeholder="What changed?" className={input} value={note} onChange={(e) => setNote(e.target.value)} />
+            <button className={button} type="submit">Save revision</button>
+          </form>
+          <ul className="space-y-1 text-sm">
+            {[...pattern.revisions].reverse().map((r) => (
+              <li key={r.id} className="flex items-center gap-2">
+                <span>{r.note} · {r.rules.length} rules · {r.savedAt.slice(0, 10)}</span>
+                <button className={button} onClick={() => dispatch({ type: "restore-revision", patternId: id, revisionId: r.id })}>Restore {r.note}</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </main>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/pattern/proposal-client.ts">
+
+```typescript
+import type { Example } from "./patterns.ts";
+import { checkProposal, type ProposalCheck } from "./rule-schema.ts";
+
+export const SERVICE_URL = "http://127.0.0.1:4319";
+
+export type ProposalResponse =
+  | { status: "ok"; raw: string; model: string; check: ProposalCheck }
+  | { status: "unavailable"; message: string }
+  | { status: "error"; message: string };
+
+// Transport failures and model failures are reported differently. Neither changes a pattern.
+export async function requestProposal(
+  examples: readonly Example[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<ProposalResponse> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`${SERVICE_URL}/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ examples: examples.map(({ before, after }) => ({ before, after })) }),
+    });
+  } catch {
+    return { status: "unavailable", message: "The local QVAC service is not running. Keep weaving by hand." };
+  }
+  const body = (await res.json().catch(() => ({}))) as {
+    raw?: unknown;
+    model?: unknown;
+    error?: unknown;
+    check?: { ok?: unknown; rules?: unknown; reasons?: unknown };
+  };
+  if (res.status === 503) return { status: "unavailable", message: String(body.error ?? "Proposals are not available") };
+  if (!res.ok || typeof body.raw !== "string" || typeof body.model !== "string") {
+    return { status: "error", message: String(body.error ?? `Service answered ${res.status}`) };
+  }
+  // Re-check in the browser: the app never trusts a rule it did not validate itself.
+  const check: ProposalCheck =
+    body.check?.ok === true
+      ? checkProposal(body.check.rules)
+      : { ok: false, reasons: Array.isArray(body.check?.reasons) ? body.check.reasons.map(String) : ["Proposal was not checked"] };
+  return { status: "ok", raw: body.raw, model: body.model, check };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/pattern/rule-schema.ts">
+
+```typescript
+import type { Rule } from "./rules.ts";
+
+export const LIMITS = { maxRules: 6, maxText: 40, maxParts: 6 } as const;
+
+export type ProposalCheck =
+  | { ok: true; rules: Rule[] }
+  | { ok: false; reasons: string[] };
+
+const KEYS: Record<Rule["kind"], string[]> = {
+  trim: ["kind", "collapse"],
+  split: ["kind", "separator", "order", "join"],
+  case: ["kind", "to"],
+  replace: ["kind", "find", "with"],
+  format: ["kind", "template"],
+};
+
+function readableText(value: unknown, allowEmpty: boolean): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= LIMITS.maxText &&
+    (allowEmpty || value.length > 0) &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+function checkRule(value: unknown): Rule | string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "is not an object";
+  const v = value as Record<string, unknown>;
+  const kind = v.kind as Rule["kind"];
+  if (!(kind in KEYS)) return `has unknown kind ${JSON.stringify(v.kind)}`;
+  const extra = Object.keys(v).filter((k) => !KEYS[kind].includes(k));
+  if (extra.length > 0) return `has unexpected fields ${extra.join(", ")}`;
+  switch (kind) {
+    case "trim":
+      return typeof v.collapse === "boolean" ? { kind, collapse: v.collapse } : "needs collapse true or false";
+    case "split": {
+      const order = v.order;
+      if (!readableText(v.separator, false) || !readableText(v.join, true)) return "needs a short separator and join";
+      if (
+        !Array.isArray(order) ||
+        order.length === 0 ||
+        order.length > LIMITS.maxParts ||
+        !order.every((n) => Number.isInteger(n) && n >= 0 && n < LIMITS.maxParts)
+      ) {
+        return `needs 1 to ${LIMITS.maxParts} part numbers`;
+      }
+      return { kind, separator: v.separator as string, order: order as number[], join: v.join as string };
+    }
+    case "case":
+      return v.to === "upper" || v.to === "lower" || v.to === "title" ? { kind, to: v.to } : "needs to: upper, lower, or title";
+    case "replace":
+      return readableText(v.find, false) && readableText(v.with, true)
+        ? { kind, find: v.find as string, with: v.with as string }
+        : "needs short literal find and with text";
+    case "format":
+      return readableText(v.template, false) && (v.template as string).split("{value}").length === 2
+        ? { kind, template: v.template as string }
+        : "needs a short template with exactly one {value}";
+  }
+}
+
+// The model proposes. This gate decides whether a proposal is even readable.
+// Anything outside the closed vocabulary is rejected whole, with reasons a person can read.
+export function checkProposal(candidate: unknown): ProposalCheck {
+  if (!Array.isArray(candidate)) return { ok: false, reasons: ["Proposal is not a list of rules"] };
+  if (candidate.length === 0) return { ok: false, reasons: ["Proposal has no rules"] };
+  if (candidate.length > LIMITS.maxRules) return { ok: false, reasons: [`Proposal has more than ${LIMITS.maxRules} rules`] };
+  const rules: Rule[] = [];
+  const reasons: string[] = [];
+  candidate.forEach((item, i) => {
+    const result = checkRule(item);
+    if (typeof result === "string") reasons.push(`Rule ${i + 1} ${result}`);
+    else rules.push(result);
+  });
+  return reasons.length > 0 ? { ok: false, reasons } : { ok: true, rules };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/pattern/workbench.ts">
+
+```typescript
+import type { Example, Pattern } from "./patterns";
+import type { Rule } from "./rules";
+
+export type Action =
+  | { type: "add-rule"; patternId: string; rule: Rule }
+  | { type: "update-rule"; patternId: string; index: number; rule: Rule }
+  | { type: "move-rule"; patternId: string; index: number; by: -1 | 1 }
+  | { type: "remove-rule"; patternId: string; index: number }
+  | { type: "add-example"; patternId: string; example: Example }
+  | { type: "remove-example"; patternId: string; exampleId: string }
+  | { type: "save-revision"; patternId: string; id: string; savedAt: string; note: string }
+  | { type: "restore-revision"; patternId: string; revisionId: string }
+  | { type: "replace-all"; patterns: Pattern[] }
+  | { type: "apply-proposal"; patternId: string; rules: Rule[]; model: string; ids: [string, string]; savedAt: string };
+
+function edit(patterns: Pattern[], id: string, change: (p: Pattern) => Pattern): Pattern[] {
+  return patterns.map((p) => (p.id === id ? change(p) : p));
+}
+
+// Every change returns new objects. Saved revisions are never edited in place.
+export function reduce(patterns: Pattern[], action: Action): Pattern[] {
+  switch (action.type) {
+    case "replace-all":
+      return action.patterns;
+    case "add-rule":
+      return edit(patterns, action.patternId, (p) => ({ ...p, rules: [...p.rules, action.rule] }));
+    case "update-rule":
+      return edit(patterns, action.patternId, (p) => ({
+        ...p,
+        rules: p.rules.map((r, i) => (i === action.index ? action.rule : r)),
+      }));
+    case "move-rule":
+      return edit(patterns, action.patternId, (p) => {
+        const to = action.index + action.by;
+        if (to < 0 || to >= p.rules.length) return p;
+        const rules = [...p.rules];
+        [rules[action.index], rules[to]] = [rules[to], rules[action.index]];
+        return { ...p, rules };
+      });
+    case "remove-rule":
+      return edit(patterns, action.patternId, (p) => ({
+        ...p,
+        rules: p.rules.filter((_, i) => i !== action.index),
+      }));
+    case "add-example":
+      return edit(patterns, action.patternId, (p) => ({ ...p, examples: [...p.examples, action.example] }));
+    case "remove-example":
+      return edit(patterns, action.patternId, (p) => ({
+        ...p,
+        examples: p.examples.filter((e) => e.id !== action.exampleId),
+      }));
+    case "save-revision":
+      return edit(patterns, action.patternId, (p) => ({
+        ...p,
+        revisions: [
+          ...p.revisions,
+          { id: action.id, savedAt: action.savedAt, note: action.note, rules: structuredClone(p.rules) },
+        ],
+      }));
+    case "apply-proposal":
+      // A person confirmed it. Keep the old weave first, so the change can be undone.
+      return edit(patterns, action.patternId, (p) => ({
+        ...p,
+        rules: structuredClone(action.rules),
+        revisions: [
+          ...p.revisions,
+          { id: action.ids[0], savedAt: action.savedAt, note: "Before proposal", rules: structuredClone(p.rules) },
+          { id: action.ids[1], savedAt: action.savedAt, note: `Applied proposal from ${action.model}`, rules: structuredClone(action.rules) },
+        ],
+      }));
+    case "restore-revision":
+      return edit(patterns, action.patternId, (p) => {
+        const revision = p.revisions.find((r) => r.id === action.revisionId);
+        return revision ? { ...p, rules: structuredClone(revision.rules) } : p;
+      });
+  }
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/pattern/rule-schema.test.ts qvac-service/server.test.ts src/features/pattern/ProposalPanel.test.tsx src/features/pattern/workbench.test.ts
+```
+
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+**Receipt:** at `f6ec73d`, lint and typecheck pass and the full suite passes 25 tests. Every rejected proposal in the tests is a FIXTURE. We did not observe a live model producing these; they are the shapes the gate must refuse.
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 04: Constrain proposals to readable, reversible rules"
+```
+
+## Before continuing
+
+- [ ] You saw a rejected proposal explained in sentences.
+- [ ] You undid an applied proposal with Restore.
+
+Continue to [Test rules against counterexamples](/docs/pattern/05-counterexamples).

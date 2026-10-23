@@ -1,0 +1,668 @@
+---
+title: "04. Turn descriptions into reviewed garment details"
+description: "We will turn a local description into proposed catalogue fields, drop anything Closet's rules or the description itself do not support, and let a person copy the rest into the ordinary form."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Closet · 04. Turn descriptions into reviewed garment details" />
+
+A sentence is not a catalogue entry. We ask a small local language model to turn the description into fields, constrained by a JSON schema, and then Closet checks every field before a person sees it.
+
+The model fills a review card. The person edits it, copies it into the normal **Add garment** form, and saves. Nothing is added automatically.
+
+**Source checkpoint:** `550c9c2` · **Starting checkpoint:** `6e855f3`
+
+## What changes
+
+| File | Change |
+| --- | --- |
+| `src/features/closet/garment-proposal.ts` | The JSON schema, the prompt, and the gate that keeps only grounded fields |
+| `src/features/closet/PhotoReview.tsx` | Upload a photo, see the proposal and its issues, copy it into the form |
+| `src/features/closet/ClosetApp.tsx` | Mount the review panel; the form can now carry a photo |
+| `qvac-service/server.ts` | Add `/details`, which returns the model's raw JSON text |
+| `qvac-service/qvac-engine.ts` | Load `LLAMA_3_2_1B_INST_Q4_0` and read `(await run.final).contentText` |
+| `src/features/closet/service-client.ts` | Add `proposeDetails` |
+
+To compare with the previous checkpoint: `git diff 6e855f3 550c9c2`.
+
+## Build and observe
+
+### 1. Shape is not meaning
+
+The engine calls `completion` with `responseFormat: { type: "json_schema", ... }` and returns `(await run.final).contentText`. The schema limits `category` to Closet's six categories. That constrains shape. It does not make the model right.
+
+### 2. Read the gate
+
+Open `garment-proposal.ts`. `parseGarmentProposal` runs in the browser:
+
+- not JSON: nothing is proposed, and the card says so;
+- a category outside the fixed list: dropped, never coerced to the nearest one;
+- a colour or material that does not appear in the description: dropped with an issue. The person can read the description, so every kept field has visible evidence.
+
+### 3. Try it
+
+Run the service and the app:
+
+```bash
+npm run qvac:service
+npm run dev
+```
+
+Open **Garments**, choose **Add from photo**, and pick `public/garments/yellow-raincoat.png`. The card shows the description, the proposed fields, and any issues. Edit what is wrong, press **Copy into form**, then **Add garment with photo**. Only that last press changes the closet.
+
+### 4. Stop the service and try again
+
+Stop `qvac:service` and upload again. The status line says the local service is not running and that you can add the garment by hand. The form still works.
+
+### 5. A runtime bug the type checker did not catch
+
+The service runs `.ts` files directly in Node, and now imports `garment-proposal.ts` from `src`. Next.js resolves `./model` without an extension; Node does not. So `garment-proposal.ts` imports `./model.ts` explicitly. Start `qvac:service` after any change to shared files to catch this.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+
+<AccordionGroup>
+<Accordion title="src/features/closet/garment-proposal.ts">
+
+```typescript
+import { CATEGORIES, isCategory, type Category } from "./model.ts";
+
+// The JSON shape the local model must fill. Shape only: the app still checks meaning.
+export const GARMENT_PROPOSAL_SCHEMA = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    category: { type: "string", enum: [...CATEGORIES] },
+    colour: { type: "string" },
+    material: { type: "string" },
+  },
+  required: ["name", "category", "colour", "material"],
+  additionalProperties: false,
+} as const;
+
+export function buildDetailsHistory(description: string) {
+  return [
+    {
+      role: "system" as const,
+      content:
+        "You turn a short garment description into catalogue fields. Use only facts stated in the description. " +
+        `category must be one of: ${CATEGORIES.join(", ")}. Use "unknown" for colour or material that is not stated.`,
+    },
+    { role: "user" as const, content: `Description: ${description}` },
+  ];
+}
+
+export type ProposedFields = Partial<{ name: string; category: Category; colour: string; material: string }>;
+export type GarmentProposal = { fields: ProposedFields; issues: string[] };
+
+const clean = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 60) : "");
+
+// The app decides which proposed fields are allowed into the review form.
+export function parseGarmentProposal(raw: string, description: string): GarmentProposal {
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { fields: {}, issues: ["The model did not return JSON, so nothing was proposed."] };
+  }
+  if (!data || typeof data !== "object") return { fields: {}, issues: ["The model returned no fields."] };
+
+  const fields: ProposedFields = {};
+  const issues: string[] = [];
+  const source = description.toLowerCase();
+
+  const name = clean(data.name);
+  if (name) fields.name = name;
+  else issues.push("No name was proposed.");
+
+  if (isCategory(data.category)) fields.category = data.category;
+  else issues.push(`Category "${clean(data.category)}" is not one of Closet's categories.`);
+
+  // Colour and material must be grounded in the description the person can read.
+  for (const key of ["colour", "material"] as const) {
+    const value = clean(data[key]);
+    if (!value || value.toLowerCase() === "unknown") {
+      issues.push(`No ${key} was stated.`);
+    } else if (!value.toLowerCase().split(/[\s,/-]+/).some((word) => word.length > 2 && source.includes(word))) {
+      issues.push(`${key[0].toUpperCase()}${key.slice(1)} "${value}" is not in the description, so it was left out.`);
+    } else {
+      fields[key] = value;
+    }
+  }
+  return { fields, issues };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/PhotoReview.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { CATEGORIES, type Category } from "./model";
+import { parseGarmentProposal, type ProposedFields } from "./garment-proposal";
+import { describeGarment, proposeDetails } from "./service-client";
+
+type Review = {
+  image: string;
+  description: string;
+  models: string[];
+  fields: ProposedFields;
+  issues: string[];
+};
+
+function readAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// Local models propose. This panel shows the proposal; a person copies what
+// they agree with into the ordinary garment form and saves it themselves.
+export function PhotoReview({ onApply }: { onApply: (fields: ProposedFields, image: string) => void }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
+
+  async function analyse(file: File) {
+    setReview(null);
+    if (!/^image\/(png|jpeg)$/.test(file.type)) {
+      setStatus("Choose a PNG or JPEG photo.");
+      return;
+    }
+    setStatus("Describing the photo locally…");
+    const image = await readAsDataUrl(file);
+    const described = await describeGarment({ name: file.name, dataUrl: image });
+    if (!described.ok) {
+      setStatus(`${described.message} You can still add the garment by hand below.`);
+      return;
+    }
+    setStatus("Turning the description into details…");
+    const details = await proposeDetails(described.value.description);
+    const parsed = details.ok
+      ? parseGarmentProposal(details.value.raw, described.value.description)
+      : { fields: {}, issues: [details.message] };
+    setReview({
+      image,
+      description: described.value.description,
+      models: details.ok ? [described.value.model, details.value.model] : [described.value.model],
+      ...parsed,
+    });
+    setStatus(null);
+  }
+
+  return (
+    <section aria-label="Photo intake" className="mb-4 rounded-lg border border-dashed border-stone-300 p-3 text-sm">
+      <label className="flex flex-col gap-1">
+        Add from photo
+        <input
+          type="file"
+          accept="image/png,image/jpeg"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void analyse(file);
+          }}
+        />
+      </label>
+      {status && <p role="status" className="mt-2 text-stone-600">{status}</p>}
+      {review && (
+        <ProposalCard
+          key={review.image}
+          review={review}
+          onApply={(fields) => {
+            onApply(fields, review.image);
+            setReview(null);
+          }}
+          onDiscard={() => setReview(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function ProposalCard({
+  review,
+  onApply,
+  onDiscard,
+}: {
+  review: Review;
+  onApply: (fields: ProposedFields) => void;
+  onDiscard: () => void;
+}) {
+  const [fields, setFields] = useState<ProposedFields>(review.fields);
+  return (
+    <div aria-label="Proposed details" role="group" className="mt-3 space-y-2 rounded bg-amber-50 p-3">
+      <p className="text-xs uppercase tracking-wide text-amber-900">Proposal · {review.models.join(" + ")} · local</p>
+      <p>
+        <span className="font-semibold">Description:</span> {review.description}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {(["name", "colour", "material"] as const).map((key) => (
+          <label key={key} className="flex flex-col">
+            Proposed {key}
+            <input
+              value={fields[key] ?? ""}
+              onChange={(e) => setFields({ ...fields, [key]: e.target.value })}
+              className="rounded border px-2 py-1"
+            />
+          </label>
+        ))}
+        <label className="flex flex-col">
+          Proposed category
+          <select
+            value={fields.category ?? ""}
+            onChange={(e) => setFields({ ...fields, category: (e.target.value || undefined) as Category | undefined })}
+            className="rounded border px-2 py-1"
+          >
+            <option value="">(choose)</option>
+            {CATEGORIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {review.issues.length > 0 && (
+        <ul aria-label="Proposal issues" className="list-disc pl-5 text-amber-900">
+          {review.issues.map((issue) => (
+            <li key={issue}>{issue}</li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <button type="button" className="rounded bg-stone-900 px-3 py-1 text-white" onClick={() => onApply(fields)}>
+          Copy into form
+        </button>
+        <button type="button" className="rounded border px-3 py-1" onClick={onDiscard}>
+          Discard
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/garment-proposal.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { GARMENT_PROPOSAL_SCHEMA, parseGarmentProposal } from "./garment-proposal";
+
+// Every raw string below is a hand-written fixture, not recorded model output.
+const description = "A yellow raincoat with a front seam and long sleeves.";
+
+describe("garment proposal gate", () => {
+  it("keeps grounded fields", () => {
+    const raw = JSON.stringify({ name: "Yellow raincoat", category: "outerwear", colour: "yellow", material: "unknown" });
+    expect(parseGarmentProposal(raw, description)).toEqual({
+      fields: { name: "Yellow raincoat", category: "outerwear", colour: "yellow" },
+      issues: ["No material was stated."],
+    });
+  });
+
+  it("drops a category outside the fixed list instead of coercing it", () => {
+    const raw = JSON.stringify({ name: "Raincoat", category: "jacket", colour: "yellow", material: "" });
+    const result = parseGarmentProposal(raw, description);
+    expect(result.fields.category).toBeUndefined();
+    expect(result.issues[0]).toContain('"jacket"');
+  });
+
+  it("drops a colour the description never mentioned", () => {
+    const raw = JSON.stringify({ name: "Raincoat", category: "outerwear", colour: "green", material: "wool" });
+    const result = parseGarmentProposal(raw, description);
+    expect(result.fields.colour).toBeUndefined();
+    expect(result.fields.material).toBeUndefined();
+    expect(result.issues).toHaveLength(2);
+  });
+
+  it("turns malformed output into an issue, not a crash", () => {
+    expect(parseGarmentProposal("{name: raincoat", description)).toEqual({
+      fields: {},
+      issues: ["The model did not return JSON, so nothing was proposed."],
+    });
+  });
+
+  it("asks the model for exactly Closet's categories", () => {
+    expect(GARMENT_PROPOSAL_SCHEMA.properties.category.enum).toContain("outerwear");
+    expect(GARMENT_PROPOSAL_SCHEMA.additionalProperties).toBe(false);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/closet/PhotoReview.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ClosetApp } from "./ClosetApp";
+
+// Fixture service replies, written by hand. They stand in for the local
+// service so the review flow is testable; they are not model output.
+const FIXTURE_DESCRIPTION = "A yellow raincoat with a front seam.";
+const FIXTURE_DETAILS = JSON.stringify({ name: "Yellow rain jacket", category: "outerwear", colour: "yellow", material: "rubber" });
+
+function mockService(routes: Record<string, () => Response>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const route = routes[new URL(url).pathname];
+      if (!route) throw new TypeError("fetch failed");
+      return route();
+    }),
+  );
+}
+const json = (status: number, body: unknown) => () => new Response(JSON.stringify(body), { status });
+const photo = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "coat.png", { type: "image/png" });
+
+beforeEach(() => window.localStorage.clear());
+afterEach(() => vi.unstubAllGlobals());
+
+describe("reviewed garment details", () => {
+  it("shows a proposal, drops ungrounded fields, and saves only after the person adds it", async () => {
+    mockService({
+      "/describe": json(200, { description: FIXTURE_DESCRIPTION, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" }),
+      "/details": json(200, { raw: FIXTURE_DETAILS, model: "LLAMA_3_2_1B_INST_Q4_0" }),
+    });
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.upload(screen.getByLabelText("Add from photo"), photo());
+
+    const card = await screen.findByRole("group", { name: "Proposed details" });
+    expect(within(card).getByLabelText("Proposed colour")).toHaveValue("yellow");
+    expect(within(card).getByLabelText("Proposed material")).toHaveValue("");
+    expect(within(card).getByText(/Material "rubber" is not in the description/)).toBeInTheDocument();
+
+    const catalogue = screen.getByRole("list", { name: "Catalogue" });
+    await user.clear(within(card).getByLabelText("Proposed name"));
+    await user.type(within(card).getByLabelText("Proposed name"), "Festival raincoat");
+    await user.click(within(card).getByRole("button", { name: "Copy into form" }));
+    expect(within(catalogue).queryByText("Festival raincoat")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add garment with photo" }));
+    expect(within(catalogue).getByText("Festival raincoat")).toBeInTheDocument();
+  });
+
+  it("keeps the manual form usable when the service is not running", async () => {
+    mockService({});
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.upload(screen.getByLabelText("Add from photo"), photo());
+    expect(await screen.findByRole("status")).toHaveTextContent("not running. You can still add the garment by hand");
+    expect(screen.getByRole("button", { name: "Add garment" })).toBeEnabled();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-engine.ts">
+
+```typescript
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { buildDetailsHistory, GARMENT_PROPOSAL_SCHEMA } from "../src/features/closet/garment-proposal.ts";
+import { DESCRIBE_GARMENT_PROMPT, resolveLocalQvacPaths, VISION_MODEL } from "./local-config.ts";
+import type { ClosetEngine, GarmentImage } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+// Loads QVAC once, then each model on first use. All inference stays local.
+export async function createQvacEngine(appDirectory: string): Promise<ClosetEngine & { close(): Promise<void> }> {
+  const { cacheDirectory, configPath } = resolveLocalQvacPaths(appDirectory);
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  const sdk: Sdk = await import("@qvac/sdk");
+  const loaded = new Map<string, Promise<string>>();
+
+  function model(key: string, load: () => Promise<string>) {
+    let pending = loaded.get(key);
+    if (!pending) {
+      pending = load().catch((error: unknown) => {
+        loaded.delete(key); // a failed load can be retried
+        throw error;
+      });
+      loaded.set(key, pending);
+    }
+    return pending;
+  }
+
+  const vision = () =>
+    model(VISION_MODEL, () =>
+      sdk.loadModel({
+        modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+        modelConfig: { ctx_size: 1024, projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+      }),
+    );
+
+  const LLM_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
+  const llm = () => model(LLM_MODEL, () => sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }));
+
+  // The vision model reads attachments from disk, so stage the upload briefly.
+  async function withTempImage<T>(image: GarmentImage, work: (file: string) => Promise<T>) {
+    const dir = await mkdtemp(path.join(tmpdir(), "closet-"));
+    const file = path.join(dir, image.mime === "image/png" ? "garment.png" : "garment.jpg");
+    try {
+      await writeFile(file, image.bytes);
+      return await work(file);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  return {
+    async describe(image) {
+      const modelId = await vision();
+      return withTempImage(image, async (file) => {
+        const run = sdk.completion({
+          modelId,
+          history: [{ role: "user", content: DESCRIBE_GARMENT_PROMPT, attachments: [{ path: file }] }],
+          stream: true,
+        });
+        let text = "";
+        for await (const token of run.tokenStream) text += token;
+        const description = text.replace(/\s+/g, " ").trim();
+        if (!description) throw new Error("The model returned an empty description");
+        return { description, model: VISION_MODEL };
+      });
+    },
+    async details(description) {
+      const modelId = await llm();
+      const run = sdk.completion({
+        modelId,
+        history: buildDetailsHistory(description),
+        stream: true,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: { name: "garment", schema: GARMENT_PROPOSAL_SCHEMA as unknown as Record<string, unknown> },
+        },
+      });
+      const final = await run.final;
+      return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async close() {
+      for (const pending of loaded.values()) {
+        const modelId = await pending.catch(() => null);
+        if (modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+      }
+      await sdk.close().catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+export const SERVICE_PORT = 4320;
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+export type GarmentImage = { name: string; bytes: Uint8Array; mime: "image/png" | "image/jpeg" };
+
+// Everything the local models can do for Closet. Each capability is optional:
+// a missing one answers 503 and the app keeps its manual path.
+export type ClosetEngine = {
+  describe?: (image: GarmentImage) => Promise<{ description: string; model: string }>;
+  // Returns the model's raw JSON text. The browser validates it.
+  details?: (description: string) => Promise<{ raw: string; model: string }>;
+};
+
+function requireText(body: unknown, key: string, max = 2000): string {
+  const value = (body as Record<string, unknown> | null)?.[key];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Request must contain ${key}`);
+  if (value.length > max) throw new Error(`${key} is too long`);
+  return value;
+}
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and other local tools send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseGarmentImage(value: unknown): GarmentImage {
+  const v = value as { name?: unknown; dataUrl?: unknown } | null;
+  if (!v || typeof v.name !== "string" || typeof v.dataUrl !== "string") {
+    throw new Error("Request must contain name and dataUrl");
+  }
+  const match = /^data:(image\/png|image\/jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(v.dataUrl);
+  if (!match) throw new Error("Only PNG or JPEG data URLs are accepted");
+  const bytes = new Uint8Array(Buffer.from(match[2], "base64"));
+  const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const mime = match[1] as GarmentImage["mime"];
+  if ((mime === "image/png" && !isPng) || (mime === "image/jpeg" && !isJpeg)) {
+    throw new Error("Image bytes do not match the declared type");
+  }
+  return { name: v.name.slice(0, 120), bytes, mime };
+}
+
+export function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+type Route = (body: unknown, engine: ClosetEngine) => Promise<unknown> | null;
+
+// Each route returns null when its capability is not loaded.
+const ROUTES: Record<string, Route> = {
+  "/describe": (body, engine) => {
+    if (!engine.describe) return null;
+    const image = parseGarmentImage(body);
+    return engine.describe(image);
+  },
+  "/details": (body, engine) => {
+    if (!engine.details) return null;
+    return engine.details(requireText(body, "description"));
+  },
+};
+
+export function capabilities(engine: ClosetEngine) {
+  return Object.keys(ROUTES)
+    .map((route) => route.slice(1))
+    .filter((name) => typeof (engine as Record<string, unknown>)[name] === "function");
+}
+
+// The service proposes. It never saves anything. The browser decides.
+export function createClosetServer(engine: ClosetEngine) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      return send(res, 200, { ok: true, capabilities: capabilities(engine) }, origin);
+    }
+    const route = req.method === "POST" && req.url ? ROUTES[req.url] : undefined;
+    if (!route) return send(res, 404, { error: "Not found" }, origin);
+
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    let pending: Promise<unknown> | null;
+    try {
+      pending = route(body, engine);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    if (!pending) return send(res, 503, { error: "This local model is not available" }, origin);
+    try {
+      return send(res, 200, await pending, origin);
+    } catch (error) {
+      return send(res, 502, { error: (error as Error).message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/closet/garment-proposal.test.ts src/features/closet/PhotoReview.test.tsx
+```
+
+Expected result: 2 test files pass, 7 tests pass. The raw model strings and service replies in these tests are hand-written fixtures, labelled in the code. They do not prove live model inference.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 04: Turn descriptions into reviewed garment details"
+```
+
+## Before continuing
+
+- [ ] A dropped field shows an issue instead of a guess.
+- [ ] The garment only appears after you press **Add garment with photo**.
+
+Continue to [Label garments with a wardrobe classifier](/docs/closet/05-wardrobe-classifier).

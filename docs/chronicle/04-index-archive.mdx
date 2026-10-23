@@ -1,0 +1,259 @@
+---
+title: "04. Index the archive with embeddings"
+description: "We will turn each memory into a vector with a local embedding model and save a small index. This lets Chronicle find memories by meaning, not only by exact words."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Chronicle · 04. Index the archive with embeddings" />
+
+We will turn each memory into a vector with a local embedding model and save a small index. This lets Chronicle find memories by meaning, not only by exact words.
+
+We embed only the fields a person wrote: title, caption, people, and date. Proposed text from earlier chapters stays out of the index until someone accepts it.
+
+**Source checkpoint:** `9faae9c` · **Starting checkpoint:** `e401734`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/chronicle/memory-index.ts` | Build the text to embed and validate every returned vector |
+| `qvac-service/index-archive-smoke.mjs` | Load `GTE_LARGE_FP16`, embed all memories in one call, write `.qvac/archive-index.json` |
+| `package.json` | Add `qvac:index-smoke` |
+
+## Build and observe
+
+### 1. Run the indexer
+
+```bash
+npm run qvac:index-smoke
+```
+
+The output shows `model`, `dimensions`, `memories`, and `elapsedMs`. `memories` should be 6. The index file goes into `.qvac`, which Git ignores.
+
+### 2. Reuse app code outside React
+
+The smoke script imports `archive.ts` and `memory-index.ts` directly. Node 22.18 and newer strip TypeScript types on import. That is why `memory-index.ts` uses `import type` for `Memory`: a type-only import disappears, so Node does not need to resolve another `.ts` file.
+
+### 3. Validate what comes back
+
+`embed` with an array of texts returns one vector per text. `buildMemoryIndex` checks three things before it trusts the result: the count matches, every vector has the same size, and every number is finite. A mismatch is an error, not a partial index.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+
+<AccordionGroup>
+<Accordion title="src/features/chronicle/memory-index.ts">
+
+```typescript
+import type { Memory } from "./archive";
+
+export type IndexedMemory = {
+  memoryId: string;
+  text: string;
+  vector: number[];
+};
+
+export type MemoryIndex = {
+  model: string;
+  dimensions: number;
+  entries: IndexedMemory[];
+};
+
+export type EmbedMany = (texts: string[]) => Promise<number[][]>;
+
+// The text we embed is built from fields a person wrote or confirmed.
+export function memoryText(memory: Memory): string {
+  return [
+    memory.title,
+    memory.caption,
+    `People: ${memory.people.join(", ")}`,
+    `Date: ${memory.date}`,
+  ].join("\n");
+}
+
+export async function buildMemoryIndex(
+  memories: Memory[],
+  model: string,
+  embedMany: EmbedMany,
+): Promise<MemoryIndex> {
+  if (memories.length === 0) throw new Error("There are no memories to index");
+  const texts = memories.map(memoryText);
+  const vectors = await embedMany(texts);
+  if (vectors.length !== memories.length) {
+    throw new Error(
+      `Expected ${memories.length} embeddings but received ${vectors.length}`,
+    );
+  }
+  const dimensions = vectors[0].length;
+  vectors.forEach((vector, index) => {
+    if (vector.length !== dimensions || dimensions === 0) {
+      throw new Error(`Embedding ${index} has an unexpected size`);
+    }
+    if (!vector.every(Number.isFinite)) {
+      throw new Error(`Embedding ${index} contains a non-numeric value`);
+    }
+  });
+  return {
+    model,
+    dimensions,
+    entries: memories.map((memory, index) => ({
+      memoryId: memory.id,
+      text: texts[index],
+      vector: vectors[index],
+    })),
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/chronicle/memory-index.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { sampleArchive } from "./archive";
+import { buildMemoryIndex, memoryText } from "./memory-index";
+
+// Fixture embedder: three-number vectors made by hand. Not model output.
+const fixtureEmbedMany = async (texts: string[]) =>
+  texts.map((_, index) => [index + 1, 0.5, -0.25]);
+
+describe("memory index", () => {
+  it("embeds the human-written fields of a memory", () => {
+    const text = memoryText(sampleArchive[0]);
+    expect(text).toContain("Picnic at Gull Point");
+    expect(text).toContain("People: Ada Lind, Tomas Lind");
+  });
+
+  it("indexes every memory with a vector of one fixed size", async () => {
+    const index = await buildMemoryIndex(sampleArchive, "fixture", fixtureEmbedMany);
+    expect(index.entries).toHaveLength(6);
+    expect(index.dimensions).toBe(3);
+    expect(index.entries[2].memoryId).toBe(sampleArchive[2].id);
+  });
+
+  it("rejects a response with the wrong number of vectors", async () => {
+    await expect(
+      buildMemoryIndex(sampleArchive, "fixture", async () => [[1, 2, 3]]),
+    ).rejects.toThrow("Expected 6 embeddings but received 1");
+  });
+
+  it("rejects vectors of mixed sizes", async () => {
+    await expect(
+      buildMemoryIndex(sampleArchive, "fixture", async (texts) =>
+        texts.map((_, i) => (i === 3 ? [1, 2] : [1, 2, 3])),
+      ),
+    ).rejects.toThrow("Embedding 3 has an unexpected size");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/index-archive-smoke.mjs">
+
+```javascript
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const indexPath = path.join(qvacDirectory, "archive-index.json");
+const modelName = "GTE_LARGE_FP16";
+
+let modelId;
+let sdk;
+try {
+  // Node strips the TypeScript types from these two app modules.
+  const { sampleArchive } = await import("../src/features/chronicle/archive.ts");
+  const { buildMemoryIndex } = await import(
+    "../src/features/chronicle/memory-index.ts"
+  );
+
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ cacheDirectory }, null, 2)}\n`,
+    "utf8",
+  );
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.GTE_LARGE_FP16,
+    modelType: "embeddings",
+    onProgress: (p) => {
+      process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`);
+    },
+  });
+  const startedAt = Date.now();
+  const index = await buildMemoryIndex(sampleArchive, modelName, async (texts) => {
+    const { embedding } = await sdk.embed({ modelId, text: texts });
+    return embedding;
+  });
+  const elapsedMs = Date.now() - startedAt;
+  await writeFile(indexPath, `${JSON.stringify(index)}\n`, "utf8");
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        model: index.model,
+        dimensions: index.dimensions,
+        memories: index.entries.length,
+        elapsedMs,
+        indexPath,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`QVAC index smoke failed: ${message}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) {
+    await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/chronicle/memory-index.test.ts
+```
+
+Expected result: 1 test file passes, 4 tests pass.
+
+These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+
+Run the broader checks separately, from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 04: Index the archive with embeddings"
+```
+
+## Before continuing
+
+- [ ] The indexer reported 6 memories and one fixed dimension.
+- [ ] You can explain why proposed text is not embedded yet.
+
+Continue to [Retrieve moments from an imperfect recollection](/docs/chronicle/05-retrieve-moments).

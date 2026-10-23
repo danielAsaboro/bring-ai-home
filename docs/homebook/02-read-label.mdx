@@ -1,0 +1,403 @@
+---
+title: "02. Read an appliance label with OCR"
+description: "We will read a fictional water heater rating plate with QVAC's local OCR model, outside React, and turn the text into proposed asset facts."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Homebook · 02. Read an appliance label with OCR" />
+
+Typing a serial number from a rating plate is slow and easy to get wrong. A local OCR model can read the plate. It cannot decide which text is the serial number. Homebook decides that, and a person still accepts each value.
+
+This chapter runs OCR outside React. That separates install, download, and native runtime problems from app problems.
+
+**Source checkpoint:** `d126ea1` · **Starting checkpoint:** `cda74e3`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `package.json`, `package-lock.json` | Pin `@qvac/sdk` at exactly **0.22.0**, add `b4a`, add `qvac:label-smoke` |
+| `.gitignore` | Ignore `/.qvac/`, which holds config, the model cache, and later the manual index |
+| `public/test-files/homebook/water-heater-label.png` | A fictional rating plate |
+| `src/features/homebook/label-facts.ts` | Rebuild rows from OCR boxes and propose brand, model, serial, and a starting install date |
+| `qvac-service/label-ocr-smoke.mjs` | The standalone smoke command |
+
+## Build and observe
+
+### Before you start on Linux
+
+- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`. This checkpoint adds it.
+- If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x node_modules/bare-runtime-linux-x64/bin/bare`.
+
+### 1. Install the pinned runtime
+
+```bash
+npm ci
+```
+
+The lockfile pins `@qvac/sdk` 0.22.0. Do not run a floating `npm install @qvac/sdk`.
+
+### 2. Read the OCR lifecycle
+
+Open `qvac-service/label-ocr-smoke.mjs`. It writes `.qvac/config.json` and sets `QVAC_CONFIG_PATH` before it imports the SDK. Then:
+
+- `loadModel({ modelSrc: sdk.OCR_LATIN, modelType: sdk.MODEL_TYPES.ggmlOcr, modelConfig: { langList: ["en"], ... } })` loads the Latin recogniser and its CRAFT detector.
+- `ocr({ modelId, image, options: { paragraph: false } })` returns `blocks` and `stats` promises. Each block has `text`, and optionally `bbox` and `confidence`.
+- `finally` calls `unloadModel` and `close`, even after an error.
+
+### 3. Read where the app decides
+
+OCR returns separate blocks: `MODEL NO.` and `AT-50G` are two boxes on one row. `readingOrder` groups blocks into rows by their top edge, then sorts each row left to right. `proposeLabelFacts` matches field names on those rows and keeps the source line and confidence with each value. A manufacture month like `2021-02` only becomes a starting guess for the install date.
+
+### 4. Run it twice
+
+```bash
+npm run qvac:label-smoke
+npm run qvac:label-smoke
+```
+
+The first run downloads OCR assets into `.qvac/models`. The second reuses them. Read `blocks` and compare them with the plate, then read `facts`. Each fact names the text it came from.
+
+### 5. If the download stalls
+
+In our build container the worker started, then the log stopped after printing the blob it wanted, and `.qvac/models` held two 0-byte files: `..._latin_g2.gguf` and `..._craft_mlt_25k.gguf`. That network blocks QVAC's model registry. It is a download failure, not a code failure. Run on a machine with normal internet. We did not get live OCR output in that container, so this page shows none.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+
+<AccordionGroup>
+<Accordion title=".gitignore">
+
+```text
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local QVAC config, model cache, and manual index
+/.qvac/
+```
+
+</Accordion>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "homebook",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/label-ocr-smoke.mjs">
+
+```javascript
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const defaultSource = fileURLToPath(
+  new URL("../public/test-files/homebook/water-heater-label.png", import.meta.url),
+);
+const sourcePath = path.resolve(process.argv[2] ?? defaultSource);
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+let sdk;
+let modelId;
+try {
+  await access(sourcePath);
+  const sourceDigest = createHash("sha256").update(await readFile(sourcePath)).digest("hex");
+  // Node strips the TypeScript types from this app module.
+  const { proposeLabelFacts } = await import("../src/features/homebook/label-facts.ts");
+
+  // Config must exist before the SDK is imported.
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.OCR_LATIN,
+    modelType: sdk.MODEL_TYPES.ggmlOcr,
+    modelConfig: { langList: ["en"], magRatio: 1.5, contrastRetry: false, lowConfidenceThreshold: 0.5 },
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const run = sdk.ocr({ modelId, image: sourcePath, options: { paragraph: false } });
+  const [blocks, stats] = await Promise.all([run.blocks, run.stats]);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        kind: "proposed-label-facts",
+        sourceName: path.basename(sourcePath),
+        sourceDigest,
+        model: "OCR_LATIN",
+        blocks,
+        facts: proposeLabelFacts(blocks),
+        stats: stats ?? null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(
+    `QVAC label OCR smoke failed: ${message}\nThe first successful run downloads OCR assets into ${cacheDirectory}; warmed runs reuse that cache.\n`,
+  );
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/label-facts.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { proposeLabelFacts, readingOrder, type OcrBlock } from "./label-facts";
+
+// Fixture blocks written by hand to match water-heater-label.png.
+// They are not OCR output. Boxes are [x1, y1, x2, y2] in pixels.
+const fixtureBlocks: OcrBlock[] = [
+  { text: "SERIAL NO.", bbox: [50, 226, 240, 254], confidence: 0.97 },
+  { text: "AQUATERRA", bbox: [50, 50, 400, 95], confidence: 0.99 },
+  { text: "AT50-2291-0457", bbox: [330, 225, 578, 255], confidence: 0.88 },
+  { text: "MODEL NO.", bbox: [50, 166, 240, 194], confidence: 0.98 },
+  { text: "AT-50G", bbox: [330, 167, 436, 193], confidence: 0.93 },
+  { text: "FICTIONAL SAMPLE LABEL", bbox: [50, 110, 336, 130], confidence: 0.95 },
+  { text: "MFG DATE", bbox: [50, 405, 222, 433], confidence: 0.96 },
+  { text: "2021-02", bbox: [330, 405, 455, 433], confidence: 0.9 },
+];
+
+describe("label facts", () => {
+  it("rebuilds rows in reading order", () => {
+    expect(readingOrder(fixtureBlocks).slice(0, 4)).toEqual([
+      "AQUATERRA",
+      "FICTIONAL SAMPLE LABEL",
+      "MODEL NO. AT-50G",
+      "SERIAL NO. AT50-2291-0457",
+    ]);
+  });
+
+  it("proposes brand, model, serial, and a starting install date with their source text", () => {
+    const facts = proposeLabelFacts(fixtureBlocks);
+    expect(facts.map((f) => [f.field, f.value])).toEqual([
+      ["brand", "Aquaterra"],
+      ["model", "AT-50G"],
+      ["serial", "AT50-2291-0457"],
+      ["installedOn", "2021-02-01"],
+    ]);
+    expect(facts.find((f) => f.field === "serial")).toMatchObject({
+      sourceText: "SERIAL NO. AT50-2291-0457",
+      confidence: 0.88,
+    });
+  });
+
+  it("proposes nothing when the plate has no recognisable fields", () => {
+    expect(proposeLabelFacts([{ text: "keep clear", bbox: [0, 0, 10, 10] }])).toEqual([]);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/label-facts.ts">
+
+```typescript
+// OCR finds text on a rating plate. This module decides which pieces of that
+// text could fill an asset field. It only proposes; a person accepts.
+
+export type OcrBlock = {
+  text: string;
+  bbox?: [number, number, number, number];
+  confidence?: number;
+};
+
+export type LabelField = "brand" | "model" | "serial" | "installedOn";
+
+export type LabelFact = {
+  field: LabelField;
+  value: string;
+  sourceText: string;
+  confidence: number | null;
+};
+
+const ROW_TOLERANCE = 18;
+
+// Put blocks in reading order: top to bottom by row, then left to right.
+export function readingOrder(blocks: readonly OcrBlock[]): string[] {
+  const placed = blocks.filter((b) => b.text.trim().length > 0);
+  if (!placed.every((b) => b.bbox)) return placed.map((b) => b.text.trim());
+  const sorted = [...placed].sort((a, b) => a.bbox![1] - b.bbox![1]);
+  const rows: OcrBlock[][] = [];
+  for (const block of sorted) {
+    const row = rows.at(-1);
+    if (row && Math.abs(row[0].bbox![1] - block.bbox![1]) <= ROW_TOLERANCE) row.push(block);
+    else rows.push([block]);
+  }
+  return rows.map((row) =>
+    row
+      .sort((a, b) => a.bbox![0] - b.bbox![0])
+      .map((b) => b.text.trim())
+      .join(" "),
+  );
+}
+
+const PATTERNS: { field: Exclude<LabelField, "brand">; pattern: RegExp; normalise?: (v: string) => string | null }[] = [
+  { field: "model", pattern: /\bMODEL(?:\s*(?:NO|NUMBER|#)\.?)?\s*[:.]?\s*([A-Z0-9][A-Z0-9./-]{2,})/i },
+  { field: "serial", pattern: /\bSERIAL(?:\s*(?:NO|NUMBER|#)\.?)?\s*[:.]?\s*([A-Z0-9][A-Z0-9-]{4,})/i },
+  {
+    field: "installedOn",
+    pattern: /\b(?:MFG|MANUFACTURED|MFD)\.?\s*(?:DATE)?\s*[:.]?\s*(\d{4}-\d{2}(?:-\d{2})?)/i,
+    // A manufacture month becomes a starting guess for the install date.
+    normalise: (v) => (/^\d{4}-\d{2}$/.test(v) ? `${v}-01` : v),
+  },
+];
+
+function confidenceFor(blocks: readonly OcrBlock[], value: string): number | null {
+  const hit = blocks.find((b) => b.text.includes(value));
+  return typeof hit?.confidence === "number" ? hit.confidence : null;
+}
+
+export function proposeLabelFacts(blocks: readonly OcrBlock[]): LabelFact[] {
+  const lines = readingOrder(blocks);
+  const facts: LabelFact[] = [];
+  for (const { field, pattern, normalise } of PATTERNS) {
+    for (const line of lines) {
+      const match = line.match(pattern);
+      if (!match) continue;
+      const raw = match[1].replace(/[.,;]+$/, "");
+      const value = normalise ? normalise(raw) : raw;
+      if (value) facts.push({ field, value, sourceText: line, confidence: confidenceFor(blocks, raw) });
+      break;
+    }
+  }
+  // The first line that is a single all-caps word is a brand candidate.
+  const brandLine = lines.find((l) => /^[A-Z][A-Z&-]{2,}$/.test(l.trim()));
+  if (brandLine) {
+    const brand = brandLine.trim();
+    facts.unshift({
+      field: "brand",
+      value: brand.charAt(0) + brand.slice(1).toLowerCase(),
+      sourceText: brandLine,
+      confidence: confidenceFor(blocks, brand),
+    });
+  }
+  return facts;
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/homebook/label-facts.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass. The OCR blocks in this test are hand-written fixtures that match the plate. They are not model output.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 02: Read an appliance label with OCR"
+```
+
+## Before continuing
+
+- [ ] The smoke command printed `proposed-label-facts` for the plate.
+- [ ] You can tell a stalled download (0-byte files) from a worker start failure.
+
+Continue to [Add the local service boundary](/docs/homebook/03-local-service).

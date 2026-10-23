@@ -1,0 +1,1137 @@
+---
+title: "07. Draft an optional follow-up"
+description: "We will let a local LLM draft a short message from notes you already saved. The draft is editable, can be copied or discarded, and Circle never sends it."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Circle · 07. Draft an optional follow-up" />
+
+We will let a local LLM draft a short message from notes you already saved. The draft is editable, can be copied or discarded, and Circle never sends it.
+
+Sometimes you know what you want to say but not how to start. A local model can draft a few warm lines from the notes you saved.
+
+The draft is optional and hidden behind a disclosure. It is labelled as not sent and shows which notes it was based on. There is no send button. You copy it, change it, or throw it away.
+
+**Source checkpoint:** `5161006` · **Starting checkpoint:** `8072ad1`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/circle/followup.ts` | A grounded prompt and `cleanDraft`, which strips subject lines, caps length, and refuses empty drafts |
+| `src/features/circle/FollowUp.tsx` | Intent box, editable draft, Copy, and Discard |
+| `qvac-service/server.mjs` | Run `LLAMA_3_2_1B_INST_Q4_0` completion for `/followup/draft` |
+| `src/features/circle/service-client.ts` | Add `draftFollowUp` |
+
+## Build and observe
+
+### 1. Ask for a draft
+
+Open Dev Raman, expand **Draft a follow-up (optional)**, type `good luck with the talk`, and select **Draft**.
+
+### 2. Check it against the notes
+
+The label shows the model and how many saved notes it used. The prompt tells the model not to add facts, plans, or dates. A small model can still drift. You are the check: read it before you copy it.
+
+### 3. Edit, copy, or discard
+
+Change the text. Select **Copy**, then send it yourself from your own messaging app if it still feels right. Or select **Discard**.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/server.mjs">
+
+```javascript
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { rankContext } from "../src/features/circle/context.ts";
+import {
+  buildExtractionPrompt,
+  parseExtraction,
+  PROPOSAL_SCHEMA,
+} from "../src/features/circle/extraction.ts";
+import { buildFollowUpPrompt, cleanDraft } from "../src/features/circle/followup.ts";
+import { buildRecapDraft } from "./recap.ts";
+import { createService, MAX_BODY_BYTES, SERVICE_PORT } from "./service.ts";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const HOST = "127.0.0.1";
+const ALLOWED_ORIGINS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+const sdk = await import("@qvac/sdk");
+
+// Models load on first use and stay loaded until the service stops.
+const loaded = new Map();
+function model(name, options) {
+  if (!loaded.has(name)) {
+    loaded.set(
+      name,
+      sdk.loadModel(options).catch((error) => {
+        loaded.delete(name);
+        throw error;
+      }),
+    );
+  }
+  return loaded.get(name);
+}
+
+const capabilities = {
+  async transcribe(audio, fileName) {
+    const modelId = await model("WHISPER_TINY", {
+      modelSrc: sdk.WHISPER_TINY,
+      modelConfig: { language: "en", translate: false, temperature: 0.0 },
+    });
+    const dir = await mkdtemp(path.join(tmpdir(), "circle-recap-"));
+    const audioPath = path.join(dir, path.basename(fileName));
+    try {
+      await writeFile(audioPath, audio);
+      const segments = await sdk.transcribe({ modelId, audioChunk: audioPath, metadata: true });
+      return buildRecapDraft(segments, "WHISPER_TINY");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+};
+
+capabilities.extract = async ({ transcript, people, today }) => {
+  const modelId = await model("LLAMA_3_2_1B_INST_Q4_0", {
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelConfig: { ctx_size: 4096 },
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: buildExtractionPrompt(transcript, people, today) }],
+    stream: false,
+    responseFormat: {
+      type: "json_schema",
+      json_schema: { name: "circle_proposals", schema: PROPOSAL_SCHEMA },
+    },
+  });
+  const final = await run.final;
+  return parseExtraction(final.contentText, {
+    transcript,
+    people,
+    today,
+    model: "LLAMA_3_2_1B_INST_Q4_0",
+  });
+};
+
+capabilities.retrieve = async ({ query, passages }) => {
+  const modelId = await model("GTE_LARGE_FP16", {
+    modelSrc: sdk.GTE_LARGE_FP16,
+    modelType: "embeddings",
+  });
+  const { embedding } = await sdk.embed({
+    modelId,
+    text: [query, ...passages.map((p) => p.text)],
+  });
+  const [queryVector, ...vectors] = embedding;
+  return {
+    model: "GTE_LARGE_FP16",
+    matches: rankContext(queryVector, passages, vectors, { limit: 3, minScore: 0.3 }),
+  };
+};
+
+capabilities.draft = async ({ personName, intent, context }) => {
+  const modelId = await model("LLAMA_3_2_1B_INST_Q4_0", {
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelConfig: { ctx_size: 4096 },
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: buildFollowUpPrompt(personName, intent, context) }],
+    stream: false,
+  });
+  const final = await run.final;
+  return cleanDraft(final.contentText, "LLAMA_3_2_1B_INST_Q4_0", context);
+};
+
+const handle = createService(capabilities);
+
+const server = createServer(async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Headers", "content-type");
+  }
+  if (req.method === "OPTIONS") return res.writeHead(204).end();
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    return res.writeHead(403).end(JSON.stringify({ error: "origin-not-allowed" }));
+  }
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) {
+      return res.writeHead(413).end(JSON.stringify({ error: "too-large" }));
+    }
+    chunks.push(chunk);
+  }
+  let body;
+  try {
+    body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
+  } catch {
+    return res.writeHead(400).end(JSON.stringify({ error: "invalid-json" }));
+  }
+  const url = new URL(req.url ?? "/", `http://${HOST}`);
+  const result = await handle(req.method ?? "GET", url.pathname, body);
+  res.writeHead(result.status, { "content-type": "application/json" });
+  res.end(JSON.stringify(result.body));
+});
+
+server.listen(SERVICE_PORT, HOST, () => {
+  process.stdout.write(`Circle QVAC service on http://${HOST}:${SERVICE_PORT}\n`);
+});
+
+async function shutdown() {
+  server.close();
+  for (const pending of loaded.values()) {
+    const modelId = await pending.catch(() => undefined);
+    if (modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  await sdk.close().catch(() => undefined);
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/service.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { buildRecapDraft } from "./recap";
+import { createService } from "./service";
+
+const audioBase64 = Buffer.from("fixture-audio").toString("base64");
+
+describe("local service boundary", () => {
+  it("reports which capabilities are configured", async () => {
+    const handle = createService({});
+    const res = await handle("GET", "/health", undefined);
+    expect(res).toEqual({
+      status: 200,
+      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false, retrieve: false, draft: false } },
+    });
+  });
+
+  it("answers 503 instead of inventing a transcript", async () => {
+    const res = await createService({})("POST", "/recap/transcribe", { audioBase64, fileName: "a.wav" });
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: "not-configured" });
+  });
+
+  it("validates the request before calling the model", async () => {
+    let called = false;
+    const handle = createService({
+      transcribe: async () => {
+        called = true;
+        throw new Error("unreachable");
+      },
+    });
+    const res = await handle("POST", "/recap/transcribe", { fileName: "a.wav" });
+    expect(res.status).toBe(400);
+    expect(called).toBe(false);
+  });
+
+  it("passes decoded bytes to the injected transcriber", async () => {
+    // FIXTURE transcriber: returns hand-written segments, not model output.
+    const handle = createService({
+      transcribe: async (audio, fileName) => {
+        expect(Buffer.from(audio).toString()).toBe("fixture-audio");
+        expect(fileName).toBe("a.wav");
+        return buildRecapDraft([{ text: "fixture words", startMs: 0, endMs: 10 }], "FIXTURE");
+      },
+    });
+    const res = await handle("POST", "/recap/transcribe", { audioBase64, fileName: "a.wav" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "proposed", transcript: "fixture words" });
+  });
+
+  it("turns model failures into 502", async () => {
+    const res = await createService({
+      transcribe: async () => {
+        throw new Error("No speech was recognised in this recap");
+      },
+    })("POST", "/recap/transcribe", { audioBase64, fileName: "a.wav" });
+    expect(res).toEqual({
+      status: 502,
+      body: { error: "model-failed", message: "No speech was recognised in this recap" },
+    });
+  });
+
+  it("validates extract requests and forwards them", async () => {
+    const handle = createService({
+      // FIXTURE extractor: echoes its input, no model involved.
+      extract: async ({ people, today }) => ({ status: "proposed", model: `FIXTURE ${today}`, proposals: [], rejected: people.map((item) => ({ item, reason: "fixture" })) }),
+    });
+    const bad = await handle("POST", "/recap/extract", { transcript: "hi", people: [], today: "2026-10-23" });
+    expect(bad.status).toBe(400);
+    const ok = await handle("POST", "/recap/extract", {
+      transcript: "hi",
+      people: [{ id: "dev-raman", name: "Dev Raman" }],
+      today: "2026-10-23",
+    });
+    expect(ok).toMatchObject({ status: 200, body: { model: "FIXTURE 2026-10-23" } });
+  });
+
+  it("returns no context for a person with an empty timeline without calling a model", async () => {
+    const res = await createService({
+      retrieve: async () => {
+        throw new Error("should not run");
+      },
+    })("POST", "/context/retrieve", { query: "coffee", passages: [] });
+    expect(res).toEqual({ status: 200, body: { model: "none", matches: [] } });
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/service.ts">
+
+```typescript
+import type { ContextMatch, Passage } from "../src/features/circle/context";
+import type { FollowUpDraft } from "../src/features/circle/followup";
+import type { ExtractionResult, KnownPerson } from "../src/features/circle/extraction";
+import type { RecapDraft } from "./recap";
+
+// Everything the native runtime can do for Circle. A missing entry means
+// "not configured", never "pretend".
+export type Capabilities = {
+  transcribe?: (audio: Uint8Array, fileName: string) => Promise<RecapDraft>;
+  extract?: (input: {
+    transcript: string;
+    people: KnownPerson[];
+    today: string;
+  }) => Promise<ExtractionResult>;
+  retrieve?: (input: {
+    query: string;
+    passages: Passage[];
+  }) => Promise<{ model: string; matches: ContextMatch[] }>;
+  draft?: (input: {
+    personName: string;
+    intent: string;
+    context: Passage[];
+  }) => Promise<FollowUpDraft>;
+};
+
+export type ServiceResponse = { status: number; body: unknown };
+
+export const SERVICE_PORT = 4327;
+export const MAX_BODY_BYTES = 12 * 1024 * 1024;
+
+class BadRequest extends Error {}
+
+function people(body: Record<string, unknown>): KnownPerson[] {
+  const list = body.people;
+  if (!Array.isArray(list) || list.length === 0 || list.length > 500) {
+    throw new BadRequest("Missing people");
+  }
+  return list.map((p) => {
+    const r = record(p);
+    return { id: text(r, "id", 200), name: text(r, "name", 200) };
+  });
+}
+
+function passages(body: Record<string, unknown>, key: string): Passage[] {
+  const list = body[key];
+  if (!Array.isArray(list) || list.length > 200) throw new BadRequest(`Missing ${key}`);
+  return list.map((p) => {
+    const r = record(p);
+    return { id: text(r, "id", 200), text: text(r, "text", 2000) };
+  });
+}
+
+function isoDay(body: Record<string, unknown>, key: string): string {
+  const value = text(body, key, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new BadRequest(`${key} must be YYYY-MM-DD`);
+  return value;
+}
+
+function record(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new BadRequest("Expected a JSON object");
+  }
+  return body as Record<string, unknown>;
+}
+
+function text(body: Record<string, unknown>, key: string, max = 20_000): string {
+  const value = body[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new BadRequest(`Missing ${key}`);
+  }
+  if (value.length > max) throw new BadRequest(`${key} is too long`);
+  return value;
+}
+
+type Route = {
+  capability: keyof Capabilities;
+  run: (caps: Required<Capabilities>, body: Record<string, unknown>) => Promise<unknown>;
+};
+
+const routes: Record<string, Route> = {
+  "/recap/transcribe": {
+    capability: "transcribe",
+    run: (caps, body) => {
+      const audio = Buffer.from(text(body, "audioBase64", MAX_BODY_BYTES), "base64");
+      if (audio.length === 0) throw new BadRequest("Empty recording");
+      return caps.transcribe(new Uint8Array(audio), text(body, "fileName", 200));
+    },
+  },
+  "/recap/extract": {
+    capability: "extract",
+    run: (caps, body) =>
+      caps.extract({
+        transcript: text(body, "transcript"),
+        people: people(body),
+        today: isoDay(body, "today"),
+      }),
+  },
+  "/context/retrieve": {
+    capability: "retrieve",
+    run: (caps, body) => {
+      const list = passages(body, "passages");
+      if (list.length === 0) return Promise.resolve({ model: "none", matches: [] });
+      return caps.retrieve({ query: text(body, "query", 500), passages: list });
+    },
+  },
+  "/followup/draft": {
+    capability: "draft",
+    run: (caps, body) =>
+      caps.draft({
+        personName: text(body, "personName", 200),
+        intent: text(body, "intent", 500),
+        context: passages(body, "context"),
+      }),
+  },
+};
+
+export function createService(capabilities: Capabilities) {
+  return async function handle(
+    method: string,
+    path: string,
+    body: unknown,
+  ): Promise<ServiceResponse> {
+    if (method === "GET" && path === "/health") {
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          service: "circle-qvac",
+          capabilities: Object.fromEntries(
+            Object.keys(routes).map((r) => [
+              routes[r].capability,
+              typeof capabilities[routes[r].capability] === "function",
+            ]),
+          ),
+        },
+      };
+    }
+    const route = routes[path];
+    if (!route) return { status: 404, body: { error: "not-found" } };
+    if (method !== "POST") return { status: 405, body: { error: "method-not-allowed" } };
+    if (typeof capabilities[route.capability] !== "function") {
+      return {
+        status: 503,
+        body: { error: "not-configured", capability: route.capability },
+      };
+    }
+    try {
+      const result = await route.run(capabilities as Required<Capabilities>, record(body));
+      return { status: 200, body: result };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof BadRequest) return { status: 400, body: { error: message } };
+      return { status: 502, body: { error: "model-failed", message } };
+    }
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/CircleApp.tsx">
+
+```tsx
+"use client";
+
+import { useMemo, useState, useSyncExternalStore } from "react";
+
+import {
+  addReminder,
+  completeReminder,
+  letterOf,
+  logEntry,
+  openReminders,
+  peopleByLetter,
+  toggleCircle,
+} from "./state";
+import { BeforeWeMeet } from "./BeforeWeMeet";
+import { FollowUp } from "./FollowUp";
+import { RecapPanel } from "./RecapPanel";
+import { createServiceClient, type ServiceClient } from "./service-client";
+import { browserStore, type CircleStore } from "./storage";
+import type { CircleState, EntryKind, Person } from "./types";
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const noopSubscribe = () => () => {};
+
+export function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function CircleApp({
+  store: injected,
+  client: injectedClient,
+}: {
+  store?: CircleStore;
+  client?: ServiceClient;
+}) {
+  const store = useMemo(() => injected ?? browserStore(), [injected]);
+  const client = useMemo(() => injectedClient ?? createServiceClient(), [injectedClient]);
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  const loaded = useMemo(() => (mounted ? store.load() : null), [mounted, store]);
+  const [edited, setEdited] = useState<CircleState | null>(null);
+  const [letter, setLetter] = useState("A");
+  const [personId, setPersonId] = useState<string | null>(null);
+  const state = edited ?? loaded;
+
+  function commit(next: CircleState) {
+    store.save(next);
+    setEdited(next);
+  }
+
+  if (!state) {
+    return (
+      <main className="mx-auto max-w-5xl p-6">
+        <h1 className="font-serif text-4xl">Circle</h1>
+        <p>Opening your book…</p>
+      </main>
+    );
+  }
+
+  const inLetter = peopleByLetter(state.people, letter);
+  const person = state.people.find((p) => p.id === personId) ?? inLetter[0] ?? null;
+
+  return (
+    <main className="mx-auto max-w-5xl p-4 sm:p-6 text-stone-800">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-amber-200 pb-3">
+        <div>
+          <h1 className="font-serif text-4xl">Circle</h1>
+          <p className="text-stone-600">A warm phonebook for the people you keep close.</p>
+        </div>
+        <button
+          type="button"
+          className="rounded border border-stone-300 px-3 py-1 text-sm"
+          onClick={() => {
+            setEdited(store.reset());
+            setPersonId(null);
+          }}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <RecapPanel state={state} onChange={commit} client={client} today={today()} />
+
+      <nav aria-label="Alphabet" role="tablist" className="my-4 flex flex-wrap gap-1">
+        {LETTERS.map((l) => {
+          const count = state.people.filter((p) => letterOf(p.name) === l).length;
+          return (
+            <button
+              key={l}
+              type="button"
+              role="tab"
+              aria-selected={l === letter}
+              disabled={count === 0}
+              onClick={() => {
+                setLetter(l);
+                setPersonId(null);
+              }}
+              className={`h-8 w-8 rounded-t font-serif ${
+                l === letter ? "bg-amber-200" : "bg-amber-50"
+              } disabled:opacity-30`}
+            >
+              {l}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="grid gap-4 md:grid-cols-[14rem_1fr_16rem]">
+        <ul aria-label="People" className="space-y-1">
+          {inLetter.map((p) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setPersonId(p.id)}
+                aria-current={person?.id === p.id}
+                className={`w-full rounded px-2 py-1 text-left ${
+                  person?.id === p.id ? "bg-amber-100" : ""
+                }`}
+              >
+                {p.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {person ? (
+          <PersonCard
+            key={person.id}
+            person={person}
+            state={state}
+            onChange={commit}
+            client={client}
+          />
+        ) : (
+          <p>No one under {letter} yet.</p>
+        )}
+
+        <aside aria-label="Gentle reminders" className="space-y-2">
+          <h2 className="font-serif text-xl">Gentle reminders</h2>
+          {openReminders(state).length === 0 && <p>Nothing waiting.</p>}
+          <ul className="space-y-2">
+            {openReminders(state).map((r) => {
+              const who = state.people.find((p) => p.id === r.personId);
+              return (
+                <li key={r.id} className="rounded bg-amber-50 p-2 text-sm">
+                  <p>
+                    <strong>{r.due}</strong> · {who?.name}
+                  </p>
+                  <p>{r.text}</p>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => commit(completeReminder(state, r.id))}
+                  >
+                    Done: {r.text}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <h2 className="font-serif text-xl">Circles</h2>
+          <ul className="text-sm">
+            {state.circles.map((c) => (
+              <li key={c}>
+                {c}: {state.people.filter((p) => p.circles.includes(c)).length}
+              </li>
+            ))}
+          </ul>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function PersonCard({
+  person,
+  state,
+  onChange,
+  client,
+}: {
+  person: Person;
+  state: CircleState;
+  onChange: (next: CircleState) => void;
+  client: ServiceClient;
+}) {
+  const [kind, setKind] = useState<EntryKind>("interaction");
+  const [date, setDate] = useState(today());
+  const [text, setText] = useState("");
+  const [reminderText, setReminderText] = useState("");
+  const [reminderDue, setReminderDue] = useState(today());
+  const [error, setError] = useState<string | null>(null);
+
+  function attempt(update: () => CircleState, reset: () => void) {
+    try {
+      onChange(update());
+      reset();
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return (
+    <article
+      aria-label={`${person.name} card`}
+      className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm"
+    >
+      <h2 className="font-serif text-2xl">{person.name}</h2>
+      <p className="text-stone-600">{person.note}</p>
+
+      <fieldset className="my-2 flex flex-wrap gap-2 text-sm">
+        <legend className="sr-only">Circles</legend>
+        {state.circles.map((c) => (
+          <label key={c} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={person.circles.includes(c)}
+              onChange={() => onChange(toggleCircle(state, person.id, c))}
+            />
+            {c}
+          </label>
+        ))}
+      </fieldset>
+
+      <form
+        aria-label="Log to timeline"
+        className="my-3 space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(
+            () => logEntry(state, person.id, { kind, date, text }),
+            () => setText(""),
+          );
+        }}
+      >
+        <div className="flex gap-2">
+          <select
+            aria-label="Entry kind"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as EntryKind)}
+          >
+            <option value="interaction">Interaction</option>
+            <option value="memory">Memory</option>
+          </select>
+          <input
+            aria-label="Entry date"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+        <textarea
+          aria-label="What happened"
+          className="w-full rounded border p-2"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <button type="submit" className="rounded bg-amber-200 px-3 py-1">
+          Save to timeline
+        </button>
+      </form>
+
+      <form
+        aria-label="Add reminder"
+        className="my-3 flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(
+            () =>
+              addReminder(state, {
+                personId: person.id,
+                due: reminderDue,
+                text: reminderText,
+              }),
+            () => setReminderText(""),
+          );
+        }}
+      >
+        <input
+          aria-label="Reminder"
+          className="flex-1 rounded border p-1"
+          value={reminderText}
+          onChange={(e) => setReminderText(e.target.value)}
+        />
+        <input
+          aria-label="Reminder date"
+          type="date"
+          value={reminderDue}
+          onChange={(e) => setReminderDue(e.target.value)}
+        />
+        <button type="submit" className="rounded border px-2">
+          Remind me
+        </button>
+      </form>
+      {error && <p role="alert">{error}</p>}
+
+      <BeforeWeMeet person={person} state={state} client={client} />
+      <FollowUp person={person} state={state} client={client} />
+
+      <h3 className="font-serif text-lg">Timeline</h3>
+      <ol aria-label="Timeline" className="space-y-1">
+        {person.timeline.length === 0 && <li>No entries yet.</li>}
+        {person.timeline.map((t) => (
+          <li key={t.id} className="text-sm">
+            <span className="text-stone-500">
+              {t.date} · {t.kind}
+            </span>{" "}
+            {t.text}
+          </li>
+        ))}
+      </ol>
+    </article>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/FollowUp.test.tsx">
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { createDemoState } from "./fixtures";
+import { FollowUp } from "./FollowUp";
+
+describe("FollowUp", () => {
+  it("shows an editable draft and offers no send button", async () => {
+    const user = userEvent.setup();
+    const state = createDemoState();
+    const dev = state.people.find((p) => p.id === "dev-raman")!;
+    // FIXTURE draft, not live model output.
+    const draftFollowUp = vi.fn(async () => ({ status: "draft" as const, model: "FIXTURE", text: "Good luck, Dev!", basedOn: ["t5", "r1"] }));
+    render(<FollowUp person={dev} state={state} client={{ draftFollowUp }} />);
+    await user.click(screen.getByText("Draft a follow-up (optional)"));
+    await user.type(screen.getByLabelText("What do you want to say?"), "good luck");
+    await user.click(screen.getByRole("button", { name: "Draft" }));
+    const box = await screen.findByLabelText(/Draft, not sent \(FIXTURE, from 2 saved notes\)/);
+    expect(box).toHaveValue("Good luck, Dev!");
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByLabelText(/Draft, not sent/)).toBeNull();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/circle/FollowUp.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { passagesFor } from "./context";
+import type { FollowUpDraft } from "./followup";
+import type { ServiceClient } from "./service-client";
+import type { CircleState, Person } from "./types";
+
+export function FollowUp({
+  person,
+  state,
+  client,
+}: {
+  person: Person;
+  state: CircleState;
+  client: Pick<ServiceClient, "draftFollowUp">;
+}) {
+  const [intent, setIntent] = useState("");
+  const [draft, setDraft] = useState<FollowUpDraft | null>(null);
+  const [text, setText] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+
+  return (
+    <details className="my-3 text-sm">
+      <summary>Draft a follow-up (optional)</summary>
+      <p className="text-stone-600">Circle never sends messages. You copy, edit, or discard.</p>
+      <form
+        className="mt-2 flex gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setNote(null);
+          try {
+            const result = await client.draftFollowUp(
+              person.name,
+              intent,
+              passagesFor(person, state.reminders).slice(0, 5),
+            );
+            setDraft(result);
+            setText(result.text);
+          } catch (err) {
+            setNote(err instanceof Error ? err.message : String(err));
+          }
+        }}
+      >
+        <input
+          aria-label="What do you want to say?"
+          className="flex-1 rounded border p-1"
+          value={intent}
+          onChange={(e) => setIntent(e.target.value)}
+        />
+        <button type="submit" className="rounded border px-2" disabled={!intent.trim()}>
+          Draft
+        </button>
+      </form>
+      {note && <p role="alert">{note}</p>}
+      {draft && (
+        <div className="mt-2">
+          <label className="block">
+            Draft, not sent ({draft.model}, from {draft.basedOn.length} saved notes)
+            <textarea
+              className="mt-1 w-full rounded border p-2"
+              rows={4}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded border px-2"
+              onClick={() => {
+                void navigator.clipboard?.writeText(text).catch(() => undefined);
+                setNote("Copied. Send it yourself if it still feels right.");
+              }}
+            >
+              Copy
+            </button>
+            <button type="button" className="rounded border px-2" onClick={() => setDraft(null)}>
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+    </details>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/followup.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { buildFollowUpPrompt, cleanDraft, MAX_DRAFT_CHARS } from "./followup";
+
+const context = [{ id: "t5", text: "2026-10-10 interaction: Practised the first five minutes of his talk." }];
+
+describe("follow-up drafts", () => {
+  it("grounds the prompt in saved notes only", () => {
+    const prompt = buildFollowUpPrompt("Dev Raman", "good luck with the talk", context);
+    expect(prompt).toContain("- 2026-10-10 interaction: Practised");
+    expect(prompt).toContain("Do not add facts");
+  });
+
+  it("cleans a fixture reply into a draft, never a sent message", () => {
+    // FIXTURE: hand-written model-style reply, not live output.
+    const draft = cleanDraft('Subject: Hi\n"Good luck on Tuesday, Dev!"', "FIXTURE", context);
+    expect(draft).toEqual({ status: "draft", model: "FIXTURE", text: "Good luck on Tuesday, Dev!", basedOn: ["t5"] });
+  });
+
+  it("caps length and refuses empty drafts", () => {
+    expect(cleanDraft("x".repeat(900), "FIXTURE", []).text.length).toBe(MAX_DRAFT_CHARS + 1);
+    expect(() => cleanDraft('  ""  ', "FIXTURE", [])).toThrow("empty draft");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/circle/followup.ts">
+
+```typescript
+import type { Passage } from "./context";
+
+export type FollowUpDraft = {
+  status: "draft";
+  model: string;
+  text: string;
+  basedOn: string[];
+};
+
+export const MAX_DRAFT_CHARS = 600;
+
+export function buildFollowUpPrompt(
+  personName: string,
+  intent: string,
+  context: Passage[],
+): string {
+  return [
+    `Write a short, warm message I could send to ${personName}.`,
+    `What I want to say: ${intent}`,
+    "Use only these notes I saved. Do not add facts, plans, or dates that are not here.",
+    ...context.map((c) => `- ${c.text}`),
+    "Two to four sentences. Plain text. No subject line, no signature.",
+  ].join("\n");
+}
+
+// The app, not the model, decides what a usable draft looks like.
+export function cleanDraft(
+  raw: string,
+  model: string,
+  context: Passage[],
+): FollowUpDraft {
+  const text = raw
+    .replace(/^\s*subject:.*$/gim, "")
+    .trim()
+    .replace(/^["“]+|["”]+$/g, "")
+    .trim();
+  if (!text) throw new Error("The model returned an empty draft");
+  return {
+    status: "draft",
+    model,
+    text: text.length > MAX_DRAFT_CHARS ? `${text.slice(0, MAX_DRAFT_CHARS).trimEnd()}…` : text,
+    basedOn: context.map((c) => c.id),
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/service-client.ts">
+
+```typescript
+import type { ContextMatch, Passage } from "./context";
+import type { FollowUpDraft } from "./followup";
+import type { ExtractionResult, KnownPerson } from "./extraction";
+
+// The browser never imports @qvac/sdk. It talks to the loopback service.
+export const DEFAULT_SERVICE_URL = "http://127.0.0.1:4327";
+
+export type ServiceHealth = {
+  ok: boolean;
+  capabilities: Record<string, boolean>;
+};
+
+export type ProposedRecap = {
+  status: "proposed";
+  model: string;
+  transcript: string;
+  durationMs: number;
+};
+
+export class ServiceError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+export function createServiceClient(
+  baseUrl: string = DEFAULT_SERVICE_URL,
+  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+) {
+  async function call(path: string, init?: RequestInit): Promise<unknown> {
+    let res: Response;
+    try {
+      res = await fetchImpl(`${baseUrl}${path}`, init);
+    } catch {
+      throw new ServiceError("The local AI service is not running", "unreachable");
+    }
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      const code = typeof body.error === "string" ? body.error : `http-${res.status}`;
+      const message = typeof body.message === "string" ? body.message : code;
+      throw new ServiceError(message, code);
+    }
+    return body;
+  }
+
+  function post(path: string, payload: unknown) {
+    return call(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  return {
+    async health(): Promise<ServiceHealth> {
+      const body = (await call("/health")) as ServiceHealth;
+      return { ok: body.ok === true, capabilities: body.capabilities ?? {} };
+    },
+    async transcribe(audioBase64: string, fileName: string): Promise<ProposedRecap> {
+      const body = (await post("/recap/transcribe", { audioBase64, fileName })) as ProposedRecap;
+      if (body.status !== "proposed" || typeof body.transcript !== "string") {
+        throw new ServiceError("Unexpected transcription response", "bad-response");
+      }
+      return body;
+    },
+    async extract(
+      transcript: string,
+      people: KnownPerson[],
+      today: string,
+    ): Promise<ExtractionResult> {
+      const body = (await post("/recap/extract", { transcript, people, today })) as ExtractionResult;
+      if (body.status !== "proposed" || !Array.isArray(body.proposals)) {
+        throw new ServiceError("Unexpected extraction response", "bad-response");
+      }
+      return body;
+    },
+    async retrieve(
+      query: string,
+      passages: Passage[],
+    ): Promise<{ model: string; matches: ContextMatch[] }> {
+      const body = (await post("/context/retrieve", { query, passages })) as {
+        model: string;
+        matches: ContextMatch[];
+      };
+      if (!Array.isArray(body.matches)) {
+        throw new ServiceError("Unexpected retrieval response", "bad-response");
+      }
+      return body;
+    },
+    async draftFollowUp(
+      personName: string,
+      intent: string,
+      context: Passage[],
+    ): Promise<FollowUpDraft> {
+      const body = (await post("/followup/draft", { personName, intent, context })) as FollowUpDraft;
+      if (body.status !== "draft" || typeof body.text !== "string") {
+        throw new ServiceError("Unexpected draft response", "bad-response");
+      }
+      return body;
+    },
+    post,
+  };
+}
+
+export type ServiceClient = ReturnType<typeof createServiceClient>;
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/circle/followup.test.ts src/features/circle/FollowUp.test.tsx
+```
+
+Expected result: 2 test files pass, 4 tests pass. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 07: Draft an optional follow-up"
+```
+
+## Before continuing
+
+- [ ] You edited a draft before copying it.
+- [ ] You confirmed there is no send action.
+
+Continue to [Prove it offline](/docs/circle/08-offline-proof).

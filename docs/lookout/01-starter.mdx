@@ -1,0 +1,761 @@
+---
+title: "01. Build the Lookout starter"
+description: "We will build Lookout without AI: sample sources, arm and disarm, ordinary motion, change, and time rules, an event tape, and acknowledgement. Every later chapter starts from this commit."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 01. Build the Lookout starter" />
+
+We will build Lookout without AI. At the end of this chapter you can arm a source, replay its stored frames through ordinary rules, review the event tape, and acknowledge events. Every later chapter starts from this commit.
+
+Lookout is an event-first control room for visual sources you own. Events lead. Feeds support them. Armed state is impossible to miss.
+
+Lookout does not connect to cameras. Its sources are three fictional places, each with four drawn still frames. Every frame, time, and place is invented.
+
+**Source checkpoint:** `d67fc04` · **Starting checkpoint:** `ae0d652`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `src/features/lookout/sources.ts` | Three fictional sources and twelve stored frames with motion and change values |
+| `src/features/lookout/rules.ts` | Ordinary motion, change, and time rules. No model |
+| `src/features/lookout/events.ts` | Replay frames into the event tape, keep acknowledgements |
+| `src/features/lookout/store.ts` | The one storage adapter around `localStorage` |
+| `src/features/lookout/ControlRoom.tsx` | Armed banner, event tape, sources, rules editor, reset |
+| `public/test-files/lookout/*.png` | Twelve drawn sample frames |
+
+To compare with the starting checkpoint: `git diff ae0d652 d67fc04`.
+
+## Build and observe
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/danielAsaboro/bring-ai-home
+cd bring-ai-home
+git checkout d67fc04
+node --version
+npm ci
+npm run dev
+```
+
+Each lesson checkpoint holds the app at the repository root. The finished app is the tip of branch `course/lookout-qvac`.
+
+Use Node 22.22 or newer. Open `http://localhost:3000`.
+
+### 2. See the disarmed state
+
+The banner at the top reads **DISARMED · no source is watched**. The event tape says there are no events. Nothing is watched until you say so.
+
+### 3. Arm a source
+
+Click **Arm Front gate**. The banner turns red and reads **ARMED · 1 of 3 sources watched**. The Front gate card gets a red border. You cannot miss it, and that is the point.
+
+### 4. Replay stored frames
+
+Click **Replay stored frames**. Lookout runs the four Front gate frames through two default rules: motion at least 30% on any source, and scene change at least 15% on the Front gate.
+
+Three events appear, newest first: the cat at 22:15, the parcel at 10:44, and the courier at 10:42. The empty gate at 07:10 raises nothing.
+
+Look at the cat. It is a real event by these rules and a false alarm by any human standard. Plain motion and change rules cannot tell a cat from a parcel. Keep that in mind for chapter 02.
+
+### 5. Acknowledge and reload
+
+Click **Acknowledge Front gate 10:44**. The counter drops from 3 to 2. Reload the page. The acknowledgement is still there, because `store.ts` saved it.
+
+Open `store.ts`. It is the only file that touches browser storage. If storage is blocked or the saved JSON is broken, Lookout falls back to defaults and keeps working. **Reset demo data** clears it.
+
+### 6. Write down the rule for this course
+
+> A model may propose verdicts and watcher rules. The app decides what it will believe. Only a person activates a watcher or confirms an alert.
+
+We will test this rule in every chapter.
+
+## Read the checkpoint implementation
+
+These are complete files from `d67fc04`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+
+<AccordionGroup>
+<Accordion title="src/app/layout.tsx">
+
+```tsx
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Lookout",
+  description: "An event-first control room for visual sources you own.",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/app/page.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import Home from "./page";
+
+describe("Lookout control room", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("introduces Lookout and starts disarmed", async () => {
+    render(<Home />);
+    expect(screen.getByRole("heading", { level: 1, name: "Lookout" })).toBeInTheDocument();
+    expect(await screen.findByText(/No events/)).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Armed state" })).toHaveTextContent("DISARMED");
+  });
+
+  it("arms a source, replays frames onto the tape, and acknowledges an event", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByText(/No events/);
+
+    await user.click(screen.getByRole("button", { name: "Arm Front gate" }));
+    expect(screen.getByRole("status", { name: "Armed state" })).toHaveTextContent("ARMED · 1 of 3");
+
+    await user.click(screen.getByRole("button", { name: "Replay stored frames" }));
+    const tape = screen.getByRole("list", { name: "Events" });
+    expect(within(tape).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText("3 to review")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Acknowledge Front gate 10:44" }));
+    expect(screen.getByText("2 to review")).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("lookout:v1")!).tape[1].acknowledged).toBe(true);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/app/page.tsx">
+
+```tsx
+import { ControlRoom } from "@/features/lookout/ControlRoom";
+
+export default function Home() {
+  return (
+    <main>
+      <ControlRoom />
+    </main>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/ControlRoom.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { acknowledge, mergeTape, replayFrames } from "./events";
+import { ANY_SOURCE, describeRule, type Rule } from "./rules";
+import { findFrame, sampleSources } from "./sources";
+import { createStore, defaultState, type LookoutState } from "./store";
+
+function browserStorage() {
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function sourceName(id: string) {
+  return id === ANY_SOURCE ? "Any source" : (sampleSources.find((s) => s.id === id)?.name ?? id);
+}
+
+export function ControlRoom() {
+  const store = useMemo(() => createStore(browserStorage()), []);
+  const [state, setState] = useState<LookoutState>(defaultState);
+  const [loaded, setLoaded] = useState(false);
+  const [draftKind, setDraftKind] = useState<Rule["kind"]>("motion");
+  const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
+  const [draftValue, setDraftValue] = useState("40");
+  const [draftTo, setDraftTo] = useState("6");
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setState(store.load());
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [store]);
+
+  function update(next: LookoutState) {
+    setState(next);
+    store.save(next);
+  }
+
+  const armedCount = Object.values(state.armed).filter(Boolean).length;
+  const unacked = state.tape.filter((e) => !e.acknowledged).length;
+
+  function addRule() {
+    const id = `rule-${Date.now()}`;
+    const n = Number(draftValue);
+    let rule: Rule;
+    if (draftKind === "time") {
+      rule = { id, sourceId: draftSource, kind: "time", fromHour: n % 24, toHour: Number(draftTo) % 24 };
+    } else if (draftKind === "motion") {
+      rule = { id, sourceId: draftSource, kind: "motion", minMotion: Math.min(Math.max(n, 0), 100) / 100 };
+    } else {
+      rule = { id, sourceId: draftSource, kind: "change", minChange: Math.min(Math.max(n, 0), 100) / 100 };
+    }
+    update({ ...state, rules: [...state.rules, rule] });
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl p-4 font-sans text-slate-900">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Lookout</h1>
+        <button
+          className="rounded border px-3 py-1 text-sm"
+          onClick={() => update(store.reset())}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <p
+        role="status"
+        aria-label="Armed state"
+        className={`mb-6 rounded p-4 text-xl font-bold ${armedCount > 0 ? "bg-red-600 text-white" : "bg-slate-200 text-slate-700"}`}
+      >
+        {armedCount > 0
+          ? `ARMED · ${armedCount} of ${sampleSources.length} sources watched`
+          : "DISARMED · no source is watched"}
+      </p>
+
+      <section aria-labelledby="tape-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="tape-heading" className="text-lg font-semibold">
+            Event tape
+          </h2>
+          <span className="text-sm text-slate-600">{unacked} to review</span>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white"
+            onClick={() =>
+              update({ ...state, tape: mergeTape(state.tape, replayFrames(sampleSources, state.armed, state.rules)) })
+            }
+          >
+            Replay stored frames
+          </button>
+        </div>
+        {state.tape.length === 0 ? (
+          <p className="text-slate-600">
+            {loaded ? "No events. Arm a source and replay its stored frames." : "Loading…"}
+          </p>
+        ) : (
+          <ol aria-label="Events" className="space-y-2">
+            {state.tape.map((event) => {
+              const frame = findFrame(sampleSources, event.frameId);
+              return (
+                <li
+                  key={event.id}
+                  className={`flex flex-wrap items-center gap-3 rounded border p-2 ${event.acknowledged ? "opacity-60" : "border-red-400"}`}
+                >
+                  {frame ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">
+                      {sourceName(event.sourceId)} · {event.at.replace("T", " ")}
+                    </p>
+                    <p className="text-sm text-slate-600">Matched: {event.reasons.join(", ")}</p>
+                  </div>
+                  {event.acknowledged ? (
+                    <span className="text-sm">Acknowledged</span>
+                  ) : (
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, tape: acknowledge(state.tape, event.id) })}
+                    >
+                      Acknowledge {sourceName(event.sourceId)} {event.at.slice(11)}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+
+      <section aria-labelledby="sources-heading" className="mb-8">
+        <h2 id="sources-heading" className="mb-2 text-lg font-semibold">
+          Sources
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Stored still frames from sample sources. Lookout does not connect to cameras.
+        </p>
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {sampleSources.map((source) => {
+            const armed = Boolean(state.armed[source.id]);
+            const latest = source.frames[source.frames.length - 1];
+            return (
+              <li key={source.id} className={`rounded border-4 p-2 ${armed ? "border-red-600" : "border-slate-200"}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={latest.image} alt={latest.caption} width={320} height={200} className="w-full rounded" />
+                <p className="mt-1 font-medium">{source.name}</p>
+                <p className="text-sm text-slate-600">{source.place}</p>
+                <button
+                  aria-pressed={armed}
+                  className={`mt-2 w-full rounded px-2 py-1 font-semibold ${armed ? "bg-red-600 text-white" : "bg-slate-200"}`}
+                  onClick={() => update({ ...state, armed: { ...state.armed, [source.id]: !armed } })}
+                >
+                  {armed ? `Disarm ${source.name}` : `Arm ${source.name}`}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="rules-heading">
+        <h2 id="rules-heading" className="mb-2 text-lg font-semibold">
+          Rules
+        </h2>
+        <ul aria-label="Rules" className="mb-3 space-y-1">
+          {state.rules.map((rule) => (
+            <li key={rule.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(rule.sourceId)}: {describeRule(rule)}
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, rules: state.rules.filter((r) => r.id !== rule.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-end gap-2 text-sm">
+          <label className="flex flex-col">
+            Kind
+            <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as Rule["kind"])} className="border">
+              <option value="motion">Motion at least (%)</option>
+              <option value="change">Scene change at least (%)</option>
+              <option value="time">Only between hours</option>
+            </select>
+          </label>
+          <label className="flex flex-col">
+            Source
+            <select value={draftSource} onChange={(e) => setDraftSource(e.target.value)} className="border">
+              <option value={ANY_SOURCE}>Any source</option>
+              {sampleSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col">
+            {draftKind === "time" ? "From hour" : "Threshold"}
+            <input value={draftValue} onChange={(e) => setDraftValue(e.target.value)} inputMode="numeric" className="w-20 border" />
+          </label>
+          {draftKind === "time" ? (
+            <label className="flex flex-col">
+              To hour
+              <input value={draftTo} onChange={(e) => setDraftTo(e.target.value)} inputMode="numeric" className="w-20 border" />
+            </label>
+          ) : null}
+          <button className="rounded border px-3 py-1" onClick={addRule}>
+            Add rule
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/events.ts">
+
+```typescript
+import { evaluateRules, type Rule } from "./rules";
+import { allFrames, type Source } from "./sources";
+
+export type LookoutEvent = {
+  id: string;
+  frameId: string;
+  sourceId: string;
+  at: string;
+  reasons: string[];
+  acknowledged: boolean;
+};
+
+// Replays every stored frame through the ordinary rules. Disarmed sources are
+// skipped entirely: they never raise events.
+export function replayFrames(
+  sources: Source[],
+  armed: Record<string, boolean>,
+  rules: Rule[],
+): LookoutEvent[] {
+  const events: LookoutEvent[] = [];
+  for (const frame of allFrames(sources)) {
+    if (!armed[frame.sourceId]) continue;
+    const reasons = evaluateRules(rules, frame);
+    if (!reasons) continue;
+    events.push({
+      id: `evt-${frame.id}`,
+      frameId: frame.id,
+      sourceId: frame.sourceId,
+      at: frame.at,
+      reasons,
+      acknowledged: false,
+    });
+  }
+  // The tape shows newest first.
+  return events.reverse();
+}
+
+// Keeps acknowledgements across replays of the same frames.
+export function mergeTape(previous: LookoutEvent[], next: LookoutEvent[]): LookoutEvent[] {
+  const acked = new Set(previous.filter((e) => e.acknowledged).map((e) => e.id));
+  return next.map((e) => (acked.has(e.id) ? { ...e, acknowledged: true } : e));
+}
+
+export function acknowledge(tape: LookoutEvent[], eventId: string): LookoutEvent[] {
+  return tape.map((e) => (e.id === eventId ? { ...e, acknowledged: true } : e));
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/rules.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { acknowledge, mergeTape, replayFrames } from "./events";
+import { evaluateRules, inWindow, type Rule } from "./rules";
+import { sampleSources } from "./sources";
+import { createStore, defaultState } from "./store";
+
+const gate = sampleSources[0];
+
+describe("ordinary rules", () => {
+  it("wraps time windows across midnight", () => {
+    expect(inWindow("2026-03-14T23:40", 22, 6)).toBe(true);
+    expect(inWindow("2026-03-14T10:00", 22, 6)).toBe(false);
+  });
+
+  it("needs a motion or change trigger; time only narrows", () => {
+    const night: Rule = { id: "t", sourceId: "any", kind: "time", fromHour: 22, toHour: 6 };
+    expect(evaluateRules([night], gate.frames[3])).toBeNull();
+    const motion: Rule = { id: "m", sourceId: "any", kind: "motion", minMotion: 0.3 };
+    expect(evaluateRules([night, motion], gate.frames[3])).toEqual(["between 22:00 and 06:00", "motion ≥ 30%"]);
+    expect(evaluateRules([night, motion], gate.frames[1])).toBeNull();
+  });
+});
+
+describe("event tape", () => {
+  it("skips disarmed sources and keeps acknowledgements across replays", () => {
+    const { rules } = defaultState();
+    const none = replayFrames(sampleSources, {}, rules);
+    expect(none).toEqual([]);
+    const tape = replayFrames(sampleSources, { "front-gate": true }, rules);
+    expect(tape.map((e) => e.frameId)).toEqual(["front-gate-4", "front-gate-3", "front-gate-2"]);
+    const acked = acknowledge(tape, "evt-front-gate-2");
+    const again = mergeTape(acked, replayFrames(sampleSources, { "front-gate": true }, rules));
+    expect(again.find((e) => e.id === "evt-front-gate-2")?.acknowledged).toBe(true);
+  });
+});
+
+describe("storage adapter", () => {
+  it("falls back to defaults on corrupt or missing storage", () => {
+    const broken = { getItem: () => "{nope", setItem: () => undefined, removeItem: () => undefined };
+    expect(createStore(broken).load()).toEqual(defaultState());
+    expect(createStore(undefined).load()).toEqual(defaultState());
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/rules.ts">
+
+```typescript
+import type { Frame } from "./sources";
+
+// Ordinary, deterministic rules. No model is involved.
+export type Rule =
+  | { id: string; sourceId: string; kind: "motion"; minMotion: number }
+  | { id: string; sourceId: string; kind: "change"; minChange: number }
+  | { id: string; sourceId: string; kind: "time"; fromHour: number; toHour: number };
+
+export const ANY_SOURCE = "any";
+
+function hourOf(at: string): number {
+  return Number(at.slice(11, 13));
+}
+
+// True when the hour falls inside [fromHour, toHour). Windows may wrap midnight.
+export function inWindow(at: string, fromHour: number, toHour: number): boolean {
+  const h = hourOf(at);
+  if (fromHour === toHour) return true;
+  return fromHour < toHour ? h >= fromHour && h < toHour : h >= fromHour || h < toHour;
+}
+
+export function describeRule(rule: Rule): string {
+  switch (rule.kind) {
+    case "motion":
+      return `motion ≥ ${Math.round(rule.minMotion * 100)}%`;
+    case "change":
+      return `scene change ≥ ${Math.round(rule.minChange * 100)}%`;
+    case "time":
+      return `between ${String(rule.fromHour).padStart(2, "0")}:00 and ${String(rule.toHour).padStart(2, "0")}:00`;
+  }
+}
+
+function applies(rule: Rule, frame: Frame): boolean {
+  return rule.sourceId === ANY_SOURCE || rule.sourceId === frame.sourceId;
+}
+
+function matches(rule: Rule, frame: Frame): boolean {
+  switch (rule.kind) {
+    case "motion":
+      return frame.motion >= rule.minMotion;
+    case "change":
+      return frame.change >= rule.minChange;
+    case "time":
+      return inWindow(frame.at, rule.fromHour, rule.toHour);
+  }
+}
+
+// A frame raises an event when any applicable motion or change rule matches and
+// every applicable time rule matches. Time rules only narrow; they never trigger alone.
+export function evaluateRules(rules: Rule[], frame: Frame): string[] | null {
+  const applicable = rules.filter((r) => applies(r, frame));
+  const windows = applicable.filter((r) => r.kind === "time");
+  const fired = applicable.filter((r) => r.kind !== "time" && matches(r, frame));
+  if (fired.length === 0) return null;
+  if (!windows.every((r) => matches(r, frame))) return null;
+  return [...windows, ...fired].map(describeRule);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/sources.ts">
+
+```typescript
+// Fictional sample sources. Every frame is a drawn still in
+// public/test-files/lookout. No real camera is connected to Lookout.
+
+export type Frame = {
+  id: string;
+  sourceId: string;
+  at: string; // local time of capture, "YYYY-MM-DDTHH:mm"
+  image: string;
+  motion: number; // 0..1, share of the frame that moved since the last frame
+  change: number; // 0..1, share of the frame that differs from the reference still
+  caption: string; // written by a person, describes the drawing
+};
+
+export type Source = {
+  id: string;
+  name: string;
+  place: string;
+  frames: Frame[];
+};
+
+function frame(
+  sourceId: string,
+  n: number,
+  at: string,
+  motion: number,
+  change: number,
+  caption: string,
+): Frame {
+  return {
+    id: `${sourceId}-${n}`,
+    sourceId,
+    at,
+    image: `/test-files/lookout/${sourceId}-${n}.png`,
+    motion,
+    change,
+    caption,
+  };
+}
+
+export const sampleSources: Source[] = [
+  {
+    id: "front-gate",
+    name: "Front gate",
+    place: "Path to the street",
+    frames: [
+      frame("front-gate", 1, "2026-03-14T07:10", 0.02, 0.01, "Closed gate, nobody there"),
+      frame("front-gate", 2, "2026-03-14T10:42", 0.61, 0.34, "A courier stands by the gate holding a box"),
+      frame("front-gate", 3, "2026-03-14T10:44", 0.08, 0.22, "A parcel sits by the gate, nobody there"),
+      frame("front-gate", 4, "2026-03-14T22:15", 0.48, 0.18, "A cat walks along the wall at night"),
+    ],
+  },
+  {
+    id: "back-garden",
+    name: "Back garden",
+    place: "Lawn and apple tree",
+    frames: [
+      frame("back-garden", 1, "2026-03-14T06:30", 0.01, 0.0, "Quiet garden at dawn"),
+      frame("back-garden", 2, "2026-03-14T14:05", 0.55, 0.05, "Wind moves the tree"),
+      frame("back-garden", 3, "2026-03-15T02:20", 0.4, 0.2, "A fox crosses the lawn at night"),
+      frame("back-garden", 4, "2026-03-15T18:00", 0.01, 0.0, "Quiet garden in the evening"),
+    ],
+  },
+  {
+    id: "studio-door",
+    name: "Studio door",
+    place: "Workshop entrance",
+    frames: [
+      frame("studio-door", 1, "2026-03-14T09:00", 0.0, 0.0, "Door closed"),
+      frame("studio-door", 2, "2026-03-14T23:40", 0.3, 0.41, "Door open at night"),
+      frame("studio-door", 3, "2026-03-14T23:41", 0.7, 0.5, "A figure stands in the open doorway"),
+      frame("studio-door", 4, "2026-03-15T08:00", 0.0, 0.0, "Door closed"),
+    ],
+  },
+];
+
+export function findFrame(sources: Source[], frameId: string): Frame | undefined {
+  for (const source of sources) {
+    const match = source.frames.find((f) => f.id === frameId);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+// All frames from every source, in capture order.
+export function allFrames(sources: Source[]): Frame[] {
+  return sources.flatMap((s) => s.frames).sort((a, b) => a.at.localeCompare(b.at));
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/store.ts">
+
+```typescript
+import type { LookoutEvent } from "./events";
+import type { Rule } from "./rules";
+import { sampleSources } from "./sources";
+
+export type LookoutState = {
+  version: 1;
+  armed: Record<string, boolean>;
+  rules: Rule[];
+  tape: LookoutEvent[];
+};
+
+export const STORAGE_KEY = "lookout:v1";
+
+export function defaultState(): LookoutState {
+  return {
+    version: 1,
+    armed: Object.fromEntries(sampleSources.map((s) => [s.id, false])),
+    rules: [
+      { id: "rule-motion", sourceId: "any", kind: "motion", minMotion: 0.3 },
+      { id: "rule-change", sourceId: "front-gate", kind: "change", minChange: 0.15 },
+    ],
+    tape: [],
+  };
+}
+
+type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+// The only place Lookout touches browser storage.
+export function createStore(storage: KeyValue | undefined) {
+  return {
+    load(): LookoutState {
+      try {
+        const raw = storage?.getItem(STORAGE_KEY);
+        if (!raw) return defaultState();
+        const parsed = JSON.parse(raw) as Partial<LookoutState>;
+        if (parsed.version !== 1 || !parsed.armed || !Array.isArray(parsed.rules) || !Array.isArray(parsed.tape)) {
+          return defaultState();
+        }
+        return { ...defaultState(), ...parsed } as LookoutState;
+      } catch {
+        return defaultState();
+      }
+    },
+    save(state: LookoutState) {
+      try {
+        storage?.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch {
+        // Storage can be full or blocked. The app keeps working in memory.
+      }
+    },
+    reset(): LookoutState {
+      try {
+        storage?.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      return defaultState();
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="vitest.setup.ts">
+
+```typescript
+import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => cleanup());
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- src/app/page.test.tsx src/features/lookout/rules.test.ts
+```
+
+Expected result: 2 test files pass, 6 tests pass. They cover the armed banner, replay, acknowledgement, persistence, and broken storage.
+
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 01: Build the Lookout starter"
+```
+
+## Before continuing
+
+- [ ] The banner turned red when you armed a source.
+- [ ] Replay produced three Front gate events, including the cat.
+- [ ] An acknowledgement survived a reload.
+
+Next: [02. Check one frame against a plain-language condition](/docs/lookout/02-check-frame)

@@ -1,0 +1,11 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/docs", "destination": "/docs/index" }
+  ],
+  "redirects": [
+    { "source": "/:section(redact|replay|chronicle|ledger|circle|homebook|pattern|closet|lookout|deck|leash|start-here|downloads)/:path*", "destination": "/docs/:section/:path*", "permanent": true },
+    { "source": "/:page(apps|local-ai|development)", "destination": "/docs/:page", "permanent": true }
+  ]
+}

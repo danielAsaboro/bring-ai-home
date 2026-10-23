@@ -1,0 +1,401 @@
+---
+title: "09. Evaluate quality and geometry"
+description: "We will run the same real analyzer on four labelled images and measure both classification and placement. A convincing example is useful for debugging; a repeatable evaluation is what tells us where the system still misses."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 09. Evaluate quality and geometry" />
+
+We will run the same real analyzer on four labelled images and measure both classification and placement. A convincing example is useful for debugging; a repeatable evaluation is what tells us where the system still misses.
+
+**Source checkpoint:** `a72b7da` · **Starting checkpoint:** `1376820`
+
+## Make this chapter's changes
+
+Download [the complete Chapter 9 patch](/docs/downloads/redact/09-evaluation.patch) into `~/Downloads`. It includes the implementation, tests, and lockfile changes for this chapter only. Complete the previous chapter first.
+
+Stop the app and service before changing a checkpoint. From the **parent `redact-course` directory**, inspect and apply the patch:
+
+```bash
+git apply --stat ~/Downloads/09-evaluation.patch
+git apply --check ~/Downloads/09-evaluation.patch
+git apply ~/Downloads/09-evaluation.patch
+cd redact
+npm ci
+```
+
+`--check` should exit successfully without changing files. If it reports that a patch does not apply, stop and check your previous chapter and local edits. Do not force it with `--reject` or overwrite your work.
+
+The walkthrough below explains the changes in implementation order. You can instead write the files yourself using the patch and complete source blocks as your reference. Use one method per chapter: do not apply the patch on top of the same edits you already wrote.
+
+## Build and observe
+
+### 1. Generate the four inputs
+
+```bash
+npm run redact:test-files
+```
+
+Open the clear, rotated, low-contrast, and partially obscured files under `public/test-files/redact/evaluation`. Verify the visual differences before looking at scores.
+
+### 2. Inspect labels independently of proposals
+
+Read `EVALUATION_CASES` in `evaluation.ts`. Expected boxes represent sensitive regions. They are used for scoring after inference, not fed to the model as answers.
+
+The obscured address remains in ground truth. An unreadable region can still represent a required field; the resulting miss should stay visible in the receipt.
+
+### 3. Work through one match
+
+Intersection over union is overlapping area divided by combined area. The evaluator allows a match only when labels agree and IoU is at least 0.45. It greedily consumes highest-IoU pairs with stable tie breaks; each expected and proposed region can be counted once.
+
+Precision is matched proposals divided by all proposals. Recall is matched expected regions divided by all expected regions. F1 balances the two. Every case needs at least 0.70 for all three.
+
+Five matches from six expected regions with no extra proposals gives precision 1, recall 5/6, and F1 about 0.91. Passing that gate still leaves one missed region.
+
+### 4. Understand rotation recovery
+
+Inspect the analyzer diff and its focused test. Fragmented vertical text on a landscape page can trigger a counter-clockwise retry. Recovered coordinates must be mapped clockwise back to the unchanged original page. Better recognition on a rotated temporary image is insufficient if its boxes are not transformed back.
+
+### 5. Run the actual evaluation
+
+Warm OCR with `npm run qvac:ocr-smoke` and reasoning with one successful app analysis. Stop the service so the evaluator owns the runtime. Then:
+
+```bash
+npm run qvac:evaluate > evaluation-receipt.json
+```
+
+Inspect both the exit status and JSON. A nonzero status means the gate did not pass or execution failed. During diagnosis, isolate a case:
+
+```bash
+REDACT_EVALUATION_CASE=chat-rotated npm run qvac:evaluate
+```
+
+Before calling the evaluation complete, run all four cases. Record identifiers, false positives, false negatives, model load, inference timings, and sampled memory. A four-case fictional set is an executable course gate, not proof of accuracy on arbitrary private documents.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. The patch above contains the remaining UI wiring and tests. Paths are relative to the `redact` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/evaluation.ts">
+
+```typescript
+import type { BoundingBox, RedactionLabel } from "../src/features/redact/workflow-domain";
+
+export type LabelledRegion = {
+  id: string;
+  label: RedactionLabel;
+  bbox: BoundingBox;
+};
+
+export type EvaluationCase = {
+  id: string;
+  condition: "clear" | "rotated" | "low-contrast" | "partially-obscured";
+  fixturePath: string;
+  expected: LabelledRegion[];
+};
+
+export const EVALUATION_THRESHOLDS = {
+  iou: 0.45,
+  minimumPrecision: 0.7,
+  minimumRecall: 0.7,
+  minimumF1: 0.7,
+} as const;
+
+export const EVALUATION_IDENTIFIERS = {
+  sdk: "@qvac/sdk@0.17.1",
+  ocr: "OCR_LATIN/qvac-ocr-latin",
+  reasoning: "QWEN3_600M_INST_Q4/qwen3-600m-instruct-q4",
+  policy: "redact-sensitive-fields-v2",
+} as const;
+
+const clearRegions: LabelledRegion[] = [
+  { id: "name", label: "name", bbox: { x: 17.583333, y: 7.125, width: 15.5, height: 2.75 } },
+  { id: "email", label: "email", bbox: { x: 17.75, y: 10.375, width: 22.083333, height: 1.75 } },
+  { id: "address", label: "address", bbox: { x: 15.583333, y: 20.875, width: 44.333333, height: 1.9375 } },
+  { id: "phone", label: "phone", bbox: { x: 19.166667, y: 23.75, width: 27, height: 2.125 } },
+  { id: "account", label: "account", bbox: { x: 39.333333, y: 34.125, width: 27.583333, height: 2 } },
+  { id: "reference", label: "reference", bbox: { x: 31.333333, y: 36.875, width: 30, height: 1.9375 } },
+];
+
+function rotateClockwise(region: LabelledRegion): LabelledRegion {
+  const { x, y, width, height } = region.bbox;
+  return {
+    ...region,
+    id: `${region.id}-rotated`,
+    bbox: { x: 100 - y - height, y: x, width: height, height: width },
+  };
+}
+
+function copyRegions(suffix: string) {
+  return clearRegions.map((region) => ({ ...region, id: `${region.id}-${suffix}` }));
+}
+
+export const EVALUATION_CASES: EvaluationCase[] = [
+  {
+    id: "chat-clear",
+    condition: "clear",
+    fixturePath: "public/test-files/redact/evaluation/chat-clear.png",
+    expected: clearRegions,
+  },
+  {
+    id: "chat-rotated",
+    condition: "rotated",
+    fixturePath: "public/test-files/redact/evaluation/chat-rotated.png",
+    expected: clearRegions.map(rotateClockwise),
+  },
+  {
+    id: "chat-low-contrast",
+    condition: "low-contrast",
+    fixturePath: "public/test-files/redact/evaluation/chat-low-contrast.png",
+    expected: copyRegions("low-contrast"),
+  },
+  {
+    id: "chat-partially-obscured",
+    condition: "partially-obscured",
+    fixturePath: "public/test-files/redact/evaluation/chat-partially-obscured.png",
+    expected: copyRegions("partially-obscured"),
+  },
+];
+
+export function intersectionOverUnion(a: BoundingBox, b: BoundingBox): number {
+  const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const height = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  const intersection = width * height;
+  const union = a.width * a.height + b.width * b.height - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+export function evaluateRegions(
+  expected: readonly LabelledRegion[],
+  proposed: readonly LabelledRegion[],
+  iouThreshold: number = EVALUATION_THRESHOLDS.iou,
+) {
+  const pairs = expected
+    .flatMap((expectedRegion) =>
+      proposed
+        .filter((proposal) => proposal.label === expectedRegion.label)
+        .map((proposal) => ({
+          expectedId: expectedRegion.id,
+          proposedId: proposal.id,
+          iou: intersectionOverUnion(expectedRegion.bbox, proposal.bbox),
+        })),
+    )
+    .filter((pair) => pair.iou >= iouThreshold)
+    .sort((a, b) => b.iou - a.iou || a.expectedId.localeCompare(b.expectedId) || a.proposedId.localeCompare(b.proposedId));
+  const usedExpected = new Set<string>();
+  const usedProposed = new Set<string>();
+  const matches = pairs.filter((pair) => {
+    if (usedExpected.has(pair.expectedId) || usedProposed.has(pair.proposedId)) return false;
+    usedExpected.add(pair.expectedId);
+    usedProposed.add(pair.proposedId);
+    return true;
+  }).sort((a, b) => a.expectedId.localeCompare(b.expectedId) || a.proposedId.localeCompare(b.proposedId));
+  const truePositives = matches.length;
+  const falsePositives = proposed.length - truePositives;
+  const falseNegatives = expected.length - truePositives;
+  const precision = proposed.length === 0 ? 1 : truePositives / proposed.length;
+  const recall = expected.length === 0 ? 1 : truePositives / expected.length;
+  const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+  return {
+    truePositives,
+    falsePositives,
+    falseNegatives,
+    precision,
+    recall,
+    f1,
+    passed:
+      precision >= EVALUATION_THRESHOLDS.minimumPrecision &&
+      recall >= EVALUATION_THRESHOLDS.minimumRecall &&
+      f1 >= EVALUATION_THRESHOLDS.minimumF1,
+    matches,
+    thresholds: { ...EVALUATION_THRESHOLDS, iou: iouThreshold },
+  };
+}
+
+export async function runEvaluationCases(
+  cases: readonly EvaluationCase[],
+  propose: (item: EvaluationCase) => Promise<LabelledRegion[]>,
+  profiler: {
+    onCaseStart?(item: EvaluationCase): void;
+    onCaseComplete?(item: EvaluationCase, result: ReturnType<typeof evaluateRegions>, elapsedMs: number): void;
+  } = {},
+  now: () => number = Date.now,
+) {
+  const receipts = [];
+  for (const item of cases) {
+    profiler.onCaseStart?.(item);
+    const started = now();
+    const proposals = await propose(item);
+    const result = evaluateRegions(item.expected, proposals);
+    const elapsedMs = now() - started;
+    profiler.onCaseComplete?.(item, result, elapsedMs);
+    receipts.push({ caseId: item.id, proposals, result, elapsedMs });
+  }
+  return receipts;
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/evaluation-cli.ts">
+
+```typescript
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import sharp from "sharp";
+
+import { normalizeOcrBbox } from "../src/features/redact/ocr-geometry";
+import { createQvacOcrAnalyzer } from "./qvac-analyzer";
+import { createStructuredReasoner } from "./reasoning";
+import { EVALUATION_CASES, EVALUATION_IDENTIFIERS, runEvaluationCases } from "./evaluation";
+import { resolveLocalQvacPaths } from "./local-config";
+
+async function main() {
+  const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+  const paths = resolveLocalQvacPaths(appDirectory);
+  await Promise.all([
+    mkdir(paths.cacheDirectory, { recursive: true }),
+    mkdir(paths.tempDirectory, { recursive: true }),
+  ]);
+  if ((await readdir(paths.cacheDirectory)).length === 0) {
+    throw new Error("QVAC cache is empty. Run npm run qvac:ocr-smoke and one app analysis first.");
+  }
+  await writeFile(paths.configPath, `${JSON.stringify({ cacheDirectory: paths.cacheDirectory }, null, 2)}\n`);
+  process.env.QVAC_CONFIG_PATH = paths.configPath;
+  process.env.SNAP_USER_COMMON = paths.runtimeHome;
+
+  const qvac = await import("@qvac/sdk");
+  const modelLoadMs = { ocr: 0, reasoning: 0 };
+  const reasoner = createStructuredReasoner({
+    modelSource: qvac.QWEN3_600M_INST_Q4,
+    runtime: {
+      async loadModel(options) {
+        const started = Date.now();
+        try { return await qvac.loadModel(options as never); }
+        finally { modelLoadMs.reasoning += Date.now() - started; }
+      },
+      completion: (options) => qvac.completion(options as never),
+      unloadModel: (options) => qvac.unloadModel(options),
+    },
+  });
+  const analyzer = createQvacOcrAnalyzer({
+    modelSource: qvac.OCR_LATIN,
+    runtime: {
+      async loadModel(options) {
+        const started = Date.now();
+        try { return await qvac.loadModel(options as never); }
+        finally { modelLoadMs.ocr += Date.now() - started; }
+      },
+      ocr: (options) => qvac.ocr(options),
+      unloadModel: (options) => qvac.unloadModel(options),
+      close: () => qvac.close(),
+    },
+    reasoner,
+  });
+  let peakRssBytes = process.memoryUsage().rss;
+  let peakHeapUsedBytes = process.memoryUsage().heapUsed;
+  const timings: Array<{ caseId: string; ocrInferenceMs: number; reasoningInferenceMs: number }> = [];
+  try {
+    let previousOcrLoad = 0;
+    let previousReasoningLoad = 0;
+    const requestedCase = process.env.REDACT_EVALUATION_CASE;
+    const cases = requestedCase
+      ? EVALUATION_CASES.filter((item) => item.id === requestedCase)
+      : EVALUATION_CASES;
+    if (cases.length === 0) throw new Error(`Unknown evaluation case: ${requestedCase}`);
+    const results = await runEvaluationCases(cases, async (item) => {
+      const fixture = path.resolve(appDirectory, item.fixturePath);
+      const bytes = await readFile(fixture);
+      const metadata = await sharp(bytes).metadata();
+      if (!metadata.width || !metadata.height) throw new Error(`Missing dimensions for ${item.id}`);
+      const response = await analyzer.analyzePage({
+        documentId: `evaluation-${item.id}`,
+        pageId: `${item.id}-page-1`,
+        pageNumber: 1,
+        width: metadata.width,
+        height: metadata.height,
+        pngBase64: bytes.toString("base64"),
+        level: "private",
+        direction: "Redact direct personal identifiers, account numbers, and reference codes.",
+      });
+      const ocrLoadThisCase = modelLoadMs.ocr - previousOcrLoad;
+      const reasoningLoadThisCase = modelLoadMs.reasoning - previousReasoningLoad;
+      previousOcrLoad = modelLoadMs.ocr;
+      previousReasoningLoad = modelLoadMs.reasoning;
+      timings.push({
+        caseId: item.id,
+        ocrInferenceMs: Math.max(0, (response.run.ocrMs ?? 0) - ocrLoadThisCase),
+        reasoningInferenceMs: Math.max(0, (response.run.reasoningMs ?? 0) - reasoningLoadThisCase),
+      });
+      const memory = process.memoryUsage();
+      peakRssBytes = Math.max(peakRssBytes, memory.rss);
+      peakHeapUsedBytes = Math.max(peakHeapUsedBytes, memory.heapUsed);
+      return response.candidates.flatMap((candidate) => {
+        const block = response.ocrBlocks[candidate.blockIndex];
+        if (!block) return [];
+        const bbox = normalizeOcrBbox(block.bbox, response.page.width, response.page.height);
+        return bbox ? [{ id: `${item.id}-${candidate.blockIndex}`, label: candidate.label, bbox }] : [];
+      });
+    }, {
+      onCaseStart: (item) => process.stderr.write(`Evaluating ${item.condition}…\n`),
+    });
+    const passed = results.every((item) => item.result.passed);
+    process.stdout.write(`${JSON.stringify({
+      mode: "real-cached-local-qvac",
+      identifiers: EVALUATION_IDENTIFIERS,
+      passed,
+      modelLoadMs,
+      timings,
+      memory: { peakRssBytes, peakHeapUsedBytes },
+      results,
+    }, null, 2)}\n`);
+    if (!passed) process.exitCode = 1;
+  } finally {
+    await analyzer.close();
+  }
+}
+
+void main().catch((error: unknown) => {
+  process.stderr.write(`QVAC evaluation failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/evaluation.test.ts qvac-service/qvac-analyzer.test.ts
+```
+
+These focused tests exercise application contracts with controlled inputs. They do not prove live model inference. For Chapters 2 onward, also complete the live or visible exercise described above when the model prerequisite exists.
+
+Run the broader checks separately, from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Run type generation and build sequentially because both write Next.js generated state. After all required checks pass, record your checkpoint from the parent directory:
+
+```bash
+cd ..
+git diff --check
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 09: Evaluate quality and geometry"
+```
+
+## Before continuing
+
+- [ ] You ran all four cases and kept false negatives in the receipt.
+- [ ] You can distinguish model quality, labelling errors, placement errors, and runtime failure.
+
+Continue to [Verify the cached offline workflow](/docs/redact/10-offline-proof).

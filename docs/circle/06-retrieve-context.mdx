@@ -1,0 +1,1101 @@
+---
+title: "06. Retrieve context before a meeting"
+description: "We will embed what you already saved about a person and rank it against what the meeting is about. Open promises always show, with or without a model."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Circle · 06. Retrieve context before a meeting" />
+
+We will embed what you already saved about a person and rank it against what the meeting is about. Open promises always show, with or without a model.
+
+Before you see someone, you want the few notes that matter today, not their whole timeline.
+
+`GTE_LARGE_FP16` turns the meeting topic and each saved note into vectors. Plain code ranks them by cosine similarity and drops weak matches. Only confirmed notes are searchable. Open reminders always show first, because they need no model at all.
+
+**Source checkpoint:** `8072ad1` · **Starting checkpoint:** `f0e0c0c`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/circle/context.ts` | Build passages from the timeline and open reminders, then rank by cosine |
+| `src/features/circle/BeforeWeMeet.tsx` | Open promises, a topic box, and ranked context with scores |
+| `qvac-service/server.mjs` | Embed the query and passages in one `embed` call |
+| `qvac-service/service.ts` | Validate `/context/retrieve` and skip the model for an empty timeline |
+
+## Build and observe
+
+### 1. Open a card
+
+With the service and app running, open Dev Raman. **Before we meet** shows `Still open: Ask how the meetup talk went`. That line came from the reminders list, not from a model.
+
+### 2. Gather context
+
+Type `his talk` and select **Gather context**. The first call downloads the embedding model. Each result shows its score and the model name.
+
+### 3. Read the ranking
+
+`rankContext` keeps at most three passages with a score of at least `0.3`. A low score means nothing close enough. The card then says so, instead of showing a weak guess.
+
+### 4. Try someone new
+
+Inès Moreau has no timeline entries. The service returns no matches with `model: "none"` and never loads a model.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/server.mjs">
+
+```javascript
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { rankContext } from "../src/features/circle/context.ts";
+import {
+  buildExtractionPrompt,
+  parseExtraction,
+  PROPOSAL_SCHEMA,
+} from "../src/features/circle/extraction.ts";
+import { buildRecapDraft } from "./recap.ts";
+import { createService, MAX_BODY_BYTES, SERVICE_PORT } from "./service.ts";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const HOST = "127.0.0.1";
+const ALLOWED_ORIGINS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+const sdk = await import("@qvac/sdk");
+
+// Models load on first use and stay loaded until the service stops.
+const loaded = new Map();
+function model(name, options) {
+  if (!loaded.has(name)) {
+    loaded.set(
+      name,
+      sdk.loadModel(options).catch((error) => {
+        loaded.delete(name);
+        throw error;
+      }),
+    );
+  }
+  return loaded.get(name);
+}
+
+const capabilities = {
+  async transcribe(audio, fileName) {
+    const modelId = await model("WHISPER_TINY", {
+      modelSrc: sdk.WHISPER_TINY,
+      modelConfig: { language: "en", translate: false, temperature: 0.0 },
+    });
+    const dir = await mkdtemp(path.join(tmpdir(), "circle-recap-"));
+    const audioPath = path.join(dir, path.basename(fileName));
+    try {
+      await writeFile(audioPath, audio);
+      const segments = await sdk.transcribe({ modelId, audioChunk: audioPath, metadata: true });
+      return buildRecapDraft(segments, "WHISPER_TINY");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+};
+
+capabilities.extract = async ({ transcript, people, today }) => {
+  const modelId = await model("LLAMA_3_2_1B_INST_Q4_0", {
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelConfig: { ctx_size: 4096 },
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: buildExtractionPrompt(transcript, people, today) }],
+    stream: false,
+    responseFormat: {
+      type: "json_schema",
+      json_schema: { name: "circle_proposals", schema: PROPOSAL_SCHEMA },
+    },
+  });
+  const final = await run.final;
+  return parseExtraction(final.contentText, {
+    transcript,
+    people,
+    today,
+    model: "LLAMA_3_2_1B_INST_Q4_0",
+  });
+};
+
+capabilities.retrieve = async ({ query, passages }) => {
+  const modelId = await model("GTE_LARGE_FP16", {
+    modelSrc: sdk.GTE_LARGE_FP16,
+    modelType: "embeddings",
+  });
+  const { embedding } = await sdk.embed({
+    modelId,
+    text: [query, ...passages.map((p) => p.text)],
+  });
+  const [queryVector, ...vectors] = embedding;
+  return {
+    model: "GTE_LARGE_FP16",
+    matches: rankContext(queryVector, passages, vectors, { limit: 3, minScore: 0.3 }),
+  };
+};
+
+const handle = createService(capabilities);
+
+const server = createServer(async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Headers", "content-type");
+  }
+  if (req.method === "OPTIONS") return res.writeHead(204).end();
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    return res.writeHead(403).end(JSON.stringify({ error: "origin-not-allowed" }));
+  }
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) {
+      return res.writeHead(413).end(JSON.stringify({ error: "too-large" }));
+    }
+    chunks.push(chunk);
+  }
+  let body;
+  try {
+    body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
+  } catch {
+    return res.writeHead(400).end(JSON.stringify({ error: "invalid-json" }));
+  }
+  const url = new URL(req.url ?? "/", `http://${HOST}`);
+  const result = await handle(req.method ?? "GET", url.pathname, body);
+  res.writeHead(result.status, { "content-type": "application/json" });
+  res.end(JSON.stringify(result.body));
+});
+
+server.listen(SERVICE_PORT, HOST, () => {
+  process.stdout.write(`Circle QVAC service on http://${HOST}:${SERVICE_PORT}\n`);
+});
+
+async function shutdown() {
+  server.close();
+  for (const pending of loaded.values()) {
+    const modelId = await pending.catch(() => undefined);
+    if (modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  await sdk.close().catch(() => undefined);
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/service.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { buildRecapDraft } from "./recap";
+import { createService } from "./service";
+
+const audioBase64 = Buffer.from("fixture-audio").toString("base64");
+
+describe("local service boundary", () => {
+  it("reports which capabilities are configured", async () => {
+    const handle = createService({});
+    const res = await handle("GET", "/health", undefined);
+    expect(res).toEqual({
+      status: 200,
+      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false, retrieve: false } },
+    });
+  });
+
+  it("answers 503 instead of inventing a transcript", async () => {
+    const res = await createService({})("POST", "/recap/transcribe", { audioBase64, fileName: "a.wav" });
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: "not-configured" });
+  });
+
+  it("validates the request before calling the model", async () => {
+    let called = false;
+    const handle = createService({
+      transcribe: async () => {
+        called = true;
+        throw new Error("unreachable");
+      },
+    });
+    const res = await handle("POST", "/recap/transcribe", { fileName: "a.wav" });
+    expect(res.status).toBe(400);
+    expect(called).toBe(false);
+  });
+
+  it("passes decoded bytes to the injected transcriber", async () => {
+    // FIXTURE transcriber: returns hand-written segments, not model output.
+    const handle = createService({
+      transcribe: async (audio, fileName) => {
+        expect(Buffer.from(audio).toString()).toBe("fixture-audio");
+        expect(fileName).toBe("a.wav");
+        return buildRecapDraft([{ text: "fixture words", startMs: 0, endMs: 10 }], "FIXTURE");
+      },
+    });
+    const res = await handle("POST", "/recap/transcribe", { audioBase64, fileName: "a.wav" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "proposed", transcript: "fixture words" });
+  });
+
+  it("turns model failures into 502", async () => {
+    const res = await createService({
+      transcribe: async () => {
+        throw new Error("No speech was recognised in this recap");
+      },
+    })("POST", "/recap/transcribe", { audioBase64, fileName: "a.wav" });
+    expect(res).toEqual({
+      status: 502,
+      body: { error: "model-failed", message: "No speech was recognised in this recap" },
+    });
+  });
+
+  it("validates extract requests and forwards them", async () => {
+    const handle = createService({
+      // FIXTURE extractor: echoes its input, no model involved.
+      extract: async ({ people, today }) => ({ status: "proposed", model: `FIXTURE ${today}`, proposals: [], rejected: people.map((item) => ({ item, reason: "fixture" })) }),
+    });
+    const bad = await handle("POST", "/recap/extract", { transcript: "hi", people: [], today: "2026-10-23" });
+    expect(bad.status).toBe(400);
+    const ok = await handle("POST", "/recap/extract", {
+      transcript: "hi",
+      people: [{ id: "dev-raman", name: "Dev Raman" }],
+      today: "2026-10-23",
+    });
+    expect(ok).toMatchObject({ status: 200, body: { model: "FIXTURE 2026-10-23" } });
+  });
+
+  it("returns no context for a person with an empty timeline without calling a model", async () => {
+    const res = await createService({
+      retrieve: async () => {
+        throw new Error("should not run");
+      },
+    })("POST", "/context/retrieve", { query: "coffee", passages: [] });
+    expect(res).toEqual({ status: 200, body: { model: "none", matches: [] } });
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/service.ts">
+
+```typescript
+import type { ContextMatch, Passage } from "../src/features/circle/context";
+import type { ExtractionResult, KnownPerson } from "../src/features/circle/extraction";
+import type { RecapDraft } from "./recap";
+
+// Everything the native runtime can do for Circle. A missing entry means
+// "not configured", never "pretend".
+export type Capabilities = {
+  transcribe?: (audio: Uint8Array, fileName: string) => Promise<RecapDraft>;
+  extract?: (input: {
+    transcript: string;
+    people: KnownPerson[];
+    today: string;
+  }) => Promise<ExtractionResult>;
+  retrieve?: (input: {
+    query: string;
+    passages: Passage[];
+  }) => Promise<{ model: string; matches: ContextMatch[] }>;
+};
+
+export type ServiceResponse = { status: number; body: unknown };
+
+export const SERVICE_PORT = 4327;
+export const MAX_BODY_BYTES = 12 * 1024 * 1024;
+
+class BadRequest extends Error {}
+
+function people(body: Record<string, unknown>): KnownPerson[] {
+  const list = body.people;
+  if (!Array.isArray(list) || list.length === 0 || list.length > 500) {
+    throw new BadRequest("Missing people");
+  }
+  return list.map((p) => {
+    const r = record(p);
+    return { id: text(r, "id", 200), name: text(r, "name", 200) };
+  });
+}
+
+function isoDay(body: Record<string, unknown>, key: string): string {
+  const value = text(body, key, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new BadRequest(`${key} must be YYYY-MM-DD`);
+  return value;
+}
+
+function record(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new BadRequest("Expected a JSON object");
+  }
+  return body as Record<string, unknown>;
+}
+
+function text(body: Record<string, unknown>, key: string, max = 20_000): string {
+  const value = body[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new BadRequest(`Missing ${key}`);
+  }
+  if (value.length > max) throw new BadRequest(`${key} is too long`);
+  return value;
+}
+
+type Route = {
+  capability: keyof Capabilities;
+  run: (caps: Required<Capabilities>, body: Record<string, unknown>) => Promise<unknown>;
+};
+
+const routes: Record<string, Route> = {
+  "/recap/transcribe": {
+    capability: "transcribe",
+    run: (caps, body) => {
+      const audio = Buffer.from(text(body, "audioBase64", MAX_BODY_BYTES), "base64");
+      if (audio.length === 0) throw new BadRequest("Empty recording");
+      return caps.transcribe(new Uint8Array(audio), text(body, "fileName", 200));
+    },
+  },
+  "/recap/extract": {
+    capability: "extract",
+    run: (caps, body) =>
+      caps.extract({
+        transcript: text(body, "transcript"),
+        people: people(body),
+        today: isoDay(body, "today"),
+      }),
+  },
+  "/context/retrieve": {
+    capability: "retrieve",
+    run: (caps, body) => {
+      const list = body.passages;
+      if (!Array.isArray(list) || list.length > 200) throw new BadRequest("Missing passages");
+      const passages = list.map((p) => {
+        const r = record(p);
+        return { id: text(r, "id", 200), text: text(r, "text", 2000) };
+      });
+      if (passages.length === 0) return Promise.resolve({ model: "none", matches: [] });
+      return caps.retrieve({ query: text(body, "query", 500), passages });
+    },
+  },
+};
+
+export function createService(capabilities: Capabilities) {
+  return async function handle(
+    method: string,
+    path: string,
+    body: unknown,
+  ): Promise<ServiceResponse> {
+    if (method === "GET" && path === "/health") {
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          service: "circle-qvac",
+          capabilities: Object.fromEntries(
+            Object.keys(routes).map((r) => [
+              routes[r].capability,
+              typeof capabilities[routes[r].capability] === "function",
+            ]),
+          ),
+        },
+      };
+    }
+    const route = routes[path];
+    if (!route) return { status: 404, body: { error: "not-found" } };
+    if (method !== "POST") return { status: 405, body: { error: "method-not-allowed" } };
+    if (typeof capabilities[route.capability] !== "function") {
+      return {
+        status: 503,
+        body: { error: "not-configured", capability: route.capability },
+      };
+    }
+    try {
+      const result = await route.run(capabilities as Required<Capabilities>, record(body));
+      return { status: 200, body: result };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof BadRequest) return { status: 400, body: { error: message } };
+      return { status: 502, body: { error: "model-failed", message } };
+    }
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/BeforeWeMeet.test.tsx">
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { BeforeWeMeet } from "./BeforeWeMeet";
+import { createDemoState } from "./fixtures";
+import { ServiceError } from "./service-client";
+
+describe("BeforeWeMeet", () => {
+  const state = createDemoState();
+  const dev = state.people.find((p) => p.id === "dev-raman")!;
+
+  it("shows open promises and fixture-ranked context", async () => {
+    const user = userEvent.setup();
+    // FIXTURE retrieval result, not GTE output.
+    const retrieve = vi.fn(async () => ({
+      model: "FIXTURE",
+      matches: [{ id: "t5", text: "2026-10-10 interaction: Coffee.", score: 0.71 }],
+    }));
+    render(<BeforeWeMeet person={dev} state={state} client={{ retrieve }} />);
+    expect(screen.getByText(/Still open: Ask how the meetup talk went/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("What is the meeting about?"), "his talk");
+    await user.click(screen.getByRole("button", { name: "Gather context" }));
+    expect(await screen.findByText(/0.71 · FIXTURE/)).toBeInTheDocument();
+    expect(retrieve).toHaveBeenCalledWith("his talk", expect.arrayContaining([expect.objectContaining({ id: "r1" })]));
+  });
+
+  it("says so when the local service is off", async () => {
+    const user = userEvent.setup();
+    const retrieve = vi.fn(async () => {
+      throw new ServiceError("The local AI service is not running", "unreachable");
+    });
+    render(<BeforeWeMeet person={dev} state={state} client={{ retrieve }} />);
+    await user.type(screen.getByLabelText("What is the meeting about?"), "talk");
+    await user.click(screen.getByRole("button", { name: "Gather context" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("not running");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/circle/BeforeWeMeet.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { passagesFor, type ContextMatch } from "./context";
+import type { ServiceClient } from "./service-client";
+import { openReminders } from "./state";
+import type { CircleState, Person } from "./types";
+
+export function BeforeWeMeet({
+  person,
+  state,
+  client,
+}: {
+  person: Person;
+  state: CircleState;
+  client: Pick<ServiceClient, "retrieve">;
+}) {
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<ContextMatch[] | null>(null);
+  const [model, setModel] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const promises = openReminders(state, person.id);
+
+  return (
+    <section aria-label="Before we meet" className="my-3 rounded bg-stone-50 p-3 text-sm">
+      <h3 className="font-serif text-lg">Before we meet</h3>
+      {/* Deterministic: open reminders always show, no model needed. */}
+      <ul>
+        {promises.map((r) => (
+          <li key={r.id}>
+            Still open: {r.text} ({r.due})
+          </li>
+        ))}
+      </ul>
+      <form
+        className="mt-2 flex gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          try {
+            const result = await client.retrieve(query, passagesFor(person, state.reminders));
+            setMatches(result.matches);
+            setModel(result.model);
+          } catch (err) {
+            setMatches(null);
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        }}
+      >
+        <input
+          aria-label="What is the meeting about?"
+          className="flex-1 rounded border p-1"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <button type="submit" className="rounded border px-2" disabled={!query.trim()}>
+          Gather context
+        </button>
+      </form>
+      {error && <p role="alert">{error}</p>}
+      {matches && (
+        <ol aria-label="Relevant context" className="mt-2 list-decimal pl-5">
+          {matches.length === 0 && <li>Nothing close enough in what you have saved.</li>}
+          {matches.map((m) => (
+            <li key={m.id}>
+              {m.text} <span className="text-stone-500">({m.score} · {model})</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/CircleApp.tsx">
+
+```tsx
+"use client";
+
+import { useMemo, useState, useSyncExternalStore } from "react";
+
+import {
+  addReminder,
+  completeReminder,
+  letterOf,
+  logEntry,
+  openReminders,
+  peopleByLetter,
+  toggleCircle,
+} from "./state";
+import { BeforeWeMeet } from "./BeforeWeMeet";
+import { RecapPanel } from "./RecapPanel";
+import { createServiceClient, type ServiceClient } from "./service-client";
+import { browserStore, type CircleStore } from "./storage";
+import type { CircleState, EntryKind, Person } from "./types";
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const noopSubscribe = () => () => {};
+
+export function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function CircleApp({
+  store: injected,
+  client: injectedClient,
+}: {
+  store?: CircleStore;
+  client?: ServiceClient;
+}) {
+  const store = useMemo(() => injected ?? browserStore(), [injected]);
+  const client = useMemo(() => injectedClient ?? createServiceClient(), [injectedClient]);
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  const loaded = useMemo(() => (mounted ? store.load() : null), [mounted, store]);
+  const [edited, setEdited] = useState<CircleState | null>(null);
+  const [letter, setLetter] = useState("A");
+  const [personId, setPersonId] = useState<string | null>(null);
+  const state = edited ?? loaded;
+
+  function commit(next: CircleState) {
+    store.save(next);
+    setEdited(next);
+  }
+
+  if (!state) {
+    return (
+      <main className="mx-auto max-w-5xl p-6">
+        <h1 className="font-serif text-4xl">Circle</h1>
+        <p>Opening your book…</p>
+      </main>
+    );
+  }
+
+  const inLetter = peopleByLetter(state.people, letter);
+  const person = state.people.find((p) => p.id === personId) ?? inLetter[0] ?? null;
+
+  return (
+    <main className="mx-auto max-w-5xl p-4 sm:p-6 text-stone-800">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-amber-200 pb-3">
+        <div>
+          <h1 className="font-serif text-4xl">Circle</h1>
+          <p className="text-stone-600">A warm phonebook for the people you keep close.</p>
+        </div>
+        <button
+          type="button"
+          className="rounded border border-stone-300 px-3 py-1 text-sm"
+          onClick={() => {
+            setEdited(store.reset());
+            setPersonId(null);
+          }}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <RecapPanel state={state} onChange={commit} client={client} today={today()} />
+
+      <nav aria-label="Alphabet" role="tablist" className="my-4 flex flex-wrap gap-1">
+        {LETTERS.map((l) => {
+          const count = state.people.filter((p) => letterOf(p.name) === l).length;
+          return (
+            <button
+              key={l}
+              type="button"
+              role="tab"
+              aria-selected={l === letter}
+              disabled={count === 0}
+              onClick={() => {
+                setLetter(l);
+                setPersonId(null);
+              }}
+              className={`h-8 w-8 rounded-t font-serif ${
+                l === letter ? "bg-amber-200" : "bg-amber-50"
+              } disabled:opacity-30`}
+            >
+              {l}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="grid gap-4 md:grid-cols-[14rem_1fr_16rem]">
+        <ul aria-label="People" className="space-y-1">
+          {inLetter.map((p) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setPersonId(p.id)}
+                aria-current={person?.id === p.id}
+                className={`w-full rounded px-2 py-1 text-left ${
+                  person?.id === p.id ? "bg-amber-100" : ""
+                }`}
+              >
+                {p.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {person ? (
+          <PersonCard
+            key={person.id}
+            person={person}
+            state={state}
+            onChange={commit}
+            client={client}
+          />
+        ) : (
+          <p>No one under {letter} yet.</p>
+        )}
+
+        <aside aria-label="Gentle reminders" className="space-y-2">
+          <h2 className="font-serif text-xl">Gentle reminders</h2>
+          {openReminders(state).length === 0 && <p>Nothing waiting.</p>}
+          <ul className="space-y-2">
+            {openReminders(state).map((r) => {
+              const who = state.people.find((p) => p.id === r.personId);
+              return (
+                <li key={r.id} className="rounded bg-amber-50 p-2 text-sm">
+                  <p>
+                    <strong>{r.due}</strong> · {who?.name}
+                  </p>
+                  <p>{r.text}</p>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => commit(completeReminder(state, r.id))}
+                  >
+                    Done: {r.text}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <h2 className="font-serif text-xl">Circles</h2>
+          <ul className="text-sm">
+            {state.circles.map((c) => (
+              <li key={c}>
+                {c}: {state.people.filter((p) => p.circles.includes(c)).length}
+              </li>
+            ))}
+          </ul>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function PersonCard({
+  person,
+  state,
+  onChange,
+  client,
+}: {
+  person: Person;
+  state: CircleState;
+  onChange: (next: CircleState) => void;
+  client: ServiceClient;
+}) {
+  const [kind, setKind] = useState<EntryKind>("interaction");
+  const [date, setDate] = useState(today());
+  const [text, setText] = useState("");
+  const [reminderText, setReminderText] = useState("");
+  const [reminderDue, setReminderDue] = useState(today());
+  const [error, setError] = useState<string | null>(null);
+
+  function attempt(update: () => CircleState, reset: () => void) {
+    try {
+      onChange(update());
+      reset();
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return (
+    <article
+      aria-label={`${person.name} card`}
+      className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm"
+    >
+      <h2 className="font-serif text-2xl">{person.name}</h2>
+      <p className="text-stone-600">{person.note}</p>
+
+      <fieldset className="my-2 flex flex-wrap gap-2 text-sm">
+        <legend className="sr-only">Circles</legend>
+        {state.circles.map((c) => (
+          <label key={c} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={person.circles.includes(c)}
+              onChange={() => onChange(toggleCircle(state, person.id, c))}
+            />
+            {c}
+          </label>
+        ))}
+      </fieldset>
+
+      <form
+        aria-label="Log to timeline"
+        className="my-3 space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(
+            () => logEntry(state, person.id, { kind, date, text }),
+            () => setText(""),
+          );
+        }}
+      >
+        <div className="flex gap-2">
+          <select
+            aria-label="Entry kind"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as EntryKind)}
+          >
+            <option value="interaction">Interaction</option>
+            <option value="memory">Memory</option>
+          </select>
+          <input
+            aria-label="Entry date"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+        <textarea
+          aria-label="What happened"
+          className="w-full rounded border p-2"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <button type="submit" className="rounded bg-amber-200 px-3 py-1">
+          Save to timeline
+        </button>
+      </form>
+
+      <form
+        aria-label="Add reminder"
+        className="my-3 flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(
+            () =>
+              addReminder(state, {
+                personId: person.id,
+                due: reminderDue,
+                text: reminderText,
+              }),
+            () => setReminderText(""),
+          );
+        }}
+      >
+        <input
+          aria-label="Reminder"
+          className="flex-1 rounded border p-1"
+          value={reminderText}
+          onChange={(e) => setReminderText(e.target.value)}
+        />
+        <input
+          aria-label="Reminder date"
+          type="date"
+          value={reminderDue}
+          onChange={(e) => setReminderDue(e.target.value)}
+        />
+        <button type="submit" className="rounded border px-2">
+          Remind me
+        </button>
+      </form>
+      {error && <p role="alert">{error}</p>}
+
+      <BeforeWeMeet person={person} state={state} client={client} />
+
+      <h3 className="font-serif text-lg">Timeline</h3>
+      <ol aria-label="Timeline" className="space-y-1">
+        {person.timeline.length === 0 && <li>No entries yet.</li>}
+        {person.timeline.map((t) => (
+          <li key={t.id} className="text-sm">
+            <span className="text-stone-500">
+              {t.date} · {t.kind}
+            </span>{" "}
+            {t.text}
+          </li>
+        ))}
+      </ol>
+    </article>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/context.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { cosine, passagesFor, rankContext } from "./context";
+import { createDemoState } from "./fixtures";
+
+describe("meeting context", () => {
+  it("builds passages from the timeline and open reminders only", () => {
+    const state = createDemoState();
+    const dev = state.people.find((p) => p.id === "dev-raman")!;
+    expect(passagesFor(dev, state.reminders).map((p) => p.id)).toEqual(["t5", "r1"]);
+  });
+
+  it("ranks by cosine and drops weak matches", () => {
+    // FIXTURE vectors: tiny hand-made 3-d vectors, not GTE embeddings.
+    const passages = [
+      { id: "a", text: "talk practice" },
+      { id: "b", text: "seed swap" },
+      { id: "c", text: "meetup reminder" },
+    ];
+    const vectors = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0.8, 0, 0.6],
+    ];
+    const matches = rankContext([1, 0, 0], passages, vectors, { limit: 2, minScore: 0.3 });
+    expect(matches.map((m) => [m.id, m.score])).toEqual([
+      ["a", 1],
+      ["c", 0.8],
+    ]);
+  });
+
+  it("refuses mismatched vectors", () => {
+    expect(() => cosine([1], [1, 2])).toThrow("same length");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/circle/context.ts">
+
+```typescript
+import type { Person, Reminder } from "./types";
+
+export type Passage = { id: string; text: string };
+export type ContextMatch = Passage & { score: number };
+
+// Only what the person already confirmed is searchable.
+export function passagesFor(person: Person, reminders: Reminder[]): Passage[] {
+  return [
+    ...person.timeline.map((t) => ({ id: t.id, text: `${t.date} ${t.kind}: ${t.text}` })),
+    ...reminders
+      .filter((r) => r.personId === person.id && !r.done)
+      .map((r) => ({ id: r.id, text: `Open reminder for ${r.due}: ${r.text}` })),
+  ];
+}
+
+export function cosine(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) throw new Error("Vectors must have the same length");
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na === 0 || nb === 0 ? 0 : dot / Math.sqrt(na * nb);
+}
+
+export function rankContext(
+  query: number[],
+  passages: Passage[],
+  vectors: number[][],
+  options: { limit: number; minScore: number },
+): ContextMatch[] {
+  if (vectors.length !== passages.length) throw new Error("One vector per passage");
+  return passages
+    .map((p, i) => ({ ...p, score: Math.round(cosine(query, vectors[i]) * 1000) / 1000 }))
+    .filter((m) => m.score >= options.minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, options.limit);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/circle/service-client.ts">
+
+```typescript
+import type { ContextMatch, Passage } from "./context";
+import type { ExtractionResult, KnownPerson } from "./extraction";
+
+// The browser never imports @qvac/sdk. It talks to the loopback service.
+export const DEFAULT_SERVICE_URL = "http://127.0.0.1:4327";
+
+export type ServiceHealth = {
+  ok: boolean;
+  capabilities: Record<string, boolean>;
+};
+
+export type ProposedRecap = {
+  status: "proposed";
+  model: string;
+  transcript: string;
+  durationMs: number;
+};
+
+export class ServiceError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+export function createServiceClient(
+  baseUrl: string = DEFAULT_SERVICE_URL,
+  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+) {
+  async function call(path: string, init?: RequestInit): Promise<unknown> {
+    let res: Response;
+    try {
+      res = await fetchImpl(`${baseUrl}${path}`, init);
+    } catch {
+      throw new ServiceError("The local AI service is not running", "unreachable");
+    }
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      const code = typeof body.error === "string" ? body.error : `http-${res.status}`;
+      const message = typeof body.message === "string" ? body.message : code;
+      throw new ServiceError(message, code);
+    }
+    return body;
+  }
+
+  function post(path: string, payload: unknown) {
+    return call(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  return {
+    async health(): Promise<ServiceHealth> {
+      const body = (await call("/health")) as ServiceHealth;
+      return { ok: body.ok === true, capabilities: body.capabilities ?? {} };
+    },
+    async transcribe(audioBase64: string, fileName: string): Promise<ProposedRecap> {
+      const body = (await post("/recap/transcribe", { audioBase64, fileName })) as ProposedRecap;
+      if (body.status !== "proposed" || typeof body.transcript !== "string") {
+        throw new ServiceError("Unexpected transcription response", "bad-response");
+      }
+      return body;
+    },
+    async extract(
+      transcript: string,
+      people: KnownPerson[],
+      today: string,
+    ): Promise<ExtractionResult> {
+      const body = (await post("/recap/extract", { transcript, people, today })) as ExtractionResult;
+      if (body.status !== "proposed" || !Array.isArray(body.proposals)) {
+        throw new ServiceError("Unexpected extraction response", "bad-response");
+      }
+      return body;
+    },
+    async retrieve(
+      query: string,
+      passages: Passage[],
+    ): Promise<{ model: string; matches: ContextMatch[] }> {
+      const body = (await post("/context/retrieve", { query, passages })) as {
+        model: string;
+        matches: ContextMatch[];
+      };
+      if (!Array.isArray(body.matches)) {
+        throw new ServiceError("Unexpected retrieval response", "bad-response");
+      }
+      return body;
+    },
+    post,
+  };
+}
+
+export type ServiceClient = ReturnType<typeof createServiceClient>;
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/circle/context.test.ts src/features/circle/BeforeWeMeet.test.tsx
+```
+
+Expected result: 2 test files pass, 5 tests pass. The ranking test uses tiny hand-made 3-d vectors, not GTE embeddings. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 06: Retrieve context before a meeting"
+```
+
+## Before continuing
+
+- [ ] Open promises showed without the service.
+- [ ] You read the scores of the returned context.
+
+Continue to [Draft an optional follow-up](/docs/circle/07-draft-followup).

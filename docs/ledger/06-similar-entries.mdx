@@ -1,0 +1,264 @@
+---
+title: "06. Find similar past entries with embeddings"
+description: "We will use a local embeddings model to find past entries like the new receipt. The model turns text into vectors; plain code compares and ranks them."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Ledger · 06. Find similar past entries with embeddings" />
+
+We will use a local embeddings model to find past entries that look like the new receipt. The model only turns text into numbers. Plain code compares the numbers and ranks the matches.
+
+**Source checkpoint:** `7ee6547` · **Starting checkpoint:** `57829cc`
+
+## What changes
+
+- `src/features/ledger/sample-book.ts`: a **synthetic** sample book of six past entries, and `entryText`.
+- `src/features/ledger/similar.ts`: `cosine` and `rankSimilar`.
+- `qvac-service/qvac-embedder.ts`: loads `GTE_LARGE_FP16` with `modelType: "embeddings"` and calls `embed` with a list of texts.
+- `qvac-service/server.ts`: a new `POST /v1/similar` route.
+- The client and the **Find similar past entries** button.
+
+To compare with the checkpoint: `git diff 57829cc 7ee6547`.
+
+## Build and observe
+
+### 1. Decide what gets embedded
+
+`entryText` returns `"Harbour Bakery (Eating out)"`. Merchant and category only. Amounts stay out again. "Similar" here means "same kind of place", not "same price".
+
+### 2. Embed the book once
+
+The server builds its index on the first `/v1/similar` call. It sends all six entry texts in one `embed({ modelId, text: [...] })` call and keeps the vectors. If that fails, it forgets the half-built index so the next call can try again.
+
+Each later request embeds only the query.
+
+### 3. Rank in code
+
+`rankSimilar` scores each entry with cosine similarity, rounds to three decimals, drops anything under `0.5`, sorts by score and then by ID, and keeps the top three. The same vectors always give the same list.
+
+No match above the floor? You get an empty list and the UI says **No close past entries.** A weak match is worse than none.
+
+### 4. Try it
+
+With the service and app running, read the sample receipt. Optionally propose a category first. Then select **Find similar past entries**.
+
+If a proposal was accepted by the validator, the query is `"Corner Cafe (Eating out)"`. If not, it is the raw OCR merchant text. You see past entries with their date, merchant, category, and score.
+
+We did not run GTE in the environment used to write this course. The scores in the tests come from hand-made vectors.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="src/features/ledger/sample-book.ts">
+
+```typescript
+import type { Category } from "./categories";
+
+export type LedgerEntry = {
+  id: string;
+  date: string;
+  merchant: string;
+  category: Category;
+  amountCents: number;
+  source: "manual" | "receipt";
+};
+
+// SYNTHETIC sample book. Fictional merchants and amounts for the course.
+export const SAMPLE_BOOK: LedgerEntry[] = [
+  { id: "e1", date: "2026-03-02", merchant: "Harbour Bakery", category: "Eating out", amountCents: 640, source: "manual" },
+  { id: "e2", date: "2026-03-03", merchant: "Greenleaf Market", category: "Groceries", amountCents: 4215, source: "manual" },
+  { id: "e3", date: "2026-03-05", merchant: "City Metro Card", category: "Transport", amountCents: 2000, source: "manual" },
+  { id: "e4", date: "2026-03-07", merchant: "Bean There Coffee", category: "Eating out", amountCents: 520, source: "manual" },
+  { id: "e5", date: "2026-03-09", merchant: "Northside Power", category: "Utilities", amountCents: 6730, source: "manual" },
+  { id: "e6", date: "2026-03-11", merchant: "Page Turner Books", category: "Shopping", amountCents: 1899, source: "manual" },
+];
+
+/** The text we embed for an entry. Amounts are left out on purpose. */
+export function entryText(entry: Pick<LedgerEntry, "merchant" | "category">): string {
+  return `${entry.merchant} (${entry.category})`;
+}
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/similar.ts">
+
+```typescript
+export type IndexedEntry = { entryId: string; vector: number[] };
+export type Match = { entryId: string; score: number };
+
+export function cosine(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) throw new Error("Vectors must have the same non-zero length");
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na === 0 || nb === 0 ? 0 : dot / Math.sqrt(na * nb);
+}
+
+/** Deterministic ranking: score descending, then entry ID, with a floor. */
+export function rankSimilar(
+  index: IndexedEntry[],
+  query: number[],
+  options: { limit: number; minScore: number },
+): Match[] {
+  return index
+    .map((item) => ({ entryId: item.entryId, score: Math.round(cosine(item.vector, query) * 1000) / 1000 }))
+    .filter((match) => match.score >= options.minScore)
+    .sort((a, b) => b.score - a.score || a.entryId.localeCompare(b.entryId))
+    .slice(0, options.limit);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-embedder.ts">
+
+```typescript
+import type { ModelState } from "../src/features/ledger/receipt-contract.ts";
+import { resolveLocalQvacPaths } from "./local-config.ts";
+import type { Embedder } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+// GTE large turns short entry text into vectors. Loaded on first use.
+export function createQvacEmbedder(appDirectory: string): Embedder & { close(): Promise<void> } {
+  const { configPath } = resolveLocalQvacPaths(appDirectory);
+  let sdk: Sdk | undefined;
+  let modelId: string | undefined;
+  let state: ModelState["state"] = "not_loaded";
+  let loading: Promise<string> | undefined;
+
+  async function ensureModel() {
+    if (modelId) return modelId;
+    loading ??= (async () => {
+      state = "loading";
+      process.env.QVAC_CONFIG_PATH = configPath;
+      sdk = await import("@qvac/sdk");
+      const id = await sdk.loadModel({ modelSrc: sdk.GTE_LARGE_FP16, modelType: "embeddings" });
+      modelId = id;
+      state = "ready";
+      return id;
+    })().catch((error: unknown) => {
+      state = "error";
+      loading = undefined;
+      throw error;
+    });
+    return loading;
+  }
+
+  return {
+    modelState: () => ({ kind: "embeddings", id: "GTE_LARGE_FP16", state }),
+    async embed(texts) {
+      const id = await ensureModel();
+      const { embedding } = await sdk!.embed({ modelId: id, text: texts });
+      return embedding;
+    },
+    async close() {
+      if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/main.ts">
+
+```typescript
+import { createQvacEmbedder } from "./qvac-embedder.ts";
+import { createQvacProposer } from "./qvac-proposer.ts";
+import { createQvacReader, defaultAppDirectory } from "./qvac-reader.ts";
+import { createReceiptServer } from "./server.ts";
+
+const port = Number(process.env.LEDGER_QVAC_PORT ?? 4318);
+const reader = createQvacReader(defaultAppDirectory);
+const proposer = createQvacProposer(defaultAppDirectory);
+const embedder = createQvacEmbedder(defaultAppDirectory);
+const server = createReceiptServer(reader, { proposer, embedder });
+
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write(`Ledger QVAC service listening on http://127.0.0.1:${port}\n`);
+});
+
+function shutdown() {
+  server.close(async () => {
+    await proposer.close();
+    await embedder.close();
+    await reader.close(); // closes the SDK last
+    process.exit(0);
+  });
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/similar.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { entryText, SAMPLE_BOOK } from "./sample-book";
+import { cosine, rankSimilar } from "./similar";
+
+// Hand-made 3-number vectors. Real GTE vectors are much longer.
+const index = [
+  { entryId: "e1", vector: [1, 0, 0] },
+  { entryId: "e4", vector: [0.9, 0.1, 0] },
+  { entryId: "e5", vector: [0, 0, 1] },
+];
+
+describe("similar past entries", () => {
+  it("scores identical direction as 1 and unrelated as 0", () => {
+    expect(cosine([1, 2, 3], [2, 4, 6])).toBeCloseTo(1);
+    expect(cosine([1, 0], [0, 1])).toBe(0);
+  });
+
+  it("ranks by score with a floor and a limit", () => {
+    expect(rankSimilar(index, [1, 0.05, 0], { limit: 2, minScore: 0.5 })).toEqual([
+      { entryId: "e1", score: 0.999 },
+      { entryId: "e4", score: 0.998 },
+    ]);
+  });
+
+  it("returns nothing rather than a weak match", () => {
+    expect(rankSimilar(index, [0, 1, 0], { limit: 3, minScore: 0.5 })).toEqual([]);
+  });
+
+  it("embeds words, not amounts", () => {
+    expect(entryText(SAMPLE_BOOK[0])).toBe("Harbour Bakery (Eating out)");
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm test -- src/features/ledger/similar.test.ts qvac-service/server.test.ts
+```
+
+Expected: 10 tests pass. The similarity tests use three-number vectors written by hand. The server test proves the book is embedded once and then one query per request.
+
+Full set:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 9 passed (9)`, `Tests 33 passed (33)`.
+
+## Before continuing
+
+- [ ] Only merchant and category text is embedded.
+- [ ] Ranking is plain code with a floor and a limit.
+- [ ] An empty result is shown as "No close past entries."
+
+Continue to [Review, accept, and keep the arithmetic deterministic](/docs/ledger/07-review-and-accept).

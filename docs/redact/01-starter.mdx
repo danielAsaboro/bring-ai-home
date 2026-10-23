@@ -1,0 +1,849 @@
+---
+title: "01. Run the Redact starter"
+description: "We will start with a document that needs to be shared, manually cover its private details, and save a separate flattened file. This establishes the workflow the rest of the course must preserve."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 01. Run the Redact starter" />
+
+We will start with a document that needs to be shared, manually cover its private details, and save a separate flattened file. This establishes the workflow the rest of the course must preserve.
+
+The starter is a complete manual application. We are building the local-AI version of Redact from it; we are not generating a blank Next.js project or rebuilding the supplied interface.
+
+**Source checkpoint:** `0eecfb4`
+
+## Build and observe
+
+### 1. Download and unpack the starter
+
+Download [the pinned starter ZIP](/docs/downloads/redact/redact-starter.zip). Put it in your Downloads directory and unpack it there:
+
+```bash
+cd ~/Downloads
+unzip redact-starter.zip
+cd redact-course
+git init
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Start Redact written course"
+cd redact
+node --version
+npm ci
+npm run dev -- --port 3101
+```
+
+The ZIP already contains the controlled test files. Do not regenerate them before Chapter 9: the PDF generator can change tracked bytes, and later patches expect the supplied checkpoint files.
+
+Use Node 22.17 or newer. Keep this terminal open. Open `http://localhost:3101`.
+
+The ZIP contains a parent `redact-course` directory with a `redact` application inside it. Git belongs in the parent directory because each chapter's patch names files as `redact/...`. Run npm commands inside `redact`.
+
+### 2. Make the first manual copy
+
+Upload `public/test-files/redact/chat-private.png`. This is fictional test material. Choose **Private**, leave the additional direction empty, and select **Prepare for review**.
+
+On Original, drag across `Maya Chen`. Move the mark, resize a corner, and compare it with Safe-share preview. Repeat for the email, address, phone, account number, and reference. Select **Done**, then **Save copy**.
+
+Open the saved PNG outside Redact. Confirm that the covered values are unreadable and nearby text remains visible. The output should have a `.redacted.png` name; the uploaded file should still open unchanged.
+
+### 3. Trace the path in the starter
+
+Open `src/features/redact/RedactApp.tsx`. Follow its upload, preparation, review, and completion handlers. Then read these files in order:
+
+| File | Responsibility |
+| --- | --- |
+| `file-policy.ts` | Accept PNG, JPEG, PDF; enforce source limits and direction length |
+| `rasterize.ts` | Decode the source into bounded PNG pages |
+| `workflow-domain.ts` | Describe sessions, marks, and explicit transitions |
+| `components/DocumentSurface.tsx` | Draw and manipulate marks using percentage geometry |
+| `safe-copy.ts` | Create new flattened image bytes or an image-page PDF |
+
+The original bytes and their digest belong to `SourceDocument`. The prepared pixels belong to `RasterPage`. Marks are separate data. Export combines page pixels with accepted marks into a new artifact.
+
+### 4. Check the PDF path
+
+Start again with `statement-multipage.pdf`. Add one mark on each page and save the new PDF. Reopen it and confirm two pages remain. This exercises the PDF worker and exporter, which an image-only test cannot cover.
+
+### 5. Run the baseline checks
+
+In a second terminal, enter the application's `redact` directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npx playwright install chromium
+
+```
+
+Run each command separately and check its exit status. Stop the dev server before checks if generated Next.js files or watcher contention cause trouble. Then start `npm run dev -- --port 3101` again in the first terminal and run `npm run test:e2e` in the second. Playwright expects an already running app; its configuration does not start one for you. A successful test suite does not replace opening the exported file.
+
+Notice the three invariants we will keep: the source is unchanged, marks are human-controlled, and a new flattened copy is produced.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. The patch above contains the remaining UI wiring and tests. Paths are relative to the `redact` app.
+
+<AccordionGroup>
+<Accordion title="src/features/redact/workflow-domain.ts">
+
+```typescript
+export type WorkflowStage =
+  | "configure"
+  | "analyzing"
+  | "review"
+  | "exporting"
+  | "complete";
+
+export type ConfidentialityLevel = "private" | "confidential";
+
+export type SupportedSourceMimeType =
+  | "image/png"
+  | "image/jpeg"
+  | "application/pdf";
+
+export type SourceDocument = {
+  id: string;
+  name: string;
+  mimeType: SupportedSourceMimeType;
+  byteSize: number;
+  pageCount: number;
+  originalBytes: ArrayBuffer;
+  originalDigest: string;
+};
+
+export type RasterPage = {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  width: number;
+  height: number;
+  pngBytes: ArrayBuffer;
+};
+
+export type RedactionLabel =
+  | "name"
+  | "email"
+  | "phone"
+  | "address"
+  | "account"
+  | "identity"
+  | "amount"
+  | "date"
+  | "reference"
+  | "business"
+  | "other";
+
+export type RedactionMark = {
+  id: string;
+  documentId: string;
+  pageId: string;
+  pageNumber: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: RedactionLabel;
+  source: "manual" | "accepted";
+  createdAt: string;
+};
+
+export type CandidateStatus = "proposed" | "accepted" | "rejected";
+
+export type RedactionCandidate = {
+  id: string;
+  documentId: string;
+  pageId: string;
+  pageNumber: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: RedactionLabel;
+  evidenceText: string;
+  explanation: string;
+  confidence: number | null;
+  status: CandidateStatus;
+};
+
+export type AnalysisRun = {
+  id: string;
+  documentId: string;
+  revision: number;
+  status: "loading" | "analyzing" | "ready" | "unavailable" | "error";
+  startedAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
+
+export type AuditEntry = {
+  id: string;
+  action: string;
+  detail: string;
+  at: string;
+};
+
+export type GeneratedCopyRecord = {
+  name: string;
+  mimeType: "image/png" | "application/pdf";
+  pageCount: number;
+  byteSize: number;
+  createdAt: string;
+};
+
+export type RedactSession = {
+  id: string;
+  stage: WorkflowStage;
+  source: SourceDocument;
+  pages: RasterPage[];
+  activePageNumber: number;
+  configuration: {
+    level: ConfidentialityLevel;
+    direction: string;
+  };
+  analysisRevision: number;
+  lastAnalyzedRevision: number | null;
+  marks: RedactionMark[];
+  candidates: RedactionCandidate[];
+  analysisRuns: AnalysisRun[];
+  audit: AuditEntry[];
+  generatedCopy: GeneratedCopyRecord | null;
+};
+
+export function createSession(source: SourceDocument, at: string): RedactSession {
+  return {
+    id: `session-${source.id}`,
+    stage: "configure",
+    source,
+    pages: [],
+    activePageNumber: 1,
+    configuration: { level: "private", direction: "" },
+    analysisRevision: 0,
+    lastAnalyzedRevision: null,
+    marks: [],
+    candidates: [],
+    analysisRuns: [],
+    audit: [
+      {
+        id: `audit-upload-${source.id}-${at}`,
+        action: "Added document",
+        detail: source.name,
+        at,
+      },
+    ],
+    generatedCopy: null,
+  };
+}
+
+export function configureSession(
+  session: RedactSession,
+  configuration: RedactSession["configuration"],
+): RedactSession {
+  if (
+    session.configuration.level === configuration.level &&
+    session.configuration.direction === configuration.direction
+  ) {
+    return session;
+  }
+  return {
+    ...session,
+    stage: "configure",
+    configuration,
+    analysisRevision: session.analysisRevision + 1,
+    lastAnalyzedRevision: null,
+    candidates: session.candidates.filter(
+      (candidate) => candidate.status !== "proposed",
+    ),
+    generatedCopy: null,
+  };
+}
+
+export function beginPreparation(session: RedactSession): RedactSession {
+  return { ...session, stage: "analyzing", generatedCopy: null };
+}
+
+export function openManualReview(
+  session: RedactSession,
+  pages: RasterPage[],
+): RedactSession {
+  if (pages.length === 0) throw new Error("At least one page is required");
+  return {
+    ...session,
+    stage: "review",
+    pages,
+    activePageNumber: 1,
+    generatedCopy: null,
+  };
+}
+
+export function addManualMark(
+  session: RedactSession,
+  mark: RedactionMark,
+): RedactSession {
+  return {
+    ...session,
+    marks: [...session.marks, mark],
+    generatedCopy: null,
+    audit: [
+      {
+        id: `audit-add-${mark.id}`,
+        action: "Added redaction",
+        detail: mark.label,
+        at: mark.createdAt,
+      },
+      ...session.audit,
+    ],
+  };
+}
+
+export function moveMark(
+  session: RedactSession,
+  markId: string,
+  position: Pick<RedactionMark, "x" | "y">,
+): RedactSession {
+  return {
+    ...session,
+    generatedCopy: null,
+    marks: session.marks.map((mark) =>
+      mark.id === markId
+        ? {
+            ...mark,
+            x: Math.max(0, Math.min(100 - mark.width, position.x)),
+            y: Math.max(0, Math.min(100 - mark.height, position.y)),
+          }
+        : mark,
+    ),
+  };
+}
+
+export function resizeMark(
+  session: RedactSession,
+  markId: string,
+  size: Pick<RedactionMark, "width" | "height">,
+): RedactSession {
+  return {
+    ...session,
+    generatedCopy: null,
+    marks: session.marks.map((mark) =>
+      mark.id === markId
+        ? {
+            ...mark,
+            width: Math.max(0.5, Math.min(100 - mark.x, size.width)),
+            height: Math.max(0.5, Math.min(100 - mark.y, size.height)),
+          }
+        : mark,
+    ),
+  };
+}
+
+export function removeMark(
+  session: RedactSession,
+  markId: string,
+  at: string,
+): RedactSession {
+  const mark = session.marks.find((candidate) => candidate.id === markId);
+  if (!mark) return session;
+  return {
+    ...session,
+    marks: session.marks.filter((candidate) => candidate.id !== markId),
+    generatedCopy: null,
+    audit: [
+      {
+        id: `audit-remove-${mark.id}-${at}`,
+        action: "Removed redaction",
+        detail: mark.label,
+        at,
+      },
+      ...session.audit,
+    ],
+  };
+}
+
+export function finishReview(
+  session: RedactSession,
+  options: { allowUnresolved?: boolean } = {},
+): RedactSession {
+  const unresolved = session.candidates.filter(
+    (candidate) => candidate.status === "proposed",
+  );
+  if (unresolved.length > 0 && !options.allowUnresolved) {
+    throw new Error("Resolve every suggestion before creating a safe copy");
+  }
+  const at = new Date().toISOString();
+  return {
+    ...session,
+    stage: "exporting",
+    audit:
+      unresolved.length > 0
+        ? [
+            {
+              id: `audit-unresolved-${session.id}-${at}`,
+              action: "Finished with unresolved suggestions",
+              detail: `${unresolved.length} suggestions remained unresolved`,
+              at,
+            },
+            ...session.audit,
+          ]
+        : session.audit,
+  };
+}
+
+export function recordGeneratedCopy(
+  session: RedactSession,
+  generatedCopy: GeneratedCopyRecord,
+): RedactSession {
+  return {
+    ...session,
+    stage: "complete",
+    generatedCopy,
+    audit: [
+      {
+        id: `audit-copy-${session.id}-${generatedCopy.createdAt}`,
+        action: "Created safe copy",
+        detail: generatedCopy.name,
+        at: generatedCopy.createdAt,
+      },
+      ...session.audit,
+    ],
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/redact/rasterize.ts">
+
+```typescript
+import {
+  MAX_PDF_PAGES,
+  MAX_RASTER_LONG_EDGE,
+  validateUploadMeta,
+} from "./file-policy";
+import type { RasterPage } from "./workflow-domain";
+
+export type SourceInspection = {
+  kind: "image";
+  mimeType: "image/png" | "image/jpeg";
+  pageCount: number;
+  encrypted: boolean;
+} | {
+  kind: "pdf";
+  mimeType: "application/pdf";
+  pageCount: number;
+  encrypted: boolean;
+};
+
+export type RasterizeAdapters = {
+  inspectPdf(bytes: ArrayBuffer): Promise<{
+    pageCount: number;
+    encrypted: boolean;
+  }>;
+  rasterImage(
+    bytes: ArrayBuffer,
+    mimeType: "image/png" | "image/jpeg",
+  ): Promise<RasterPage>;
+  rasterPdf(
+    bytes: ArrayBuffer,
+    maxLongEdge: number,
+  ): AsyncIterable<RasterPage>;
+};
+
+type Dimensions = { width: number; height: number };
+
+export function scaleWithinLongEdge(
+  dimensions: Dimensions,
+  maxLongEdge: number,
+): Dimensions {
+  if (
+    dimensions.width <= 0 ||
+    dimensions.height <= 0 ||
+    maxLongEdge <= 0
+  ) {
+    throw new Error("Page dimensions must be positive");
+  }
+  const longEdge = Math.max(dimensions.width, dimensions.height);
+  if (longEdge <= maxLongEdge) {
+    return { width: dimensions.width, height: dimensions.height };
+  }
+  const scale = maxLongEdge / longEdge;
+  return {
+    width: Math.max(1, Math.round(dimensions.width * scale)),
+    height: Math.max(1, Math.round(dimensions.height * scale)),
+  };
+}
+
+export function validatePdfInspection(input: {
+  pageCount: number;
+  encrypted: boolean;
+}): void {
+  if (input.encrypted) throw new Error("Choose an unlocked PDF");
+  if (!Number.isInteger(input.pageCount) || input.pageCount < 1) {
+    throw new Error("This PDF could not be read");
+  }
+  if (input.pageCount > MAX_PDF_PAGES) {
+    throw new Error(`PDFs must contain ${MAX_PDF_PAGES} pages or fewer`);
+  }
+}
+
+export async function inspectSource(
+  file: File,
+  adapters: Pick<RasterizeAdapters, "inspectPdf"> = defaultAdapters,
+): Promise<SourceInspection> {
+  const upload = validateUploadMeta(file);
+  if (upload.kind === "image") {
+    return {
+      ...upload,
+      pageCount: 1,
+      encrypted: false,
+    };
+  }
+
+  let pdf: { pageCount: number; encrypted: boolean };
+  try {
+    pdf = await adapters.inspectPdf(await file.arrayBuffer());
+  } catch {
+    throw new Error("This PDF could not be read");
+  }
+  validatePdfInspection(pdf);
+  return { ...upload, ...pdf };
+}
+
+export async function rasterizeSource(
+  file: File,
+  inspection: SourceInspection,
+  adapters: RasterizeAdapters = defaultAdapters,
+): Promise<RasterPage[]> {
+  const bytes = await file.arrayBuffer();
+  if (inspection.kind === "image") {
+    const page = await adapters.rasterImage(bytes, inspection.mimeType);
+    return [normalizePage(page, 1, file)];
+  }
+
+  validatePdfInspection(inspection);
+  const pages: RasterPage[] = [];
+  for await (const page of adapters.rasterPdf(bytes, MAX_RASTER_LONG_EDGE)) {
+    const expectedPageNumber = pages.length + 1;
+    if (page.pageNumber !== expectedPageNumber) {
+      throw new Error("Rasterized pages must be returned in page order");
+    }
+    pages.push(normalizePage(page, expectedPageNumber, file));
+  }
+  if (pages.length !== inspection.pageCount) {
+    throw new Error("The PDF page count changed during preparation");
+  }
+  return pages;
+}
+
+function normalizePage(page: RasterPage, pageNumber: number, file: File) {
+  return {
+    ...page,
+    id: `page-${pageNumber}`,
+    documentId: `source-${file.name}-${file.size}`,
+    pageNumber,
+  };
+}
+
+async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((value) => {
+      if (value) resolve(value);
+      else reject(new Error("The page could not be encoded as PNG"));
+    }, "image/png");
+  });
+  return blob.arrayBuffer();
+}
+
+function createCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+const defaultAdapters: RasterizeAdapters = {
+  async inspectPdf(bytes) {
+    const pdfjs = await loadPdfJs();
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(bytes) });
+    try {
+      const document = await loadingTask.promise;
+      const pageCount = document.numPages;
+      return { pageCount, encrypted: false };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "PasswordException" || /password/i.test(error.message))
+      ) {
+        return { pageCount: 0, encrypted: true };
+      }
+      throw error;
+    } finally {
+      await loadingTask.destroy();
+    }
+  },
+
+  async rasterImage(bytes, mimeType) {
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: mimeType }));
+    try {
+      const dimensions = scaleWithinLongEdge(bitmap, MAX_RASTER_LONG_EDGE);
+      const canvas = createCanvas(dimensions.width, dimensions.height);
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas is unavailable");
+      context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
+      return {
+        id: "page-1",
+        documentId: "pending",
+        pageNumber: 1,
+        ...dimensions,
+        pngBytes: await canvasPngBytes(canvas),
+      };
+    } finally {
+      bitmap.close();
+    }
+  },
+
+  async *rasterPdf(bytes, maxLongEdge) {
+    const pdfjs = await loadPdfJs();
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(bytes) });
+    const document = await loadingTask.promise;
+    try {
+      for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+        const page = await document.getPage(pageNumber);
+        const original = page.getViewport({ scale: 1 });
+        const dimensions = scaleWithinLongEdge(original, maxLongEdge);
+        const scale = dimensions.width / original.width;
+        const viewport = page.getViewport({ scale });
+        const canvas = createCanvas(dimensions.width, dimensions.height);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas is unavailable");
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        yield {
+          id: `page-${pageNumber}`,
+          documentId: "pending",
+          pageNumber,
+          ...dimensions,
+          pngBytes: await canvasPngBytes(canvas),
+        };
+        page.cleanup();
+      }
+    } finally {
+      await loadingTask.destroy();
+    }
+  },
+};
+
+async function loadPdfJs() {
+  const pdfjs = await import("pdfjs-dist");
+  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.min.mjs",
+      import.meta.url,
+    ).toString();
+  }
+  return pdfjs;
+}
+```
+
+</Accordion>
+<Accordion title="src/features/redact/safe-copy.ts">
+
+```typescript
+import { PDFDocument } from "pdf-lib";
+
+import { safeOutputName } from "./file-policy";
+import type {
+  RasterPage,
+  RedactionMark,
+  SourceDocument,
+} from "./workflow-domain";
+
+export type GeneratedCopy = {
+  name: string;
+  mimeType: "image/png" | "application/pdf";
+  blob: Blob;
+  pageCount: number;
+};
+
+export type CanvasFactory = {
+  flatten(page: RasterPage, marks: RedactionMark[]): Promise<Uint8Array>;
+};
+
+export type ClipboardWriter = {
+  writePng(blob: Blob): Promise<void>;
+};
+
+export type Downloader = {
+  save(blob: Blob, filename: string): void;
+};
+
+export function markToPixelRect(
+  mark: Pick<RedactionMark, "x" | "y" | "width" | "height">,
+  page: Pick<RasterPage, "width" | "height">,
+) {
+  const left = Math.max(0, Math.floor((mark.x / 100) * page.width));
+  const top = Math.max(0, Math.floor((mark.y / 100) * page.height));
+  const right = Math.min(
+    page.width,
+    Math.ceil(((mark.x + mark.width) / 100) * page.width),
+  );
+  const bottom = Math.min(
+    page.height,
+    Math.ceil(((mark.y + mark.height) / 100) * page.height),
+  );
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
+
+export async function generateSafeCopy(input: {
+  source: SourceDocument;
+  pages: RasterPage[];
+  marks: RedactionMark[];
+  canvas?: CanvasFactory;
+}): Promise<GeneratedCopy> {
+  if (input.pages.length === 0) {
+    throw new Error("At least one prepared page is required");
+  }
+  const canvas = input.canvas ?? browserCanvasFactory;
+  const flattenedPages: Uint8Array[] = [];
+  for (const page of input.pages) {
+    const pageMarks = input.marks.filter(
+      (mark) => mark.pageId === page.id || mark.pageNumber === page.pageNumber,
+    );
+    flattenedPages.push(await canvas.flatten(page, pageMarks));
+  }
+
+  if (input.source.mimeType !== "application/pdf") {
+    const bytes = flattenedPages[0];
+    return {
+      name: safeOutputName(input.source.name, "png"),
+      mimeType: "image/png",
+      blob: new Blob([copyArrayBuffer(bytes)], { type: "image/png" }),
+      pageCount: 1,
+    };
+  }
+
+  const document = await PDFDocument.create();
+  document.setProducer("Redact local safe-copy generator");
+  document.setCreator("Redact");
+  for (let index = 0; index < flattenedPages.length; index += 1) {
+    const sourcePage = input.pages[index];
+    const embedded = await document.embedPng(flattenedPages[index]);
+    const outputPage = document.addPage([sourcePage.width, sourcePage.height]);
+    outputPage.drawImage(embedded, {
+      x: 0,
+      y: 0,
+      width: sourcePage.width,
+      height: sourcePage.height,
+    });
+  }
+  const pdfBytes = await document.save();
+  return {
+    name: safeOutputName(input.source.name, "pdf"),
+    mimeType: "application/pdf",
+    blob: new Blob([copyArrayBuffer(pdfBytes)], { type: "application/pdf" }),
+    pageCount: input.pages.length,
+  };
+}
+
+export async function copySafeImage(
+  blob: Blob,
+  clipboard: ClipboardWriter,
+): Promise<void> {
+  await clipboard.writePng(blob);
+}
+
+export function saveGeneratedCopy(
+  copy: GeneratedCopy,
+  downloader: Downloader,
+): void {
+  downloader.save(copy.blob, copy.name);
+}
+
+function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/png");
+  });
+  if (blob) return new Uint8Array(await blob.arrayBuffer());
+
+  const dataUrl = canvas.toDataURL("image/png");
+  if (dataUrl === "data:,") {
+    throw new Error("The safe page could not be encoded");
+  }
+  const response = await fetch(dataUrl);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+export const browserCanvasFactory: CanvasFactory = {
+  async flatten(page, marks) {
+    const bitmap = await createImageBitmap(
+      new Blob([page.pngBytes], { type: "image/png" }),
+    );
+    try {
+      if (typeof OffscreenCanvas !== "undefined") {
+        const canvas = new OffscreenCanvas(page.width, page.height);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas is unavailable");
+        drawFlattenedPage(context, bitmap, page, marks);
+        const blob = await canvas.convertToBlob({ type: "image/png" });
+        return new Uint8Array(await blob.arrayBuffer());
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = page.width;
+      canvas.height = page.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas is unavailable");
+      drawFlattenedPage(context, bitmap, page, marks);
+      return await canvasToPng(canvas);
+    } finally {
+      bitmap.close();
+    }
+  },
+};
+
+function drawFlattenedPage(
+  context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  bitmap: ImageBitmap,
+  page: RasterPage,
+  marks: RedactionMark[],
+) {
+  context.drawImage(bitmap, 0, 0, page.width, page.height);
+  context.fillStyle = "#000000";
+  for (const mark of marks) {
+    const rectangle = markToPixelRect(mark, page);
+    context.fillRect(
+      rectangle.x,
+      rectangle.y,
+      rectangle.width,
+      rectangle.height,
+    );
+  }
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/redact/domain.test.ts src/features/redact/safe-copy.test.ts
+```
+
+These focused tests exercise application contracts with controlled inputs. They do not prove live model inference. For Chapters 2 onward, also complete the live or visible exercise described above when the model prerequisite exists.
+
+## Before continuing
+
+- [ ] You can draw, move, resize, and remove a manual mark.
+- [ ] You opened a separately generated PNG and multipage PDF.
+- [ ] The original files remain unchanged.
+
+Continue to [Read one image with QVAC](/docs/redact/02-first-ocr).

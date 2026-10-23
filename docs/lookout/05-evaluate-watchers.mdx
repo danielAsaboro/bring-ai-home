@@ -1,0 +1,693 @@
+---
+title: "05. Evaluate watchers on the event tape"
+description: "We will run every active watcher over the stored frames: ordinary prefilters first, then a local vision check, then a person confirms or dismisses each hit."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 05. Evaluate watchers on the event tape" />
+
+We will run each active watcher over the stored frames. Ordinary prefilters run first: source, hours, and motion. Only frames that pass are sent to the local vision model. Only a clear YES becomes a hit, and every hit waits for a person to confirm or dismiss it.
+
+**Source checkpoint:** `5c3b3ce` · **Starting checkpoint:** `f15f98d`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `src/features/lookout/watch-eval.ts` | Prefilter, evaluate, merge, and decide hits |
+| `src/features/lookout/watch-eval.test.ts` | Tests with hand-written verdicts |
+| `src/features/lookout/ControlRoom.tsx` | Watcher hits section with Confirm and Dismiss |
+| `src/features/lookout/store.ts` | Saves hits and their decisions |
+
+To compare with the starting checkpoint: `git diff f15f98d 5c3b3ce`.
+
+## Build and observe
+
+### 1. Read the decision
+
+Open `watch-eval.ts`. `passesPrefilter` is ordinary code: it needs no model. `evaluateWatcher` asks the injected `check` for each remaining frame. An `unclear` or `no` is not a hit. A service that is unavailable stops the run with a message; it does not turn into "no alerts".
+
+### 2. Run the watchers
+
+```bash
+git checkout 5c3b3ce
+npm run qvac:service
+npm run dev
+```
+
+Accept the parcel watcher from chapter 04, then click **Check watchers on stored frames**. The status line reports how many frames were checked and how many hits the model proposed. Each hit shows the frame, the model name, and the model's reason.
+
+Click **Confirm** on a hit that really shows a parcel. Click **Dismiss** on anything else. Run the check again: your decisions stay, because `mergeHits` keeps them by watcher and frame.
+
+### 3. When the service is down
+
+Stop the service and run the check. The status line says it stopped and why. No hit is invented and the event tape still works.
+
+## Read the checkpoint implementation
+
+These are complete files from `5c3b3ce`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+
+<AccordionGroup>
+<Accordion title="src/features/lookout/ControlRoom.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { acknowledge, mergeTape, replayFrames } from "./events";
+import { ANY_SOURCE, describeRule, type Rule } from "./rules";
+import { findFrame, sampleSources } from "./sources";
+import { createStore, defaultState, type LookoutState } from "./store";
+import { checkFrame } from "./check-client";
+import { decideHit, evaluateWatcher, mergeHits, type WatchHit } from "./watch-eval";
+import type { WatcherProposal } from "./watcher";
+import { proposeWatcher, type ProposeOutcome } from "./watcher-client";
+
+function browserStorage() {
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function sourceName(id: string) {
+  return id === ANY_SOURCE ? "Any source" : (sampleSources.find((s) => s.id === id)?.name ?? id);
+}
+
+export function ControlRoom() {
+  const store = useMemo(() => createStore(browserStorage()), []);
+  const [state, setState] = useState<LookoutState>(defaultState);
+  const [loaded, setLoaded] = useState(false);
+  const [draftKind, setDraftKind] = useState<Rule["kind"]>("motion");
+  const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
+  const [draftValue, setDraftValue] = useState("40");
+  const [draftTo, setDraftTo] = useState("6");
+  const [sentence, setSentence] = useState("");
+  const [proposing, setProposing] = useState(false);
+  const [proposal, setProposal] = useState<ProposeOutcome | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [runNote, setRunNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setState(store.load());
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [store]);
+
+  function update(next: LookoutState) {
+    setState(next);
+    store.save(next);
+  }
+
+  const armedCount = Object.values(state.armed).filter(Boolean).length;
+  const unacked = state.tape.filter((e) => !e.acknowledged).length;
+
+  function addRule() {
+    const id = `rule-${Date.now()}`;
+    const n = Number(draftValue);
+    let rule: Rule;
+    if (draftKind === "time") {
+      rule = { id, sourceId: draftSource, kind: "time", fromHour: n % 24, toHour: Number(draftTo) % 24 };
+    } else if (draftKind === "motion") {
+      rule = { id, sourceId: draftSource, kind: "motion", minMotion: Math.min(Math.max(n, 0), 100) / 100 };
+    } else {
+      rule = { id, sourceId: draftSource, kind: "change", minChange: Math.min(Math.max(n, 0), 100) / 100 };
+    }
+    update({ ...state, rules: [...state.rules, rule] });
+  }
+
+  async function propose() {
+    setProposing(true);
+    setProposal(await proposeWatcher(sentence));
+    setProposing(false);
+  }
+
+  async function runWatchers() {
+    setChecking(true);
+    setRunNote(null);
+    // Watchers read the same stored frames the event tape replays.
+    const frames = sampleSources.flatMap((s) => s.frames);
+    let hits: WatchHit[] = [];
+    let checked = 0;
+    const errors: string[] = [];
+    for (const watcher of state.watchers) {
+      const run = await evaluateWatcher(watcher, frames, (f, c) => checkFrame(f, c));
+      hits = [...hits, ...run.hits];
+      checked += run.checked;
+      errors.push(...run.errors);
+    }
+    update({ ...state, hits: mergeHits(state.hits, hits) });
+    setRunNote(errors.length > 0 ? `Stopped: ${errors[0]}` : `Checked ${checked} frames; ${hits.length} proposed hits.`);
+    setChecking(false);
+  }
+
+  function activate(p: WatcherProposal) {
+    update({ ...state, watchers: [...state.watchers, { ...p, id: `watcher-${Date.now()}` }] });
+    setProposal(null);
+    setSentence("");
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl p-4 font-sans text-slate-900">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Lookout</h1>
+        <button
+          className="rounded border px-3 py-1 text-sm"
+          onClick={() => update(store.reset())}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <p
+        role="status"
+        aria-label="Armed state"
+        className={`mb-6 rounded p-4 text-xl font-bold ${armedCount > 0 ? "bg-red-600 text-white" : "bg-slate-200 text-slate-700"}`}
+      >
+        {armedCount > 0
+          ? `ARMED · ${armedCount} of ${sampleSources.length} sources watched`
+          : "DISARMED · no source is watched"}
+      </p>
+
+      <section aria-labelledby="tape-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="tape-heading" className="text-lg font-semibold">
+            Event tape
+          </h2>
+          <span className="text-sm text-slate-600">{unacked} to review</span>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white"
+            onClick={() =>
+              update({ ...state, tape: mergeTape(state.tape, replayFrames(sampleSources, state.armed, state.rules)) })
+            }
+          >
+            Replay stored frames
+          </button>
+        </div>
+        {state.tape.length === 0 ? (
+          <p className="text-slate-600">
+            {loaded ? "No events. Arm a source and replay its stored frames." : "Loading…"}
+          </p>
+        ) : (
+          <ol aria-label="Events" className="space-y-2">
+            {state.tape.map((event) => {
+              const frame = findFrame(sampleSources, event.frameId);
+              return (
+                <li
+                  key={event.id}
+                  className={`flex flex-wrap items-center gap-3 rounded border p-2 ${event.acknowledged ? "opacity-60" : "border-red-400"}`}
+                >
+                  {frame ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">
+                      {sourceName(event.sourceId)} · {event.at.replace("T", " ")}
+                    </p>
+                    <p className="text-sm text-slate-600">Matched: {event.reasons.join(", ")}</p>
+                  </div>
+                  {event.acknowledged ? (
+                    <span className="text-sm">Acknowledged</span>
+                  ) : (
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, tape: acknowledge(state.tape, event.id) })}
+                    >
+                      Acknowledge {sourceName(event.sourceId)} {event.at.slice(11)}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+
+      <section aria-labelledby="sources-heading" className="mb-8">
+        <h2 id="sources-heading" className="mb-2 text-lg font-semibold">
+          Sources
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Stored still frames from sample sources. Lookout does not connect to cameras.
+        </p>
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {sampleSources.map((source) => {
+            const armed = Boolean(state.armed[source.id]);
+            const latest = source.frames[source.frames.length - 1];
+            return (
+              <li key={source.id} className={`rounded border-4 p-2 ${armed ? "border-red-600" : "border-slate-200"}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={latest.image} alt={latest.caption} width={320} height={200} className="w-full rounded" />
+                <p className="mt-1 font-medium">{source.name}</p>
+                <p className="text-sm text-slate-600">{source.place}</p>
+                <button
+                  aria-pressed={armed}
+                  className={`mt-2 w-full rounded px-2 py-1 font-semibold ${armed ? "bg-red-600 text-white" : "bg-slate-200"}`}
+                  onClick={() => update({ ...state, armed: { ...state.armed, [source.id]: !armed } })}
+                >
+                  {armed ? `Disarm ${source.name}` : `Arm ${source.name}`}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="watchers-heading" className="mb-8">
+        <h2 id="watchers-heading" className="mb-2 text-lg font-semibold">
+          Watchers
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Describe what to watch for. A local model proposes a rule; nothing is active until you accept it.
+        </p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <label className="flex min-w-0 flex-1 flex-col text-sm">
+            Describe a watcher
+            <input
+              value={sentence}
+              onChange={(e) => setSentence(e.target.value)}
+              placeholder="Tell me when a parcel is left by the gate"
+              className="border p-1"
+            />
+          </label>
+          <button
+            className="self-end rounded border px-3 py-1"
+            disabled={proposing || !sentence.trim()}
+            onClick={propose}
+          >
+            {proposing ? "Proposing…" : "Propose watcher"}
+          </button>
+        </div>
+        {proposal && !proposal.ok ? (
+          <p role="alert" className="mb-3 text-sm text-red-700">
+            No watcher proposed: {proposal.message}
+            {proposal.raw ? <span className="block font-mono">Model reply: {proposal.raw}</span> : null}
+          </p>
+        ) : null}
+        {proposal && proposal.ok ? (
+          <div aria-label="Proposed watcher" role="group" className="mb-3 rounded border border-amber-500 p-2 text-sm">
+            <p className="font-semibold">Proposed by {proposal.model}. Check every field.</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3">
+              <dt>Source</dt>
+              <dd>{sourceName(proposal.proposal.sourceId)}</dd>
+              <dt>Condition</dt>
+              <dd>{proposal.proposal.condition}</dd>
+              <dt>Hours</dt>
+              <dd>
+                {proposal.proposal.fromHour === proposal.proposal.toHour
+                  ? "All day"
+                  : `${proposal.proposal.fromHour}:00 to ${proposal.proposal.toHour}:00`}
+              </dd>
+              <dt>Motion at least</dt>
+              <dd>{Math.round(proposal.proposal.minMotion * 100)}%</dd>
+            </dl>
+            <div className="mt-2 flex gap-2">
+              <button className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => activate(proposal.proposal)}>
+                Accept watcher
+              </button>
+              <button className="rounded border px-3 py-1" onClick={() => setProposal(null)}>
+                Discard
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <ul aria-label="Active watchers" className="space-y-1">
+          {state.watchers.map((w) => (
+            <li key={w.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(w.sourceId)}: “{w.condition}”
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, watchers: state.watchers.filter((x) => x.id !== w.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="hits-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="hits-heading" className="text-lg font-semibold">
+            Watcher hits
+          </h2>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+            disabled={checking || state.watchers.length === 0}
+            onClick={runWatchers}
+          >
+            {checking ? "Checking…" : "Check watchers on stored frames"}
+          </button>
+        </div>
+        {runNote ? <p role="status" className="mb-2 text-sm">{runNote}</p> : null}
+        <ul aria-label="Watcher hits" className="space-y-2">
+          {state.hits.map((hit) => {
+            const frame = findFrame(sampleSources, hit.frameId);
+            const watcher = state.watchers.find((w) => w.id === hit.watcherId);
+            return (
+              <li key={hit.id} className="flex flex-wrap items-center gap-3 rounded border p-2">
+                {frame ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                ) : null}
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-medium">
+                    {watcher ? `“${watcher.condition}”` : "Removed watcher"} · {frame?.at.replace("T", " ")}
+                  </p>
+                  <p>
+                    {hit.model} proposed YES: {hit.verdict.reason || "no reason given"}
+                  </p>
+                </div>
+                {hit.status === "pending" ? (
+                  <span className="flex gap-2">
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, hits: decideHit(state.hits, hit.id, "confirmed") })}
+                    >
+                      Confirm {hit.frameId}
+                    </button>
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, hits: decideHit(state.hits, hit.id, "dismissed") })}
+                    >
+                      Dismiss {hit.frameId}
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-sm">{hit.status === "confirmed" ? "Confirmed" : "Dismissed as false"}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="rules-heading">
+        <h2 id="rules-heading" className="mb-2 text-lg font-semibold">
+          Rules
+        </h2>
+        <ul aria-label="Rules" className="mb-3 space-y-1">
+          {state.rules.map((rule) => (
+            <li key={rule.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(rule.sourceId)}: {describeRule(rule)}
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, rules: state.rules.filter((r) => r.id !== rule.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-end gap-2 text-sm">
+          <label className="flex flex-col">
+            Kind
+            <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as Rule["kind"])} className="border">
+              <option value="motion">Motion at least (%)</option>
+              <option value="change">Scene change at least (%)</option>
+              <option value="time">Only between hours</option>
+            </select>
+          </label>
+          <label className="flex flex-col">
+            Source
+            <select value={draftSource} onChange={(e) => setDraftSource(e.target.value)} className="border">
+              <option value={ANY_SOURCE}>Any source</option>
+              {sampleSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col">
+            {draftKind === "time" ? "From hour" : "Threshold"}
+            <input value={draftValue} onChange={(e) => setDraftValue(e.target.value)} inputMode="numeric" className="w-20 border" />
+          </label>
+          {draftKind === "time" ? (
+            <label className="flex flex-col">
+              To hour
+              <input value={draftTo} onChange={(e) => setDraftTo(e.target.value)} inputMode="numeric" className="w-20 border" />
+            </label>
+          ) : null}
+          <button className="rounded border px-3 py-1" onClick={addRule}>
+            Add rule
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/store.ts">
+
+```typescript
+import type { LookoutEvent } from "./events";
+import type { Rule } from "./rules";
+import { sampleSources } from "./sources";
+import type { WatchHit } from "./watch-eval";
+import type { Watcher } from "./watcher";
+
+export type LookoutState = {
+  version: 1;
+  armed: Record<string, boolean>;
+  rules: Rule[];
+  tape: LookoutEvent[];
+  watchers: Watcher[];
+  hits: WatchHit[];
+};
+
+export const STORAGE_KEY = "lookout:v1";
+
+export function defaultState(): LookoutState {
+  return {
+    version: 1,
+    armed: Object.fromEntries(sampleSources.map((s) => [s.id, false])),
+    rules: [
+      { id: "rule-motion", sourceId: "any", kind: "motion", minMotion: 0.3 },
+      { id: "rule-change", sourceId: "front-gate", kind: "change", minChange: 0.15 },
+    ],
+    tape: [],
+    watchers: [],
+    hits: [],
+  };
+}
+
+type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+// The only place Lookout touches browser storage.
+export function createStore(storage: KeyValue | undefined) {
+  return {
+    load(): LookoutState {
+      try {
+        const raw = storage?.getItem(STORAGE_KEY);
+        if (!raw) return defaultState();
+        const parsed = JSON.parse(raw) as Partial<LookoutState>;
+        if (parsed.version !== 1 || !parsed.armed || !Array.isArray(parsed.rules) || !Array.isArray(parsed.tape)) {
+          return defaultState();
+        }
+        return { ...defaultState(), ...parsed } as LookoutState;
+      } catch {
+        return defaultState();
+      }
+    },
+    save(state: LookoutState) {
+      try {
+        storage?.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch {
+        // Storage can be full or blocked. The app keeps working in memory.
+      }
+    },
+    reset(): LookoutState {
+      try {
+        storage?.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      return defaultState();
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watch-eval.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import type { CheckOutcome } from "./check-client";
+import { sampleSources } from "./sources";
+import { decideHit, evaluateWatcher, mergeHits } from "./watch-eval";
+import type { Watcher } from "./watcher";
+
+const gate = sampleSources[0].frames;
+const watcher: Watcher = { id: "w1", sourceId: "front-gate", condition: "a parcel left by the gate", fromHour: 0, toHour: 0, minMotion: 0 };
+
+// Fixture verdicts keyed by frame. These are hand-written, not model output.
+function fixtureCheck(answers: Record<string, "yes" | "no" | "unclear">) {
+  return async (frame: { id: string }): Promise<CheckOutcome> => ({
+    ok: true,
+    value: { frameId: frame.id, frameDigest: "d", model: "fixture", raw: "", ms: 1, verdict: { answer: answers[frame.id] ?? "no", reason: "" } },
+  });
+}
+
+describe("evaluateWatcher", () => {
+  it("only turns a clear yes into a pending hit", async () => {
+    const run = await evaluateWatcher(watcher, gate, fixtureCheck({ "front-gate-2": "unclear", "front-gate-3": "yes" }));
+    expect(run.checked).toBe(4);
+    expect(run.hits.map((h) => [h.frameId, h.status])).toEqual([["front-gate-3", "pending"]]);
+  });
+
+  it("skips frames the ordinary prefilters exclude", async () => {
+    const run = await evaluateWatcher({ ...watcher, minMotion: 0.3 }, gate, fixtureCheck({}));
+    expect(run).toMatchObject({ checked: 2, skipped: 2 });
+  });
+
+  it("stops at the first unavailable answer and reports it", async () => {
+    const down = async (): Promise<CheckOutcome> => ({ ok: false, kind: "unavailable", message: "not running" });
+    const run = await evaluateWatcher(watcher, gate, down);
+    expect(run).toMatchObject({ checked: 0, hits: [], errors: ["front-gate-1: not running"] });
+  });
+
+  it("keeps human decisions across re-runs", async () => {
+    const first = await evaluateWatcher(watcher, gate, fixtureCheck({ "front-gate-3": "yes" }));
+    const decided = decideHit(first.hits, "w1:front-gate-3", "dismissed");
+    const again = mergeHits(decided, first.hits);
+    expect(again).toHaveLength(1);
+    expect(again[0].status).toBe("dismissed");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watch-eval.ts">
+
+```typescript
+import type { CheckOutcome } from "./check-client";
+import { inWindow } from "./rules.ts";
+import type { Frame } from "./sources";
+import type { Verdict } from "./verdict";
+import type { Watcher } from "./watcher";
+
+export type WatchHit = {
+  id: string;
+  watcherId: string;
+  frameId: string;
+  verdict: Verdict;
+  model: string;
+  status: "pending" | "confirmed" | "dismissed";
+};
+
+export type WatchRun = { hits: WatchHit[]; checked: number; skipped: number; errors: string[] };
+
+// Ordinary prefilters run first. They are cheap, deterministic, and keep
+// frames away from the model when the watcher cannot apply.
+export function passesPrefilter(watcher: Watcher, frame: Frame): boolean {
+  return (
+    frame.sourceId === watcher.sourceId &&
+    inWindow(frame.at, watcher.fromHour, watcher.toHour) &&
+    frame.motion >= watcher.minMotion
+  );
+}
+
+// The model proposes a verdict per frame. The app decides: only a clear "yes"
+// becomes a hit, and every hit waits for a person to confirm or dismiss it.
+export async function evaluateWatcher(
+  watcher: Watcher,
+  frames: Frame[],
+  check: (frame: Frame, condition: string) => Promise<CheckOutcome>,
+): Promise<WatchRun> {
+  const run: WatchRun = { hits: [], checked: 0, skipped: 0, errors: [] };
+  for (const frame of frames) {
+    if (!passesPrefilter(watcher, frame)) {
+      run.skipped += 1;
+      continue;
+    }
+    const outcome = await check(frame, watcher.condition);
+    if (!outcome.ok) {
+      run.errors.push(`${frame.id}: ${outcome.message}`);
+      // A service that is down will not come back mid-run; stop asking.
+      if (outcome.kind === "unavailable") break;
+      continue;
+    }
+    run.checked += 1;
+    if (outcome.value.verdict.answer === "yes") {
+      run.hits.push({
+        id: `${watcher.id}:${frame.id}`,
+        watcherId: watcher.id,
+        frameId: frame.id,
+        verdict: outcome.value.verdict,
+        model: outcome.value.model,
+        status: "pending",
+      });
+    }
+  }
+  return run;
+}
+
+// Re-running keeps earlier human decisions for the same watcher and frame.
+export function mergeHits(previous: WatchHit[], next: WatchHit[]): WatchHit[] {
+  const decided = new Map(previous.filter((h) => h.status !== "pending").map((h) => [h.id, h]));
+  const merged = next.map((h) => decided.get(h.id) ?? h);
+  const kept = previous.filter((h) => h.status !== "pending" && !merged.some((m) => m.id === h.id));
+  return [...merged, ...kept];
+}
+
+export function decideHit(hits: WatchHit[], id: string, status: "confirmed" | "dismissed"): WatchHit[] {
+  return hits.map((h) => (h.id === id ? { ...h, status } : h));
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- src/features/lookout/watch-eval.test.ts
+```
+
+Expected result: 1 test file passes, 4 tests pass. Verdicts are hand-written fixtures, not model output.
+
+These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 05: Evaluate watchers on the event tape"
+```
+
+## Before continuing
+
+- [ ] Hits appeared only for frames the prefilter allowed.
+- [ ] A dismissed hit stayed dismissed after a re-run.
+
+Next: [06. Measure and tune false positives](/docs/lookout/06-tune-false-positives)

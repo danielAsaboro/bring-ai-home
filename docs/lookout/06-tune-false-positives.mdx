@@ -1,0 +1,932 @@
+---
+title: "06. Measure and tune false positives"
+description: "We will score a watcher against hand labels for the twelve sample frames, record a measured run, and add a still-scene limit that removes false positives without losing the parcel."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Lookout · 06. Measure and tune false positives" />
+
+We will stop guessing whether a watcher is good. A person labelled each of the twelve sample frames for "a parcel left by the gate". Lookout scores a watcher against those labels: true positives, false positives, false negatives, precision, and recall. Then we tune one ordinary knob and measure again.
+
+**Source checkpoint:** `3cb1fa6` · **Starting checkpoint:** `5c3b3ce`
+
+## What changes
+
+| File | Responsibility |
+| --- | --- |
+| `src/features/lookout/measure.ts` | Hand labels, `scoreWatcher`, and reviewed counts |
+| `src/features/lookout/measure.test.ts` | Scoring tests with fixture verdicts |
+| `src/features/lookout/watcher.ts` | Optional `maxMotion`, set by a person |
+| `src/features/lookout/watch-eval.ts` | Prefilter respects `maxMotion` |
+| `qvac-service/measure.mjs` | Check all twelve frames with QVAC and write a receipt |
+| `src/features/lookout/ControlRoom.tsx` | Reviewed counts and a motion limit per watcher |
+
+To compare with the starting checkpoint: `git diff 5c3b3ce 3cb1fa6`.
+
+## Build and observe
+
+### 1. Read the answer key
+
+Open `measure.ts`. Only `front-gate-3` is labelled true. The courier frame is false: the box is still in their hands. A missing or unclear verdict counts as no alert, so a silent model cannot score well by saying nothing.
+
+### 2. Measure the real model
+
+```bash
+git checkout 3cb1fa6
+npm run qvac:measure
+```
+
+The script checks every frame, prints the score, and writes `.qvac/measure-<time>.json` with each raw reply. That file is your receipt. We could not record one in our build container because the model registry is blocked there, so this page shows no measured numbers.
+
+### 3. Tune one knob
+
+A parcel that has been left does not move. The courier and the cat do. Run again with a still-scene limit:
+
+```bash
+npm run qvac:measure -- 0.2
+```
+
+Compare the two receipts. In the app, the same knob is **Skip frames with motion above (%)** on each active watcher.
+
+### 4. Know what tuning costs
+
+Read `measure.test.ts`. With fixture verdicts that say yes to the courier, the parcel, and the cat, a 20% limit removes both false positives and keeps the parcel. A 5% limit also removes the parcel: recall drops to 0. Over-tuning hides real events. False negatives can matter more than false alarms, so always read both columns.
+
+The **Reviewed** line on each watcher counts your Confirm and Dismiss decisions. That is a second, live measurement from real use.
+
+## Read the checkpoint implementation
+
+These are complete files from `3cb1fa6`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "lookout",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:check-smoke": "node --no-warnings qvac-service/check-frame-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:measure": "node --no-warnings qvac-service/measure.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/measure.mjs">
+
+```javascript
+// Run the vision check on every sample frame for one condition and score it
+// against the hand labels. Writes a receipt you can compare between tunings.
+// Usage: npm run qvac:measure -- [maxMotion]
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+const { allFrames, sampleSources } = await import("../src/features/lookout/sources.ts");
+const { PARCEL_CONDITION, parcelLabels, scoreWatcher } = await import("../src/features/lookout/measure.ts");
+const { buildConditionPrompt, parseVerdict } = await import("../src/features/lookout/verdict.ts");
+const { createQvacChecker } = await import("./qvac-checker.ts");
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+
+const maxMotion = process.argv[2] === undefined ? 1 : Number(process.argv[2]);
+const watcher = { id: "measure", sourceId: "front-gate", condition: PARCEL_CONDITION, fromHour: 0, toHour: 0, minMotion: 0, maxMotion };
+const checker = createQvacChecker(appDirectory);
+try {
+  const frames = allFrames(sampleSources);
+  const verdicts = {};
+  const raw = {};
+  for (const frame of frames) {
+    const png = await readFile(path.join(appDirectory, "public", frame.image));
+    raw[frame.id] = await checker.check(png, buildConditionPrompt(PARCEL_CONDITION));
+    verdicts[frame.id] = parseVerdict(raw[frame.id]);
+    process.stderr.write(`${frame.id}: ${verdicts[frame.id].answer}\n`);
+  }
+  const receipt = {
+    kind: "measured-run",
+    model: checker.model,
+    condition: PARCEL_CONDITION,
+    maxMotion,
+    score: scoreWatcher(watcher, frames, verdicts, parcelLabels),
+    verdicts,
+    raw,
+    at: new Date().toISOString(),
+  };
+  const out = path.join(qvacDirectory, `measure-${Date.now()}.json`);
+  await writeFile(out, `${JSON.stringify(receipt, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(receipt.score, null, 2)}\nReceipt: ${out}\n`);
+} catch (error) {
+  process.stderr.write(`Measurement failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  await checker.close();
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/ControlRoom.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { acknowledge, mergeTape, replayFrames } from "./events";
+import { ANY_SOURCE, describeRule, type Rule } from "./rules";
+import { findFrame, sampleSources } from "./sources";
+import { createStore, defaultState, type LookoutState } from "./store";
+import { checkFrame } from "./check-client";
+import { reviewedPrecision } from "./measure";
+import { decideHit, evaluateWatcher, mergeHits, type WatchHit } from "./watch-eval";
+import type { WatcherProposal } from "./watcher";
+import { proposeWatcher, type ProposeOutcome } from "./watcher-client";
+
+function browserStorage() {
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function sourceName(id: string) {
+  return id === ANY_SOURCE ? "Any source" : (sampleSources.find((s) => s.id === id)?.name ?? id);
+}
+
+export function ControlRoom() {
+  const store = useMemo(() => createStore(browserStorage()), []);
+  const [state, setState] = useState<LookoutState>(defaultState);
+  const [loaded, setLoaded] = useState(false);
+  const [draftKind, setDraftKind] = useState<Rule["kind"]>("motion");
+  const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
+  const [draftValue, setDraftValue] = useState("40");
+  const [draftTo, setDraftTo] = useState("6");
+  const [sentence, setSentence] = useState("");
+  const [proposing, setProposing] = useState(false);
+  const [proposal, setProposal] = useState<ProposeOutcome | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [runNote, setRunNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setState(store.load());
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [store]);
+
+  function update(next: LookoutState) {
+    setState(next);
+    store.save(next);
+  }
+
+  const armedCount = Object.values(state.armed).filter(Boolean).length;
+  const unacked = state.tape.filter((e) => !e.acknowledged).length;
+
+  function addRule() {
+    const id = `rule-${Date.now()}`;
+    const n = Number(draftValue);
+    let rule: Rule;
+    if (draftKind === "time") {
+      rule = { id, sourceId: draftSource, kind: "time", fromHour: n % 24, toHour: Number(draftTo) % 24 };
+    } else if (draftKind === "motion") {
+      rule = { id, sourceId: draftSource, kind: "motion", minMotion: Math.min(Math.max(n, 0), 100) / 100 };
+    } else {
+      rule = { id, sourceId: draftSource, kind: "change", minChange: Math.min(Math.max(n, 0), 100) / 100 };
+    }
+    update({ ...state, rules: [...state.rules, rule] });
+  }
+
+  async function propose() {
+    setProposing(true);
+    setProposal(await proposeWatcher(sentence));
+    setProposing(false);
+  }
+
+  async function runWatchers() {
+    setChecking(true);
+    setRunNote(null);
+    // Watchers read the same stored frames the event tape replays.
+    const frames = sampleSources.flatMap((s) => s.frames);
+    let hits: WatchHit[] = [];
+    let checked = 0;
+    const errors: string[] = [];
+    for (const watcher of state.watchers) {
+      const run = await evaluateWatcher(watcher, frames, (f, c) => checkFrame(f, c));
+      hits = [...hits, ...run.hits];
+      checked += run.checked;
+      errors.push(...run.errors);
+    }
+    update({ ...state, hits: mergeHits(state.hits, hits) });
+    setRunNote(errors.length > 0 ? `Stopped: ${errors[0]}` : `Checked ${checked} frames; ${hits.length} proposed hits.`);
+    setChecking(false);
+  }
+
+  function activate(p: WatcherProposal) {
+    update({ ...state, watchers: [...state.watchers, { ...p, id: `watcher-${Date.now()}` }] });
+    setProposal(null);
+    setSentence("");
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl p-4 font-sans text-slate-900">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Lookout</h1>
+        <button
+          className="rounded border px-3 py-1 text-sm"
+          onClick={() => update(store.reset())}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <p
+        role="status"
+        aria-label="Armed state"
+        className={`mb-6 rounded p-4 text-xl font-bold ${armedCount > 0 ? "bg-red-600 text-white" : "bg-slate-200 text-slate-700"}`}
+      >
+        {armedCount > 0
+          ? `ARMED · ${armedCount} of ${sampleSources.length} sources watched`
+          : "DISARMED · no source is watched"}
+      </p>
+
+      <section aria-labelledby="tape-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="tape-heading" className="text-lg font-semibold">
+            Event tape
+          </h2>
+          <span className="text-sm text-slate-600">{unacked} to review</span>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white"
+            onClick={() =>
+              update({ ...state, tape: mergeTape(state.tape, replayFrames(sampleSources, state.armed, state.rules)) })
+            }
+          >
+            Replay stored frames
+          </button>
+        </div>
+        {state.tape.length === 0 ? (
+          <p className="text-slate-600">
+            {loaded ? "No events. Arm a source and replay its stored frames." : "Loading…"}
+          </p>
+        ) : (
+          <ol aria-label="Events" className="space-y-2">
+            {state.tape.map((event) => {
+              const frame = findFrame(sampleSources, event.frameId);
+              return (
+                <li
+                  key={event.id}
+                  className={`flex flex-wrap items-center gap-3 rounded border p-2 ${event.acknowledged ? "opacity-60" : "border-red-400"}`}
+                >
+                  {frame ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">
+                      {sourceName(event.sourceId)} · {event.at.replace("T", " ")}
+                    </p>
+                    <p className="text-sm text-slate-600">Matched: {event.reasons.join(", ")}</p>
+                  </div>
+                  {event.acknowledged ? (
+                    <span className="text-sm">Acknowledged</span>
+                  ) : (
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, tape: acknowledge(state.tape, event.id) })}
+                    >
+                      Acknowledge {sourceName(event.sourceId)} {event.at.slice(11)}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+
+      <section aria-labelledby="sources-heading" className="mb-8">
+        <h2 id="sources-heading" className="mb-2 text-lg font-semibold">
+          Sources
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Stored still frames from sample sources. Lookout does not connect to cameras.
+        </p>
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {sampleSources.map((source) => {
+            const armed = Boolean(state.armed[source.id]);
+            const latest = source.frames[source.frames.length - 1];
+            return (
+              <li key={source.id} className={`rounded border-4 p-2 ${armed ? "border-red-600" : "border-slate-200"}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={latest.image} alt={latest.caption} width={320} height={200} className="w-full rounded" />
+                <p className="mt-1 font-medium">{source.name}</p>
+                <p className="text-sm text-slate-600">{source.place}</p>
+                <button
+                  aria-pressed={armed}
+                  className={`mt-2 w-full rounded px-2 py-1 font-semibold ${armed ? "bg-red-600 text-white" : "bg-slate-200"}`}
+                  onClick={() => update({ ...state, armed: { ...state.armed, [source.id]: !armed } })}
+                >
+                  {armed ? `Disarm ${source.name}` : `Arm ${source.name}`}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="watchers-heading" className="mb-8">
+        <h2 id="watchers-heading" className="mb-2 text-lg font-semibold">
+          Watchers
+        </h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Describe what to watch for. A local model proposes a rule; nothing is active until you accept it.
+        </p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <label className="flex min-w-0 flex-1 flex-col text-sm">
+            Describe a watcher
+            <input
+              value={sentence}
+              onChange={(e) => setSentence(e.target.value)}
+              placeholder="Tell me when a parcel is left by the gate"
+              className="border p-1"
+            />
+          </label>
+          <button
+            className="self-end rounded border px-3 py-1"
+            disabled={proposing || !sentence.trim()}
+            onClick={propose}
+          >
+            {proposing ? "Proposing…" : "Propose watcher"}
+          </button>
+        </div>
+        {proposal && !proposal.ok ? (
+          <p role="alert" className="mb-3 text-sm text-red-700">
+            No watcher proposed: {proposal.message}
+            {proposal.raw ? <span className="block font-mono">Model reply: {proposal.raw}</span> : null}
+          </p>
+        ) : null}
+        {proposal && proposal.ok ? (
+          <div aria-label="Proposed watcher" role="group" className="mb-3 rounded border border-amber-500 p-2 text-sm">
+            <p className="font-semibold">Proposed by {proposal.model}. Check every field.</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3">
+              <dt>Source</dt>
+              <dd>{sourceName(proposal.proposal.sourceId)}</dd>
+              <dt>Condition</dt>
+              <dd>{proposal.proposal.condition}</dd>
+              <dt>Hours</dt>
+              <dd>
+                {proposal.proposal.fromHour === proposal.proposal.toHour
+                  ? "All day"
+                  : `${proposal.proposal.fromHour}:00 to ${proposal.proposal.toHour}:00`}
+              </dd>
+              <dt>Motion at least</dt>
+              <dd>{Math.round(proposal.proposal.minMotion * 100)}%</dd>
+            </dl>
+            <div className="mt-2 flex gap-2">
+              <button className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => activate(proposal.proposal)}>
+                Accept watcher
+              </button>
+              <button className="rounded border px-3 py-1" onClick={() => setProposal(null)}>
+                Discard
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <ul aria-label="Active watchers" className="space-y-1">
+          {state.watchers.map((w) => {
+            const reviewed = reviewedPrecision(state.hits, w.id);
+            return (
+            <li key={w.id} className="flex flex-wrap items-center gap-2">
+              <span>
+                {sourceName(w.sourceId)}: “{w.condition}”
+              </span>
+              <span className="text-sm text-slate-600">
+                Reviewed: {reviewed.confirmed} confirmed, {reviewed.dismissed} dismissed, {reviewed.pending} pending
+              </span>
+              <label className="text-sm">
+                Skip frames with motion above (%)
+                <input
+                  aria-label={`Motion limit for ${w.condition}`}
+                  inputMode="numeric"
+                  className="ml-1 w-16 border"
+                  value={Math.round((w.maxMotion ?? 1) * 100)}
+                  onChange={(e) => {
+                    const pct = Math.min(Math.max(Number(e.target.value) || 0, 0), 100);
+                    update({
+                      ...state,
+                      watchers: state.watchers.map((x) => (x.id === w.id ? { ...x, maxMotion: pct / 100 } : x)),
+                    });
+                  }}
+                />
+              </label>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, watchers: state.watchers.filter((x) => x.id !== w.id) })}
+              >
+                Remove
+              </button>
+            </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="hits-heading" className="mb-8">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 id="hits-heading" className="text-lg font-semibold">
+            Watcher hits
+          </h2>
+          <button
+            className="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+            disabled={checking || state.watchers.length === 0}
+            onClick={runWatchers}
+          >
+            {checking ? "Checking…" : "Check watchers on stored frames"}
+          </button>
+        </div>
+        {runNote ? <p role="status" className="mb-2 text-sm">{runNote}</p> : null}
+        <ul aria-label="Watcher hits" className="space-y-2">
+          {state.hits.map((hit) => {
+            const frame = findFrame(sampleSources, hit.frameId);
+            const watcher = state.watchers.find((w) => w.id === hit.watcherId);
+            return (
+              <li key={hit.id} className="flex flex-wrap items-center gap-3 rounded border p-2">
+                {frame ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={frame.image} alt={frame.caption} width={128} height={80} className="rounded" />
+                ) : null}
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-medium">
+                    {watcher ? `“${watcher.condition}”` : "Removed watcher"} · {frame?.at.replace("T", " ")}
+                  </p>
+                  <p>
+                    {hit.model} proposed YES: {hit.verdict.reason || "no reason given"}
+                  </p>
+                </div>
+                {hit.status === "pending" ? (
+                  <span className="flex gap-2">
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, hits: decideHit(state.hits, hit.id, "confirmed") })}
+                    >
+                      Confirm {hit.frameId}
+                    </button>
+                    <button
+                      className="rounded border px-2 py-1 text-sm"
+                      onClick={() => update({ ...state, hits: decideHit(state.hits, hit.id, "dismissed") })}
+                    >
+                      Dismiss {hit.frameId}
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-sm">{hit.status === "confirmed" ? "Confirmed" : "Dismissed as false"}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="rules-heading">
+        <h2 id="rules-heading" className="mb-2 text-lg font-semibold">
+          Rules
+        </h2>
+        <ul aria-label="Rules" className="mb-3 space-y-1">
+          {state.rules.map((rule) => (
+            <li key={rule.id} className="flex items-center gap-2">
+              <span>
+                {sourceName(rule.sourceId)}: {describeRule(rule)}
+              </span>
+              <button
+                className="text-sm underline"
+                onClick={() => update({ ...state, rules: state.rules.filter((r) => r.id !== rule.id) })}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-end gap-2 text-sm">
+          <label className="flex flex-col">
+            Kind
+            <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as Rule["kind"])} className="border">
+              <option value="motion">Motion at least (%)</option>
+              <option value="change">Scene change at least (%)</option>
+              <option value="time">Only between hours</option>
+            </select>
+          </label>
+          <label className="flex flex-col">
+            Source
+            <select value={draftSource} onChange={(e) => setDraftSource(e.target.value)} className="border">
+              <option value={ANY_SOURCE}>Any source</option>
+              {sampleSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col">
+            {draftKind === "time" ? "From hour" : "Threshold"}
+            <input value={draftValue} onChange={(e) => setDraftValue(e.target.value)} inputMode="numeric" className="w-20 border" />
+          </label>
+          {draftKind === "time" ? (
+            <label className="flex flex-col">
+              To hour
+              <input value={draftTo} onChange={(e) => setDraftTo(e.target.value)} inputMode="numeric" className="w-20 border" />
+            </label>
+          ) : null}
+          <button className="rounded border px-3 py-1" onClick={addRule}>
+            Add rule
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/measure.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { parcelLabels, reviewedPrecision, scoreWatcher } from "./measure";
+import { allFrames, sampleSources } from "./sources";
+import type { Verdict } from "./verdict";
+import type { Watcher } from "./watcher";
+
+// FIXTURE verdicts: hand-written to exercise the scorer. They are not a
+// recording of any model run. Record your own with `npm run qvac:measure`.
+const yes: Verdict = { answer: "yes", reason: "fixture" };
+const fixtureVerdicts: Record<string, Verdict> = {
+  "front-gate-2": yes,
+  "front-gate-3": yes,
+  "front-gate-4": yes,
+  "studio-door-3": yes,
+};
+
+const frames = allFrames(sampleSources);
+const base: Watcher = { id: "w", sourceId: "front-gate", condition: "a parcel left by the gate", fromHour: 0, toHour: 0, minMotion: 0 };
+
+describe("scoreWatcher", () => {
+  it("counts false positives the source scope does not remove", () => {
+    const score = scoreWatcher(base, frames, fixtureVerdicts, parcelLabels);
+    expect(score.truePositives).toEqual(["front-gate-3"]);
+    expect(score.falsePositives).toEqual(["front-gate-2", "front-gate-4"]);
+    expect(score.precision).toBeCloseTo(1 / 3);
+    expect(score.recall).toBe(1);
+  });
+
+  it("a still-scene limit removes the courier and the cat without losing the parcel", () => {
+    const tuned = scoreWatcher({ ...base, maxMotion: 0.2 }, frames, fixtureVerdicts, parcelLabels);
+    expect(tuned.falsePositives).toEqual([]);
+    expect(tuned.truePositives).toEqual(["front-gate-3"]);
+  });
+
+  it("over-tuning shows up as a false negative", () => {
+    const tooTight = scoreWatcher({ ...base, maxMotion: 0.05 }, frames, fixtureVerdicts, parcelLabels);
+    expect(tooTight.falseNegatives).toEqual(["front-gate-3"]);
+    expect(tooTight.recall).toBe(0);
+  });
+});
+
+describe("reviewedPrecision", () => {
+  it("counts human decisions per watcher", () => {
+    const hits = [
+      { watcherId: "w", status: "confirmed" },
+      { watcherId: "w", status: "dismissed" },
+      { watcherId: "w", status: "pending" },
+      { watcherId: "x", status: "confirmed" },
+    ];
+    expect(reviewedPrecision(hits, "w")).toEqual({ confirmed: 1, dismissed: 1, pending: 1 });
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/measure.ts">
+
+```typescript
+import { passesPrefilter } from "./watch-eval.ts";
+import type { Frame } from "./sources";
+import type { Verdict } from "./verdict";
+import type { Watcher } from "./watcher";
+
+// Hand labels for the sample frames: does the drawing show the condition?
+// A person wrote these by looking at each frame. They are the answer key.
+export const PARCEL_CONDITION = "a parcel left by the gate";
+export const parcelLabels: Record<string, boolean> = {
+  "front-gate-1": false,
+  "front-gate-2": false, // courier still holding the box: not left yet
+  "front-gate-3": true,
+  "front-gate-4": false,
+  "back-garden-1": false,
+  "back-garden-2": false,
+  "back-garden-3": false,
+  "back-garden-4": false,
+  "studio-door-1": false,
+  "studio-door-2": false,
+  "studio-door-3": false,
+  "studio-door-4": false,
+};
+
+export type Score = {
+  truePositives: string[];
+  falsePositives: string[];
+  falseNegatives: string[];
+  trueNegatives: number;
+  precision: number | null;
+  recall: number | null;
+};
+
+// Score one watcher against recorded verdicts. A frame the prefilter excludes
+// counts as "no alert". A missing or unclear verdict also counts as "no alert".
+export function scoreWatcher(
+  watcher: Watcher,
+  frames: Frame[],
+  verdicts: Record<string, Verdict>,
+  labels: Record<string, boolean>,
+): Score {
+  const score: Score = { truePositives: [], falsePositives: [], falseNegatives: [], trueNegatives: 0, precision: null, recall: null };
+  for (const frame of frames) {
+    if (!(frame.id in labels)) continue;
+    const alert = passesPrefilter(watcher, frame) && verdicts[frame.id]?.answer === "yes";
+    const truth = labels[frame.id];
+    if (alert && truth) score.truePositives.push(frame.id);
+    else if (alert) score.falsePositives.push(frame.id);
+    else if (truth) score.falseNegatives.push(frame.id);
+    else score.trueNegatives += 1;
+  }
+  const tp = score.truePositives.length;
+  const alerts = tp + score.falsePositives.length;
+  const positives = tp + score.falseNegatives.length;
+  score.precision = alerts === 0 ? null : tp / alerts;
+  score.recall = positives === 0 ? null : tp / positives;
+  return score;
+}
+
+// People's decisions on real hits are a second, live measurement.
+export function reviewedPrecision(hits: { watcherId: string; status: string }[], watcherId: string) {
+  const mine = hits.filter((h) => h.watcherId === watcherId);
+  const confirmed = mine.filter((h) => h.status === "confirmed").length;
+  const dismissed = mine.filter((h) => h.status === "dismissed").length;
+  return { confirmed, dismissed, pending: mine.length - confirmed - dismissed };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watch-eval.ts">
+
+```typescript
+import type { CheckOutcome } from "./check-client";
+import { inWindow } from "./rules.ts";
+import type { Frame } from "./sources";
+import type { Verdict } from "./verdict";
+import type { Watcher } from "./watcher";
+
+export type WatchHit = {
+  id: string;
+  watcherId: string;
+  frameId: string;
+  verdict: Verdict;
+  model: string;
+  status: "pending" | "confirmed" | "dismissed";
+};
+
+export type WatchRun = { hits: WatchHit[]; checked: number; skipped: number; errors: string[] };
+
+// Ordinary prefilters run first. They are cheap, deterministic, and keep
+// frames away from the model when the watcher cannot apply.
+export function passesPrefilter(watcher: Watcher, frame: Frame): boolean {
+  return (
+    frame.sourceId === watcher.sourceId &&
+    inWindow(frame.at, watcher.fromHour, watcher.toHour) &&
+    frame.motion >= watcher.minMotion &&
+    frame.motion <= (watcher.maxMotion ?? 1)
+  );
+}
+
+// The model proposes a verdict per frame. The app decides: only a clear "yes"
+// becomes a hit, and every hit waits for a person to confirm or dismiss it.
+export async function evaluateWatcher(
+  watcher: Watcher,
+  frames: Frame[],
+  check: (frame: Frame, condition: string) => Promise<CheckOutcome>,
+): Promise<WatchRun> {
+  const run: WatchRun = { hits: [], checked: 0, skipped: 0, errors: [] };
+  for (const frame of frames) {
+    if (!passesPrefilter(watcher, frame)) {
+      run.skipped += 1;
+      continue;
+    }
+    const outcome = await check(frame, watcher.condition);
+    if (!outcome.ok) {
+      run.errors.push(`${frame.id}: ${outcome.message}`);
+      // A service that is down will not come back mid-run; stop asking.
+      if (outcome.kind === "unavailable") break;
+      continue;
+    }
+    run.checked += 1;
+    if (outcome.value.verdict.answer === "yes") {
+      run.hits.push({
+        id: `${watcher.id}:${frame.id}`,
+        watcherId: watcher.id,
+        frameId: frame.id,
+        verdict: outcome.value.verdict,
+        model: outcome.value.model,
+        status: "pending",
+      });
+    }
+  }
+  return run;
+}
+
+// Re-running keeps earlier human decisions for the same watcher and frame.
+export function mergeHits(previous: WatchHit[], next: WatchHit[]): WatchHit[] {
+  const decided = new Map(previous.filter((h) => h.status !== "pending").map((h) => [h.id, h]));
+  const merged = next.map((h) => decided.get(h.id) ?? h);
+  const kept = previous.filter((h) => h.status !== "pending" && !merged.some((m) => m.id === h.id));
+  return [...merged, ...kept];
+}
+
+export function decideHit(hits: WatchHit[], id: string, status: "confirmed" | "dismissed"): WatchHit[] {
+  return hits.map((h) => (h.id === id ? { ...h, status } : h));
+}
+```
+
+</Accordion>
+<Accordion title="src/features/lookout/watcher.ts">
+
+```typescript
+// A watcher is an inspectable rule: ordinary prefilters (source, hours, motion)
+// plus one plain-language condition that a vision model checks later.
+// A language model may propose one. Only a person may activate it.
+import { MAX_CONDITION_LENGTH } from "./verdict.ts";
+
+export type Watcher = {
+  id: string;
+  sourceId: string;
+  condition: string;
+  fromHour: number;
+  toHour: number;
+  minMotion: number;
+  // Set by a person while tuning (lesson 06). Frames moving more are skipped.
+  maxMotion?: number;
+};
+
+export type WatcherProposal = Omit<Watcher, "id" | "maxMotion">;
+
+export const WATCHER_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sourceId", "condition", "fromHour", "toHour", "minMotion"],
+  properties: {
+    sourceId: { type: "string" },
+    condition: { type: "string" },
+    fromHour: { type: "integer", minimum: 0, maximum: 23 },
+    toHour: { type: "integer", minimum: 0, maximum: 23 },
+    minMotion: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as const;
+
+export function buildWatcherHistory(sentence: string, sources: { id: string; name: string }[]) {
+  const list = sources.map((s) => `${s.id} (${s.name})`).join(", ");
+  return [
+    {
+      role: "system" as const,
+      content:
+        "You turn a request into a watcher rule as JSON. " +
+        `sourceId must be one of: ${list}. ` +
+        "condition is a short visible situation to look for in one still frame. " +
+        "fromHour and toHour are whole hours 0-23; use 0 and 0 for all day. " +
+        "minMotion is 0 to 1; use 0 when the thing may be still.",
+    },
+    { role: "user" as const, content: sentence },
+  ];
+}
+
+type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+function isHour(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 23;
+}
+
+// The app decides. Shape, the fixed source list, and ranges are checked here,
+// whatever the JSON Schema promised.
+export function validateWatcherProposal(value: unknown, sourceIds: readonly string[]): Result<WatcherProposal> {
+  if (typeof value !== "object" || value === null) return { ok: false, message: "Proposal is not an object" };
+  const v = value as Record<string, unknown>;
+  if (typeof v.sourceId !== "string" || !sourceIds.includes(v.sourceId)) {
+    return { ok: false, message: `Unknown source "${String(v.sourceId)}"` };
+  }
+  const condition = typeof v.condition === "string" ? v.condition.replace(/\s+/g, " ").trim() : "";
+  if (!condition || condition.length > MAX_CONDITION_LENGTH) return { ok: false, message: "Condition is empty or too long" };
+  if (!isHour(v.fromHour) || !isHour(v.toHour)) return { ok: false, message: "Hours must be whole numbers from 0 to 23" };
+  if (typeof v.minMotion !== "number" || !(v.minMotion >= 0 && v.minMotion <= 1)) {
+    return { ok: false, message: "minMotion must be between 0 and 1" };
+  }
+  return {
+    ok: true,
+    value: { sourceId: v.sourceId, condition, fromHour: v.fromHour, toHour: v.toHour, minMotion: v.minMotion },
+  };
+}
+
+export function parseWatcherJson(raw: string, sourceIds: readonly string[]): Result<WatcherProposal> {
+  try {
+    return validateWatcherProposal(JSON.parse(raw), sourceIds);
+  } catch {
+    return { ok: false, message: "Model reply was not JSON" };
+  }
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+Run the focused tests for this chapter:
+
+```bash
+npm test -- src/features/lookout/measure.test.ts
+```
+
+Expected result: 1 test file passes, 4 tests pass. The verdicts are hand-written fixtures and say so in the code; they are not a recorded model run.
+
+These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+
+Then run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 06: Measure and tune false positives"
+```
+
+## Before continuing
+
+- [ ] You have at least two `.qvac/measure-*.json` receipts to compare.
+- [ ] You can name one false positive the motion limit removed, and the limit at which recall fell.
+
+Next: [07. Hand inference to a stronger device](/docs/lookout/07-delegated-inference)

@@ -1,0 +1,845 @@
+---
+title: "04. Identify the asset from a photo"
+description: "We will ask a local vision model what kind of appliance is in a photo, and accept its answer only if it names one of Homebook's own categories."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Homebook · 04. Identify the asset from a photo" />
+
+A rating plate gives the model and serial. A photo of the whole appliance can suggest what it is. We use SmolVLM2, a small local vision model, to propose a category. The model writes free text. Homebook only accepts a category from its own list.
+
+**Source checkpoint:** `097e56d` · **Starting checkpoint:** `fb2b93d`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `src/features/homebook/asset-identity.ts` | The prompt, and a parser that maps the reply onto `ASSET_CATEGORIES` or falls back to `other` |
+| `qvac-service/identify-photo-smoke.mjs` | Standalone smoke: SmolVLM2 plus its projection model, one image attachment |
+| `qvac-service/server.ts`, `serve.mjs` | `POST /identify`. The photo is written to `.qvac/inbox` for the attachment, then deleted |
+| `src/features/homebook/AssistPanel.tsx` | **Identify from a photo**, with the raw reply shown and **Use category** to accept |
+| `public/test-files/homebook/utility-room-heater.png` | A fictional drawn photo of a water heater |
+
+## Build and observe
+
+### 1. Run the smoke command
+
+```bash
+npm run qvac:identify-smoke
+```
+
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with `projectionModelSrc: MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model lets the language model read an image. `completion` takes one message with `attachments: [{ path }]`. Read `identity.rawText` first, then `identity.category`.
+
+### 2. Read the parser
+
+`parseAssetIdentity` looks for `category:` and `name:`. If the model says `water heater`, the parser turns it into `water-heater`, which is in the list. If it says `boiler tank`, the parser stores `other` and sets `categoryUnrecognised: true`. The panel then says so in plain words. A small model will sometimes be wrong, and the raw reply stays visible so you can see why.
+
+### 3. Try it in the binder
+
+Restart `npm run qvac:service`. Choose `utility-room-heater.png` under **Identify from a photo**. The asset's category changes only when you press **Use category**.
+
+### 4. Why the photo touches disk
+
+QVAC attachments take a file path. The service writes the uploaded bytes to `.qvac/inbox/<random>.png`, runs the completion, and deletes the file in `finally`. `.qvac/` is ignored by git.
+
+The vision model download stalled in our build container, as in chapter 02. We have no live reply to show here.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "homebook",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:label-smoke": "node --no-warnings qvac-service/label-ocr-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:identify-smoke": "node --no-warnings qvac-service/identify-photo-smoke.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/identify-photo-smoke.mjs">
+
+```javascript
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const defaultSource = fileURLToPath(new URL("../public/test-files/homebook/utility-room-heater.png", import.meta.url));
+const sourcePath = path.resolve(process.argv[2] ?? defaultSource);
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+let sdk;
+let modelId;
+try {
+  await access(sourcePath);
+  const sourceDigest = createHash("sha256").update(await readFile(sourcePath)).digest("hex");
+  const { IDENTIFY_PROMPT, parseAssetIdentity } = await import("../src/features/homebook/asset-identity.ts");
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+    modelConfig: { ctx_size: 1024, projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: IDENTIFY_PROMPT, attachments: [{ path: sourcePath }] }],
+    stream: true,
+  });
+  let text = "";
+  for await (const token of run.tokenStream) text += token;
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        sourceName: path.basename(sourcePath),
+        sourceDigest,
+        model: "SMOLVLM2_500M_MULTIMODAL_Q8_0",
+        identity: parseAssetIdentity(text),
+        stats: (await run.stats) ?? null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`QVAC identify smoke failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/serve.mjs">
+
+```javascript
+import { randomUUID } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+const { createHomebookServer, SERVICE_PORT } = await import("./server.ts");
+
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+process.env.QVAC_CONFIG_PATH = configPath;
+
+const loaded = [];
+let sdk = null;
+try {
+  sdk = await import("@qvac/sdk");
+} catch (error) {
+  process.stderr.write(`QVAC SDK unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+}
+
+// Load one model, or report why not and leave that capability off.
+async function tryLoad(label, options) {
+  if (!sdk) return null;
+  try {
+    const modelId = await sdk.loadModel(options);
+    loaded.push(modelId);
+    return modelId;
+  } catch (error) {
+    process.stderr.write(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+    return null;
+  }
+}
+
+// Listen first. Each capability switches on when its model has loaded, so the
+// binder gets a clear 503 instead of a hanging request while models download.
+const capabilities = { label: null, identify: null };
+const server = createHomebookServer(capabilities);
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stderr.write(`Homebook QVAC service on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+const ocrId = await tryLoad("Label OCR", {
+  modelSrc: sdk?.OCR_LATIN,
+  modelType: sdk?.MODEL_TYPES.ggmlOcr,
+  modelConfig: { langList: ["en"], magRatio: 1.5, contrastRetry: false, lowConfidenceThreshold: 0.5 },
+});
+if (ocrId) {
+  capabilities.label = async (image) => {
+    const run = sdk.ocr({ modelId: ocrId, image, options: { paragraph: false } });
+    return { blocks: await run.blocks, model: "OCR_LATIN" };
+  };
+  process.stderr.write("Label OCR ready\n");
+}
+
+const vlmId = await tryLoad("Photo identification", {
+  modelSrc: sdk?.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+  modelConfig: { ctx_size: 1024, projectionModelSrc: sdk?.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+});
+if (vlmId) {
+  const { IDENTIFY_PROMPT } = await import("../src/features/homebook/asset-identity.ts");
+  const inbox = path.join(qvacDirectory, "inbox");
+  await mkdir(inbox, { recursive: true });
+  capabilities.identify = async (image, mimeType) => {
+    // Attachments are read from a path, so the photo lives briefly in .qvac/inbox.
+    const file = path.join(inbox, `${randomUUID()}.${mimeType === "image/png" ? "png" : "jpg"}`);
+    await writeFile(file, image);
+    try {
+      const run = sdk.completion({
+        modelId: vlmId,
+        history: [{ role: "user", content: IDENTIFY_PROMPT, attachments: [{ path: file }] }],
+        stream: true,
+      });
+      let text = "";
+      for await (const token of run.tokenStream) text += token;
+      return { text, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" };
+    } finally {
+      await rm(file, { force: true });
+    }
+  };
+  process.stderr.write("Photo identification ready\n");
+}
+
+async function shutdown() {
+  server.close();
+  for (const modelId of loaded) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createHomebookServer, isAllowedOrigin, type Capabilities } from "./server";
+
+// Fixture OCR reader. It returns hand-written blocks, not model output.
+const fixtureLabel: Capabilities["label"] = async () => ({
+  model: "fixture-ocr",
+  blocks: [
+    { text: "MODEL NO.", bbox: [50, 166, 240, 194], confidence: 0.98 },
+    { text: "AT-50G", bbox: [330, 167, 436, 193], confidence: 0.93 },
+  ],
+});
+
+// Fixture describer. Its reply is hand-written, not model output.
+const fixtureIdentify: Capabilities["identify"] = async () => ({
+  model: "fixture-vlm",
+  text: "category: water heater; name: gas water heater",
+});
+
+let close: (() => void) | null = null;
+async function start(capabilities: Capabilities) {
+  const server = createHomebookServer(capabilities);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+afterEach(() => close?.());
+
+const png = { fileName: "label.png", mimeType: "image/png", imageBase64: Buffer.from("png").toString("base64") };
+const post = (url: string, body: unknown, origin = "http://localhost:3000") =>
+  fetch(url, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify(body) });
+
+describe("Homebook local service", () => {
+  it("accepts only loopback browser origins", () => {
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(true);
+    expect(isAllowedOrigin("http://127.0.0.1:3000")).toBe(true);
+    expect(isAllowedOrigin("https://example.com")).toBe(false);
+    expect(isAllowedOrigin(undefined)).toBe(true);
+  });
+
+  it("turns OCR blocks into proposed label facts", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    const res = await post(`${base}/label`, png);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kind).toBe("proposed-label-facts");
+    expect(body.facts).toEqual([{ field: "model", value: "AT-50G", sourceText: "MODEL NO. AT-50G", confidence: 0.93 }]);
+  });
+
+  it("validates a photo identification against Homebook's categories", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    const body = await (await post(`${base}/identify`, png)).json();
+    expect(body.identity).toMatchObject({ kind: "proposed-identity", category: "water-heater", name: "Gas water heater" });
+  });
+
+  it("answers 503 when the model is not loaded, and 400 for a bad image", async () => {
+    const base = await start({ label: null, identify: null });
+    expect((await post(`${base}/label`, png)).status).toBe(503);
+    expect((await post(`${base}/label`, { ...png, mimeType: "image/gif" })).status).toBe(400);
+  });
+
+  it("refuses a foreign origin before reading the request", async () => {
+    const base = await start({ label: fixtureLabel, identify: fixtureIdentify });
+    expect((await post(`${base}/label`, png, "https://example.com")).status).toBe(403);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import type { LabelFact, OcrBlock } from "../src/features/homebook/label-facts.ts";
+import { proposeLabelFacts } from "../src/features/homebook/label-facts.ts";
+import { parseAssetIdentity } from "../src/features/homebook/asset-identity.ts";
+
+export const SERVICE_PORT = 4319;
+const MAX_BODY_BYTES = 6 * 1024 * 1024;
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
+
+export type LabelReader = (image: Buffer) => Promise<{ blocks: OcrBlock[]; model: string }>;
+
+export type PhotoDescriber = (image: Buffer, mimeType: string) => Promise<{ text: string; model: string }>;
+
+export type Capabilities = {
+  label: LabelReader | null;
+  identify: PhotoDescriber | null;
+};
+
+export type ImageRequest = { fileName: string; mimeType: string; image: Buffer };
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and other local tools send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseImageRequest(value: unknown): ImageRequest {
+  const v = value as { fileName?: unknown; mimeType?: unknown; imageBase64?: unknown } | null;
+  if (!v || typeof v.fileName !== "string" || typeof v.imageBase64 !== "string" || typeof v.mimeType !== "string") {
+    throw new Error("Request must contain fileName, mimeType, and imageBase64");
+  }
+  if (!IMAGE_TYPES.has(v.mimeType)) throw new Error("Only PNG and JPEG images are accepted");
+  const image = Buffer.from(v.imageBase64, "base64");
+  if (image.length === 0) throw new Error("The image is empty");
+  return { fileName: v.fileName, mimeType: v.mimeType, image };
+}
+
+export function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+type Route = (body: unknown) => Promise<unknown>;
+
+export class Unavailable extends Error {}
+
+// The service proposes. It never writes to the binder. The browser decides.
+export function createHomebookServer(capabilities: Capabilities) {
+  const routes: Record<string, Route> = {
+    "/label": async (body) => {
+      const request = parseImageRequest(body);
+      if (!capabilities.label) throw new Unavailable("Label reading is not available");
+      const { blocks, model } = await capabilities.label(request.image);
+      const facts: LabelFact[] = proposeLabelFacts(blocks);
+      return { kind: "proposed-label-facts", fileName: request.fileName, model, blocks, facts };
+    },
+    "/identify": async (body) => {
+      const request = parseImageRequest(body);
+      if (!capabilities.identify) throw new Unavailable("Photo identification is not available");
+      const { text, model } = await capabilities.identify(request.image, request.mimeType);
+      return { fileName: request.fileName, model, identity: parseAssetIdentity(text) };
+    },
+  };
+
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      const available = Object.fromEntries(Object.entries(capabilities).map(([k, v]) => [k, v !== null]));
+      return send(res, 200, { ok: true, capabilities: available }, origin);
+    }
+    const route = req.method === "POST" && req.url ? routes[req.url] : undefined;
+    if (!route) return send(res, 404, { error: "Not found" }, origin);
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    try {
+      return send(res, 200, await route(body), origin);
+    } catch (error) {
+      if (error instanceof Unavailable) return send(res, 503, { error: error.message }, origin);
+      const message = (error as Error).message;
+      const status = /^(Request|Only|The image)/.test(message) ? 400 : 502;
+      return send(res, status, { error: message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/AssistPanel.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { AssistError, type AssistClient } from "./assist-client";
+import { cloneBinder, sampleBinder } from "./binder";
+import { Homebook } from "./Homebook";
+import { memoryStore } from "./test-store";
+
+// A blank water heater, registered by hand, waiting for its plate details.
+const blank = cloneBinder(sampleBinder);
+blank.assets[0] = { ...blank.assets[0], brand: "", model: "", serial: "" };
+
+// Fixture client. Its facts are hand-written, not model output.
+function fixtureClient(overrides: Partial<AssistClient> = {}): AssistClient {
+  return {
+    readLabel: async () => ({
+      model: "fixture-ocr",
+      facts: [
+        { field: "model", value: "AT-50G", sourceText: "MODEL NO. AT-50G", confidence: 0.93 },
+        { field: "serial", value: "AT50-2291-0457", sourceText: "SERIAL NO. AT50-2291-0457", confidence: 0.88 },
+      ],
+    }),
+    identify: async () => ({
+      model: "fixture-vlm",
+      identity: {
+        kind: "proposed-identity",
+        category: "water-heater",
+        name: "Gas water heater",
+        categoryUnrecognised: false,
+        rawText: "category: water heater; name: gas water heater",
+      },
+    }),
+    ...overrides,
+  } as AssistClient;
+}
+
+const plate = new File(["png"], "water-heater-label.png", { type: "image/png" });
+
+describe("label review", () => {
+  it("shows proposals and changes the plate only when a person accepts one", async () => {
+    const store = memoryStore(blank);
+    render(<Homebook store={store} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.upload(screen.getByLabelText("Rating plate photo"), plate);
+    const proposals = await screen.findByRole("list", { name: "Proposed label facts" });
+    expect(within(proposals).getByText("AT50-2291-0457")).toBeInTheDocument();
+    expect(store.saved).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Use model" }));
+    expect(store.saved.at(-1)?.assets[0].model).toBe("AT-50G");
+    expect(store.saved.at(-1)?.assets[0].serial).toBe("");
+  });
+
+  it("sets the category only after a person accepts the photo identification", async () => {
+    const other = cloneBinder(sampleBinder);
+    other.assets[0] = { ...other.assets[0], category: "other" };
+    const store = memoryStore(other);
+    render(<Homebook store={store} today="2026-10-23" client={fixtureClient()} />);
+    await userEvent.upload(screen.getByLabelText("Asset photo"), new File(["png"], "heater.png", { type: "image/png" }));
+    await screen.findByRole("group", { name: "Proposed identity" });
+    expect(store.saved).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Use category" }));
+    expect(store.saved.at(-1)?.assets[0].category).toBe("water-heater");
+  });
+
+  it("explains a stopped service and leaves the binder alone", async () => {
+    const store = memoryStore(blank);
+    const client = fixtureClient({
+      readLabel: async () => {
+        throw new AssistError("service-offline", "The local QVAC service is not running. Start it with npm run qvac:service.");
+      },
+    });
+    render(<Homebook store={store} today="2026-10-23" client={client} />);
+    await userEvent.upload(screen.getByLabelText("Rating plate photo"), plate);
+    expect(await screen.findByRole("alert")).toHaveTextContent("npm run qvac:service");
+    expect(store.saved).toHaveLength(0);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/AssistPanel.tsx">
+
+```tsx
+"use client";
+
+import { useState, type ChangeEvent } from "react";
+
+import { AssistError, serviceClient, type AssistClient } from "./assist-client";
+import type { AssetIdentity } from "./asset-identity";
+import type { Asset, AssetCategory } from "./binder";
+import type { LabelFact, LabelField } from "./label-facts";
+
+const FIELD_NAMES: Record<LabelField, string> = {
+  brand: "Brand",
+  model: "Model",
+  serial: "Serial",
+  installedOn: "Installed",
+};
+
+type Status = { state: "idle" } | { state: "working"; what: string } | { state: "error"; message: string };
+
+export function AssistPanel({
+  asset,
+  client = serviceClient,
+  onAccept,
+}: {
+  asset: Asset;
+  client?: AssistClient;
+  onAccept: (field: LabelField | "category" | "name", value: string) => void;
+}) {
+  const [status, setStatus] = useState<Status>({ state: "idle" });
+  const [facts, setFacts] = useState<{ assetId: string; model: string; items: LabelFact[] } | null>(null);
+
+  async function run<T>(what: string, job: () => Promise<T>): Promise<T | null> {
+    setStatus({ state: "working", what });
+    try {
+      const result = await job();
+      setStatus({ state: "idle" });
+      return result;
+    } catch (error) {
+      const message = error instanceof AssistError ? error.message : "Something went wrong. The binder is unchanged.";
+      setStatus({ state: "error", message });
+      return null;
+    }
+  }
+
+  const [identity, setIdentity] = useState<{ assetId: string; model: string; value: AssetIdentity } | null>(null);
+
+  async function onPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await run("Looking at the photo locally…", () => client.identify(file));
+    if (result) setIdentity({ assetId: asset.id, model: result.model, value: result.identity });
+  }
+
+  async function onLabel(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await run("Reading the label locally…", () => client.readLabel(file));
+    if (result) setFacts({ assetId: asset.id, model: result.model, items: result.facts });
+  }
+
+  const visibleIdentity = identity?.assetId === asset.id ? identity : null;
+  const acceptCategory = (category: AssetCategory) => {
+    onAccept("category", category);
+    setIdentity(null);
+  };
+  const visibleFacts = facts?.assetId === asset.id ? facts : null;
+
+  return (
+    <section aria-label="Local assistant" className="space-y-3 rounded border border-emerald-800/40 bg-emerald-50/50 p-3 text-sm">
+      <h3 className="font-serif text-lg">Local assistant</h3>
+      <p className="text-xs text-stone-600">Runs on this computer through QVAC. It proposes; you decide what goes in the binder.</p>
+
+      <label className="block">
+        <span className="font-medium">Read a rating plate</span>
+        <input type="file" accept="image/png,image/jpeg" aria-label="Rating plate photo" onChange={onLabel} className="mt-1 block text-xs" />
+      </label>
+
+      <label className="block">
+        <span className="font-medium">Identify from a photo</span>
+        <input type="file" accept="image/png,image/jpeg" aria-label="Asset photo" onChange={onPhoto} className="mt-1 block text-xs" />
+      </label>
+
+      {visibleIdentity ? (
+        <div aria-label="Proposed identity" role="group" className="rounded border border-stone-300 bg-white p-2">
+          <p>
+            Looks like: <strong>{visibleIdentity.value.category}</strong>
+            {visibleIdentity.value.name ? <> · “{visibleIdentity.value.name}”</> : null}
+          </p>
+          <p className="text-xs text-stone-600">
+            Proposed by {visibleIdentity.model}. Model said: “{visibleIdentity.value.rawText}”
+            {visibleIdentity.value.categoryUnrecognised ? " (not one of Homebook's categories, so it became other)" : ""}
+          </p>
+          <div className="mt-1 flex gap-2">
+            <button type="button" className="rounded border border-emerald-800 px-2 py-0.5" onClick={() => acceptCategory(visibleIdentity.value.category)}>
+              Use category
+            </button>
+            <button type="button" className="rounded border border-stone-400 px-2 py-0.5" onClick={() => setIdentity(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {status.state === "working" ? <p role="status">{status.what}</p> : null}
+      {status.state === "error" ? <p role="alert" className="text-red-900">{status.message}</p> : null}
+
+      {visibleFacts ? (
+        <div>
+          <p className="text-xs text-stone-600">Proposed by {visibleFacts.model}. Check each value against the plate.</p>
+          {visibleFacts.items.length === 0 ? <p>No label fields were recognised. Enter them by hand.</p> : null}
+          <ul aria-label="Proposed label facts" className="divide-y">
+            {visibleFacts.items.map((fact) => (
+              <li key={fact.field} className="flex flex-wrap items-center justify-between gap-2 py-1">
+                <span>
+                  <strong>{FIELD_NAMES[fact.field]}:</strong> <code>{fact.value}</code>{" "}
+                  <span className="text-xs text-stone-600">
+                    from “{fact.sourceText}”{fact.confidence !== null ? ` · ${Math.round(fact.confidence * 100)}%` : ""}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="rounded border border-emerald-800 px-2 py-0.5"
+                  onClick={() => {
+                    onAccept(fact.field, fact.value);
+                    setFacts({ ...visibleFacts, items: visibleFacts.items.filter((f) => f.field !== fact.field) });
+                  }}
+                >
+                  Use {FIELD_NAMES[fact.field].toLowerCase()}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/asset-identity.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { parseAssetIdentity } from "./asset-identity";
+
+// Hand-written fixture replies. None of these strings is model output.
+describe("asset identity", () => {
+  it("accepts a category from Homebook's list", () => {
+    expect(parseAssetIdentity("category: water heater; name: gas water heater.")).toMatchObject({
+      category: "water-heater",
+      name: "Gas water heater",
+      categoryUnrecognised: false,
+    });
+  });
+
+  it("falls back to other and flags an invented category", () => {
+    const identity = parseAssetIdentity("category: boiler tank; name: tall white boiler");
+    expect(identity.category).toBe("other");
+    expect(identity.categoryUnrecognised).toBe(true);
+  });
+
+  it("rejects an empty reply instead of inventing one", () => {
+    expect(() => parseAssetIdentity("  ")).toThrow("empty identification");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/asset-identity.ts">
+
+```typescript
+import { ASSET_CATEGORIES, type AssetCategory } from "./binder.ts";
+
+export const IDENTIFY_PROMPT =
+  "This photo shows one household appliance or fixture. " +
+  `Reply on one line exactly as: category: <one of ${ASSET_CATEGORIES.join(", ")}>; name: <two to four words>. ` +
+  "If you are not sure, use category: other.";
+
+export type AssetIdentity = {
+  kind: "proposed-identity";
+  category: AssetCategory;
+  name: string;
+  // True when the model named a category outside Homebook's list.
+  categoryUnrecognised: boolean;
+  rawText: string;
+};
+
+function isCategory(value: string): value is AssetCategory {
+  return (ASSET_CATEGORIES as readonly string[]).includes(value);
+}
+
+// The model proposes a category in free text. Homebook only accepts its own list.
+export function parseAssetIdentity(rawText: string): AssetIdentity {
+  const text = rawText.replace(/\s+/g, " ").trim();
+  if (!text) throw new Error("The model returned an empty identification");
+  const categoryMatch = text.match(/category\s*:\s*([a-z -]+?)\s*(?:[;,.]|name\s*:|$)/i);
+  const nameMatch = text.match(/name\s*:\s*([^;.\n]+)/i);
+  const spoken = (categoryMatch?.[1] ?? "").toLowerCase().trim().replace(/\s+/g, "-");
+  const category: AssetCategory = isCategory(spoken) ? spoken : "other";
+  const name = (nameMatch?.[1] ?? "").trim().split(" ").slice(0, 4).join(" ");
+  return {
+    kind: "proposed-identity",
+    category,
+    name: name ? name.charAt(0).toUpperCase() + name.slice(1) : "",
+    categoryUnrecognised: !isCategory(spoken),
+    rawText: text,
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/assist-client.ts">
+
+```typescript
+import type { AssetIdentity } from "./asset-identity";
+import type { LabelFact } from "./label-facts";
+
+export const SERVICE_URL = "http://127.0.0.1:4319";
+
+export type AssistErrorKind = "service-offline" | "model-unavailable" | "rejected" | "failed";
+export class AssistError extends Error {
+  constructor(public kind: AssistErrorKind, message: string) {
+    super(message);
+  }
+}
+
+export async function postJson<T>(path: string, body: unknown, fetcher: typeof fetch = fetch): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetcher(`${SERVICE_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new AssistError("service-offline", "The local QVAC service is not running. Start it with npm run qvac:service.");
+  }
+  const payload = (await res.json().catch(() => ({}))) as { error?: string } & T;
+  if (res.ok) return payload;
+  const message = payload.error ?? `Service answered ${res.status}`;
+  if (res.status === 503) throw new AssistError("model-unavailable", message);
+  if (res.status === 400) throw new AssistError("rejected", message);
+  throw new AssistError("failed", message);
+}
+
+async function toBase64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+export async function imageBody(file: File) {
+  return { fileName: file.name, mimeType: file.type, imageBase64: await toBase64(file) };
+}
+
+export type AssistClient = {
+  readLabel(file: File): Promise<{ facts: LabelFact[]; model: string }>;
+  identify(file: File): Promise<{ identity: AssetIdentity; model: string }>;
+};
+
+export const serviceClient: AssistClient = {
+  async readLabel(file) {
+    return postJson("/label", await imageBody(file));
+  },
+  async identify(file) {
+    return postJson("/identify", await imageBody(file));
+  },
+};
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/homebook/asset-identity.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass. Every reply in it is a hand-written fixture.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 04: Identify the asset from a photo"
+```
+
+## Before continuing
+
+- [ ] An invented category becomes `other` and is flagged.
+- [ ] The category changes only after Use category.
+
+Continue to [Ingest manuals for retrieval](/docs/homebook/05-ingest-manuals).

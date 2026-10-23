@@ -1,0 +1,306 @@
+---
+title: "02. Describe one photo with a local vision model"
+description: "We will ask a local vision model to describe one fictional photo, entirely outside React. This separates installation, model download, and native runtime problems from app problems."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Chronicle · 02. Describe one photo with a local vision model" />
+
+We will ask a local vision model to describe one fictional photo, entirely outside React. This separates installation, model download, and native runtime problems from app problems.
+
+The result is a proposed description. It is not a caption. A person still writes or accepts the caption.
+
+**Source checkpoint:** `25c5e52` · **Starting checkpoint:** `c723afb`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `package.json` | Pin `@qvac/sdk` at exactly **0.22.0**, add `b4a`, set the Node floor, add `qvac:describe-smoke` |
+| `.gitignore` | Ignore `/.qvac/`, which holds config and the model cache |
+| `qvac-service/describe-photo-smoke.mjs` | The standalone smoke command |
+| `qvac-service/local-config.ts` | Path helpers and a receipt that labels text as a proposal |
+
+## Build and observe
+
+### Before you start on Linux
+
+Two install problems showed up on Linux. Apply each fix only if it applies to you.
+
+- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`. This checkpoint already adds it.
+- If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x node_modules/bare-runtime-linux-x64/bin/bare`.
+
+Step 2 explains how we found both.
+
+### 1. Install the pinned runtime
+
+```bash
+npm ci
+```
+
+The lockfile pins `@qvac/sdk` 0.22.0. Do not run a floating `npm install @qvac/sdk`.
+
+### 2. Why `b4a` is a direct dependency
+
+QVAC runs inference in a separate worker on the Bare runtime. On our machine the worker failed to start. The SDK only said:
+
+```text
+RPC initialization timed out after 30000ms — the worker process may have failed to start
+```
+
+That message hides the real cause. Run the worker directly to see it:
+
+```bash
+node_modules/bare-runtime-linux-x64/bin/bare node_modules/@qvac/sdk/dist/src/worker/index.js
+```
+
+It printed `MODULE_NOT_FOUND: Cannot find module 'b4a' imported from .../node_modules/bogon/index.js`. A nested package uses `b4a` without declaring it, so npm did not place it at the top level. Adding `b4a` as a direct dependency fixes the install boundary. We did not change any QVAC code.
+
+On Linux, check that the Bare binary is executable. If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x` on it. That is an install problem, not a model problem.
+
+### 3. Prepare configuration before importing QVAC
+
+Open `qvac-service/describe-photo-smoke.mjs`. It creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`. Only then does it import the SDK with `await import("@qvac/sdk")`. The SDK reads its config when it starts, so the order matters.
+
+### 4. Read the model lifecycle
+
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with its projection model `MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model lets the language model read an image. `completion` takes a message with `attachments: [{ path }]` and streams tokens. The `finally` block calls `unloadModel` and `close`, even after an error.
+
+### 5. Run it twice
+
+```bash
+npm run qvac:describe-smoke
+npm run qvac:describe-smoke
+```
+
+The first run downloads model files into `.qvac/models`. The second reuses them. Read `kind`, `sourceDigest`, `description`, and `stats`. Compare the description with the photo. A small model may get details wrong. That is why it only proposes.
+
+### 6. If the download stalls
+
+QVAC fetches models from its own registry, not from npm. In our build container the log reached `Downloading blob directly` and then stalled. The model files stayed at 0 bytes, because that network blocks the registry. That is a network failure. Fix it by running on a machine with normal internet, then rerun. Do not change the code.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/describe-photo-smoke.mjs">
+
+```javascript
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const defaultSource = fileURLToPath(
+  new URL("../public/test-files/chronicle/beach-picnic.png", import.meta.url),
+);
+const sourcePath = path.resolve(process.argv[2] ?? defaultSource);
+const sourceName = path.basename(sourcePath);
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const modelName = "SMOLVLM2_500M_MULTIMODAL_Q8_0";
+
+let modelId;
+let sdk;
+try {
+  await access(sourcePath);
+  const sourceBytes = await readFile(sourcePath);
+  const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ cacheDirectory }, null, 2)}\n`,
+    "utf8",
+  );
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+    modelConfig: {
+      ctx_size: 1024,
+      projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0,
+    },
+    onProgress: (p) => {
+      process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`);
+    },
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [
+      {
+        role: "user",
+        content:
+          "Describe this family photo in one plain sentence. Mention only what is visible.",
+        attachments: [{ path: sourcePath }],
+      },
+    ],
+    stream: true,
+  });
+  let text = "";
+  for await (const token of run.tokenStream) text += token;
+  const stats = await run.stats;
+  const description = text.replace(/\s+/g, " ").trim();
+  if (!description) throw new Error("The model returned an empty description");
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        kind: "proposed-description",
+        sourceName,
+        sourceDigest,
+        model: modelName,
+        description,
+        stats: stats ?? null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(
+    `QVAC describe smoke failed: ${message}\nThe first successful run downloads model assets into ${cacheDirectory}; warmed runs reuse that local cache.\n`,
+  );
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) {
+    await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/local-config.ts">
+
+```typescript
+import path from "node:path";
+
+export function resolveLocalQvacPaths(appDirectory: string) {
+  const qvacDirectory = path.join(appDirectory, ".qvac");
+  return {
+    qvacDirectory,
+    cacheDirectory: path.join(qvacDirectory, "models"),
+    configPath: path.join(qvacDirectory, "config.json"),
+  };
+}
+
+export type DescriptionReceipt<TStats> = {
+  kind: "proposed-description";
+  sourceName: string;
+  sourceDigest: string;
+  model: string;
+  description: string;
+  stats: TStats | null;
+};
+
+// A model description is a proposal. It never replaces a human caption.
+export function buildDescriptionReceipt<TStats>(input: {
+  sourceName: string;
+  sourceDigest: string;
+  model: string;
+  rawText: string;
+  stats: TStats | undefined;
+}): DescriptionReceipt<TStats> {
+  const description = input.rawText.replace(/\s+/g, " ").trim();
+  if (description.length === 0) {
+    throw new Error("The model returned an empty description");
+  }
+  return {
+    kind: "proposed-description",
+    sourceName: input.sourceName,
+    sourceDigest: input.sourceDigest,
+    model: input.model,
+    description,
+    stats: input.stats ?? null,
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/local-config.test.ts">
+
+```typescript
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { buildDescriptionReceipt, resolveLocalQvacPaths } from "./local-config";
+
+describe("local QVAC paths", () => {
+  it("keeps the model cache inside the app's ignored .qvac folder", () => {
+    const paths = resolveLocalQvacPaths("/work/chronicle");
+    expect(paths.cacheDirectory).toBe(path.join("/work/chronicle", ".qvac", "models"));
+    expect(paths.configPath).toBe(path.join("/work/chronicle", ".qvac", "config.json"));
+  });
+});
+
+describe("description receipt", () => {
+  // Fixture text written by hand for this test. It is not model output.
+  const fixtureText = "  A red blanket on a sandy beach,\n near blue water.  ";
+
+  it("labels the text as a proposal and normalises whitespace", () => {
+    const receipt = buildDescriptionReceipt({
+      sourceName: "beach-picnic.png",
+      sourceDigest: "abc",
+      model: "SMOLVLM2_500M_MULTIMODAL_Q8_0",
+      rawText: fixtureText,
+      stats: undefined,
+    });
+    expect(receipt.kind).toBe("proposed-description");
+    expect(receipt.description).toBe("A red blanket on a sandy beach, near blue water.");
+    expect(receipt.stats).toBeNull();
+  });
+
+  it("rejects an empty description instead of inventing one", () => {
+    expect(() =>
+      buildDescriptionReceipt({
+        sourceName: "x.png",
+        sourceDigest: "abc",
+        model: "m",
+        rawText: "   ",
+        stats: undefined,
+      }),
+    ).toThrow("empty description");
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/local-config.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass.
+
+These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+
+Run the broader checks separately, from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 02: Describe one photo with a local vision model"
+```
+
+## Before continuing
+
+- [ ] The smoke command printed a `proposed-description` for the beach photo.
+- [ ] You can tell a download failure from a worker start failure.
+
+Continue to [Transcribe a spoken memory](/docs/chronicle/03-transcribe-memory).

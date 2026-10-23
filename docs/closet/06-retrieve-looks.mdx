@@ -1,0 +1,321 @@
+---
+title: "06. Retrieve looks by occasion"
+description: "We will embed saved looks and an occasion with a local embedding model, rank by cosine similarity under the app's own threshold, and keep a labelled keyword fallback."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Closet · 06. Retrieve looks by occasion" />
+
+You remember the occasion, not the title you gave the look. "Something for a wet office day" should find **Rainy commute** even though no word matches.
+
+We embed each look and the query with `GTE_LARGE_FP16` and rank by cosine similarity. The threshold and the number of results are Closet's decision.
+
+**Source checkpoint:** `b43b940` · **Starting checkpoint:** `f3fee74`
+
+## What changes
+
+| File | Change |
+| --- | --- |
+| `src/features/closet/look-search.ts` | Look text, cosine, ranking with threshold and limit, keyword fallback |
+| `src/features/closet/LookSearch.tsx` | The search box on the feed, labelled with the method used |
+| `qvac-service/server.ts` | Add `/embed`, bounded to 64 texts |
+| `qvac-service/qvac-engine.ts` | Load `GTE_LARGE_FP16` and call `embed` |
+| `src/features/closet/service-client.ts` | Add `embedTexts`, which checks one finite, equal-length vector per text |
+
+To compare with the previous checkpoint: `git diff f3fee74 b43b940`.
+
+## Build and observe
+
+### 1. Decide what a look means
+
+`lookText` builds the embedded text from fields a person wrote: the title, the occasion, and the colours and names of the garments. Nothing a model proposed earlier goes in unless a person saved it.
+
+### 2. Rank under the app's rules
+
+`rankLooks` drops anything below `minScore` (0.35) and returns at most three. Mismatched vector lengths throw instead of producing a wrong score. The client also refuses a response with the wrong number of vectors.
+
+### 3. Try it
+
+```bash
+npm run qvac:service
+npm run dev
+```
+
+On the feed, search `wet office day`. The result line says `GTE_LARGE_FP16 · local embeddings` and shows scores. Try a query that matches nothing; the app says no saved look is close enough instead of returning the least-bad one.
+
+### 4. Stop the service
+
+Search again. The line says `keyword match` and why. The fallback is plain word overlap, and it is labelled so you never mistake it for semantic search.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+
+<AccordionGroup>
+<Accordion title="src/features/closet/look-search.ts">
+
+```typescript
+import type { Garment, Look } from "./model";
+
+// The text a look is embedded as. Built from fields a person wrote.
+export function lookText(look: Look, garments: readonly Garment[]): string {
+  const names = look.garmentIds
+    .map((id) => garments.find((g) => g.id === id))
+    .filter((g): g is Garment => !!g)
+    .map((g) => `${g.colour} ${g.name}`.trim());
+  return `${look.title}. Occasion: ${look.occasion}. Wearing: ${names.join(", ")}.`;
+}
+
+export function cosine(a: readonly number[], b: readonly number[]): number {
+  if (a.length !== b.length || a.length === 0) throw new Error("Vectors must have the same non-zero length");
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na === 0 || nb === 0 ? 0 : dot / Math.sqrt(na * nb);
+}
+
+export type LookMatch = { lookId: string; score: number };
+
+// Embeddings rank; the threshold and the limit are the app's decision.
+export function rankLooks(
+  lookIds: readonly string[],
+  lookVectors: readonly number[][],
+  queryVector: readonly number[],
+  options: { limit?: number; minScore?: number } = {},
+): LookMatch[] {
+  const { limit = 3, minScore = 0.35 } = options;
+  if (lookIds.length !== lookVectors.length) throw new Error("One vector per look is required");
+  return lookIds
+    .map((lookId, i) => ({ lookId, score: cosine(lookVectors[i], queryVector) }))
+    .filter((m) => m.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+// The manual path: plain word overlap, used when no local model is running.
+export function keywordLooks(query: string, looks: readonly Look[], garments: readonly Garment[], limit = 3): LookMatch[] {
+  const words = query.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+  if (words.length === 0) return [];
+  return looks
+    .map((look) => {
+      const text = lookText(look, garments).toLowerCase();
+      return { lookId: look.id, score: words.filter((w) => text.includes(w)).length / words.length };
+    })
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/LookSearch.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { keywordLooks, lookText, rankLooks, type LookMatch } from "./look-search";
+import type { Closet } from "./model";
+import { embedTexts } from "./service-client";
+
+type Outcome = { matches: LookMatch[]; method: string; note?: string };
+
+export function LookSearch({ closet }: { closet: Closet }) {
+  const [query, setQuery] = useState("");
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function search() {
+    const q = query.trim();
+    if (!q) return;
+    setBusy(true);
+    const texts = closet.looks.map((look) => lookText(look, closet.garments));
+    const result = await embedTexts([q, ...texts]);
+    if (result.ok) {
+      const [queryVector, ...lookVectors] = result.value.embeddings;
+      setOutcome({
+        matches: rankLooks(closet.looks.map((l) => l.id), lookVectors, queryVector),
+        method: `${result.value.model} · local embeddings`,
+      });
+    } else {
+      setOutcome({
+        matches: keywordLooks(q, closet.looks, closet.garments),
+        method: "keyword match",
+        note: result.message,
+      });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <form
+      aria-label="Find looks"
+      className="mb-4 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void search();
+      }}
+    >
+      <label className="flex flex-col gap-1">
+        Find looks for an occasion
+        <span className="flex gap-2">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} className="flex-1 rounded border px-2 py-1" />
+          <button type="submit" disabled={busy} className="rounded bg-stone-900 px-3 py-1 text-white">
+            Search
+          </button>
+        </span>
+      </label>
+      {outcome && (
+        <div className="mt-2 rounded bg-stone-50 p-2">
+          <p className="text-xs text-stone-600">
+            {outcome.method}
+            {outcome.note ? ` · ${outcome.note}` : ""}
+          </p>
+          {outcome.matches.length === 0 ? (
+            <p>No saved look is close enough. Try other words, or assemble a new look.</p>
+          ) : (
+            <ol aria-label="Matching looks" className="list-decimal pl-5">
+              {outcome.matches.map((m) => (
+                <li key={m.lookId}>
+                  {closet.looks.find((l) => l.id === m.lookId)?.title} · {m.score.toFixed(2)}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/look-search.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { cosine, keywordLooks, lookText, rankLooks } from "./look-search";
+import { sampleCloset } from "./sample-closet";
+
+describe("look retrieval", () => {
+  const closet = sampleCloset();
+
+  it("embeds a look from what the person wrote and wore", () => {
+    expect(lookText(closet.looks[1], closet.garments)).toBe(
+      "Rainy commute. Occasion: work day in the rain. Wearing: yellow Yellow raincoat, white and navy Striped breton, olive Olive chinos, brown Brown boots.",
+    );
+  });
+
+  it("ranks by cosine and applies the app's threshold and limit", () => {
+    // Fixture vectors chosen by hand so the expected order is obvious. Not model output.
+    const ids = ["a", "b", "c"];
+    const vectors = [
+      [1, 0, 0],
+      [0.8, 0.6, 0],
+      [0, 0, 1],
+    ];
+    expect(rankLooks(ids, vectors, [1, 0, 0], { limit: 2, minScore: 0.5 })).toEqual([
+      { lookId: "a", score: 1 },
+      { lookId: "b", score: 0.8 },
+    ]);
+    expect(rankLooks(ids, vectors, [0, 1, 0], { minScore: 0.9 })).toEqual([]);
+  });
+
+  it("refuses mismatched vectors instead of returning a wrong score", () => {
+    expect(() => cosine([1, 2], [1])).toThrow("same non-zero length");
+    expect(() => rankLooks(["a"], [], [1])).toThrow("One vector per look");
+  });
+
+  it("keeps a keyword fallback for when no model is running", () => {
+    expect(keywordLooks("rain", closet.looks, closet.garments)[0].lookId).toBe("look-rainy-commute");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/closet/LookSearch.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { LookSearch } from "./LookSearch";
+import { sampleCloset } from "./sample-closet";
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("look search", () => {
+  it("ranks looks with the service's vectors", async () => {
+    // Fixture vectors: the query points at the second look. Not model output.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const { texts } = JSON.parse(String(init.body)) as { texts: string[] };
+        const embeddings = texts.map((_, i) => (i === 0 || i === 2 ? [0, 1] : [1, 0]));
+        return new Response(JSON.stringify({ embeddings, model: "GTE_LARGE_FP16" }));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<LookSearch closet={sampleCloset()} />);
+    await user.type(screen.getByLabelText("Find looks for an occasion"), "wet office day");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const list = await screen.findByRole("list", { name: "Matching looks" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(list).toHaveTextContent("Rainy commute · 1.00");
+    expect(screen.getByText("GTE_LARGE_FP16 · local embeddings")).toBeInTheDocument();
+  });
+
+  it("falls back to keywords and says so when the service is down", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
+    const user = userEvent.setup();
+    render(<LookSearch closet={sampleCloset()} />);
+    await user.type(screen.getByLabelText("Find looks for an occasion"), "rain");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText(/keyword match · The local Closet service is not running/)).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Matching looks" })).toHaveTextContent("Rainy commute");
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/closet/look-search.test.ts src/features/closet/LookSearch.test.tsx
+```
+
+Expected result: 2 test files pass, 6 tests pass. The vectors in these tests are hand-picked fixtures so the expected order is obvious. They are not model embeddings.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 06: Retrieve looks by occasion"
+```
+
+## Before continuing
+
+- [ ] Results name the method that produced them.
+- [ ] A weak match is dropped, not shown.
+
+Continue to [Propose outfits under explicit constraints](/docs/closet/07-propose-outfits).

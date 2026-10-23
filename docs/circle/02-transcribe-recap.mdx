@@ -1,0 +1,329 @@
+---
+title: "02. Transcribe a voice recap locally"
+description: "We will add the QVAC SDK and turn a recorded voice recap into text with a local Whisper model. The result is a proposed recap, never a saved timeline entry."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Circle · 02. Transcribe a voice recap locally" />
+
+We will add the QVAC SDK and turn a recorded voice recap into text with a local Whisper model. The result is a proposed recap, never a saved timeline entry.
+
+After a call, it is easier to talk for twenty seconds than to type. A transcript keeps that context on your own computer. The recap also describes someone else's life, which is why it should not leave the machine.
+
+Whisper can mishear names. So the transcript is a proposal. Nothing is written to a person's card in this chapter.
+
+**Source checkpoint:** `e35ad0b` · **Starting checkpoint:** `7a37170`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `package.json` | Pin `@qvac/sdk` to `0.22.0`, add `b4a`, and add `qvac:transcribe-smoke` |
+| `qvac-service/recap.ts` | Join segments into a draft with `status: "proposed"`, or fail on silence |
+| `qvac-service/transcribe-recap-smoke.mjs` | Load `WHISPER_TINY`, call `transcribe` with `metadata: true`, and clean up |
+| `.gitignore` | Ignore `.qvac/` and `*.wav` recordings |
+
+## Build and observe
+
+### 1. Install the pinned SDK
+
+```bash
+npm install --save-exact @qvac/sdk@0.22.0 b4a@1.9.0
+```
+
+On Linux, if the native runtime will not start, make it executable. This is a local fix and is not committed:
+
+```bash
+chmod +x node_modules/bare-runtime-linux-x64/bin/bare
+```
+
+### 2. Record your own recap
+
+We do not ship a voice recording. Record about fifteen seconds and save it as WAV. Read this fictional line:
+
+> Coffee with Dev today. He is nervous about the meetup on the twenty-eighth. I said I would send him my slide template by Friday.
+
+Keep the file outside the repository. A voice is personal data, and `.gitignore` now ignores `*.wav`.
+
+### 3. Run the transcription
+
+```bash
+npm run qvac:transcribe-smoke -- ~/Downloads/dev-recap.wav
+```
+
+The first run downloads the Whisper model into `.qvac/models`. Later runs reuse that cache. Compare `transcript` with what you said, especially the names.
+
+### 4. Read the lifecycle
+
+The script writes the config, then imports the SDK, then calls `loadModel`, `transcribe`, `unloadModel`, and `close`, in that order. `metadata: true` returns segments with `startMs` and `endMs`. `buildRecapDraft` throws `No speech was recognised in this recap` when every segment is empty. It never invents text.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+
+<AccordionGroup>
+<Accordion title=".gitignore">
+
+```text
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local QVAC models, config, and recordings
+/.qvac/
+*.wav
+```
+
+</Accordion>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "circle",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:transcribe-smoke": "node --no-warnings qvac-service/transcribe-recap-smoke.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/recap.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { buildRecapDraft } from "./recap";
+
+// FIXTURE: hand-written segments shaped like `transcribe({ metadata: true })`.
+// They are not model output and prove nothing about live inference.
+const fixtureSegments = [
+  { text: " Just got off the phone with Dev.", startMs: 0, endMs: 2100 },
+  { text: "   ", startMs: 2100, endMs: 2600 },
+  { text: "I promised to send him the slide template by Friday.", startMs: 2600, endMs: 5900 },
+];
+
+describe("buildRecapDraft", () => {
+  it("joins spoken segments into a proposed recap", () => {
+    const draft = buildRecapDraft(fixtureSegments, "WHISPER_TINY");
+    expect(draft.status).toBe("proposed");
+    expect(draft.transcript).toBe(
+      "Just got off the phone with Dev. I promised to send him the slide template by Friday.",
+    );
+    expect(draft.segments).toHaveLength(2);
+    expect(draft.durationMs).toBe(5900);
+  });
+
+  it("refuses to invent text for silence", () => {
+    expect(() =>
+      buildRecapDraft([{ text: " ", startMs: 0, endMs: 900 }], "WHISPER_TINY"),
+    ).toThrow("No speech");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/recap.ts">
+
+```typescript
+export type RecapSegment = {
+  text: string;
+  startMs: number;
+  endMs: number;
+};
+
+// A transcript is a proposal. Nothing here writes to a person's timeline.
+export type RecapDraft = {
+  status: "proposed";
+  source: "local-transcription";
+  model: string;
+  transcript: string;
+  durationMs: number;
+  segments: RecapSegment[];
+};
+
+export function buildRecapDraft(
+  segments: RecapSegment[],
+  model: string,
+): RecapDraft {
+  const kept = segments
+    .map((s) => ({ ...s, text: s.text.replace(/\s+/g, " ").trim() }))
+    .filter((s) => s.text.length > 0);
+  if (kept.length === 0) {
+    throw new Error("No speech was recognised in this recap");
+  }
+  return {
+    status: "proposed",
+    source: "local-transcription",
+    model,
+    transcript: kept.map((s) => s.text).join(" "),
+    durationMs: Math.max(...kept.map((s) => s.endMs)),
+    segments: kept,
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/transcribe-recap-smoke.mjs">
+
+```javascript
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+if (!process.argv[2]) {
+  process.stderr.write(
+    "Usage: npm run qvac:transcribe-smoke -- <path-to-your-recap.wav>\n",
+  );
+  process.exit(1);
+}
+const sourcePath = path.resolve(process.argv[2]);
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+
+let modelId;
+let sdk;
+try {
+  const { buildRecapDraft } = await import("./recap.ts");
+  await access(sourcePath);
+  const sourceDigest = createHash("sha256")
+    .update(await readFile(sourcePath))
+    .digest("hex");
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.WHISPER_TINY,
+    modelConfig: { language: "en", translate: false, temperature: 0.0 },
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const segments = await sdk.transcribe({ modelId, audioChunk: sourcePath, metadata: true });
+  const draft = buildRecapDraft(segments, "WHISPER_TINY");
+  process.stdout.write(
+    `${JSON.stringify({ sourceName: path.basename(sourcePath), sourceDigest, ...draft }, null, 2)}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`QVAC transcribe smoke failed: ${message}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) {
+    await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/recap.test.ts
+```
+
+Expected result: 1 test file passes, 2 tests pass. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 02: Transcribe a voice recap locally"
+```
+
+## Before continuing
+
+- [ ] You transcribed your own recording locally.
+- [ ] You compared the transcript with what you said.
+
+Continue to [Add the local service boundary](/docs/circle/03-local-service).

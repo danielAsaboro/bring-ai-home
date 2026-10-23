@@ -1,0 +1,985 @@
+---
+title: "01. Build the Homebook starter"
+description: "We will build Homebook's working binder without any AI: rooms, an asset register, a maintenance schedule with history, filed documents, and before-and-after projects."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Homebook · 01. Build the Homebook starter" />
+
+Home records scatter across a drawer of manuals, an email inbox, a calendar, and memory. They only matter when something breaks, and then nobody can find the serial number.
+
+Homebook is a living binder for one home. This chapter builds the whole non-AI product first. Every later chapter adds local AI to an app that already does its job by hand, and the app must keep working when the AI is not there.
+
+**Source checkpoint:** `cda74e3` · **Starting checkpoint:** `cb2e661`
+
+## What you change
+
+| File | Responsibility |
+| --- | --- |
+| `src/features/homebook/binder.ts` | The binder model, fictional sample data, and pure operations: register, complete a task, file a document, record a project |
+| `src/features/homebook/storage.ts` | The one storage adapter. It wraps `localStorage` and falls back to the sample binder |
+| `src/features/homebook/Homebook.tsx` | Room tabs, asset plates, schedule, history, documents, projects, and **Reset demo data** |
+| `src/app/page.tsx`, `src/app/layout.tsx` | Render the binder and name the page |
+| `public/test-files/homebook/*.txt` | Two fictional appliance manuals with printed page markers, used from chapter 05 |
+| `vitest.setup.ts` | Clean up rendered components between tests |
+
+Every home, brand, serial number, and manual is invented. Keep your real home records out of the repository.
+
+## Build and observe
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/danielAsaboro/bring-ai-home
+cd bring-ai-home
+git checkout cb2e661
+npm ci
+```
+
+### 2. Run it
+
+```bash
+npm run dev
+```
+
+Open http://localhost:3000. The binder opens on the water heater's asset plate. Look at the room tabs, the schedule badges (`overdue`, `due-soon`, `scheduled`), the service history, and the filed manual, receipt, and warranty.
+
+### 3. Do the manual job once
+
+1. Click **Stamp done: Flush sediment from the tank**. A dated record appears in the service history and the next due date moves 12 months on.
+2. Register an asset by hand: type a name, pick a room, and press **Register**. Its plate opens.
+3. Reload the page. Your changes are still there, because the binder saved through `storage.ts`.
+4. Press **Reset demo data** to return to the sample binder.
+
+### 4. Read the boundary
+
+Open `storage.ts`. `createLocalStore` is the only code that touches `localStorage`. It catches blocked or corrupt storage and falls back to the sample binder, so a private window still works. Component tests pass an in-memory store instead.
+
+Open `binder.ts` and find `completeTask`. It returns a new binder with a history record and a moved due date. The UI never edits the binder directly.
+
+### 5. One bug we hit
+
+The first test run failed with `Found multiple elements with the role "form"`. The starter's Vitest setup does not use globals, so Testing Library never cleaned up between tests. `vitest.setup.ts` now calls `cleanup()` after each test.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+
+<AccordionGroup>
+<Accordion title="README.md">
+
+````markdown
+# Homebook
+
+> **Status:** The non-AI binder is the first commit on `course/homebook-qvac`. Branch `course/homebook-qvac` adds local QVAC features one lesson per commit.
+
+## 1. Product thesis
+
+The living binder for a home: rooms, assets, documents, maintenance, and projects stay connected.
+
+## 2. Relatable problem
+
+Home records fragment across physical binders, email, calendars, drives, spreadsheets, and memory—usually becoming urgent only after something breaks.
+
+## 3. Target users and jobs
+
+Homeowners, first-time buyers, caretakers, landlords with a small number of properties, and future residents inheriting context.
+
+## 4. Why this is a complete application
+
+It has a durable collection, repeat visits, editing, inspection, state transitions, history, and a return loop. Its value does not depend on opening a chat box.
+
+## 5. Non-AI starter experience
+
+Navigate rooms, register assets, schedule and complete maintenance, file manual/receipt/warranty metadata, and record before-and-after projects.
+
+## 6. Detailed use cases
+
+Asset register; maintenance history; warranty retrieval; manual filing; project timeline; handover record.
+
+## 7. Bespoke metaphor and interaction model
+
+A property binder built from floor plans, room tabs, asset plates, service records, and maintenance stamps.
+
+## 8. Planned QVAC transformation
+
+Planned OCR reads labels and receipts; multimodal analysis proposes asset details; RAG answers from manuals and service records; generation drafts summaries.
+
+## 9. Why local inference matters
+
+Addresses, serial numbers, receipts, contractors, costs, and access details make a home dossier more sensitive than an ordinary notes folder.
+
+## 10. Capability-to-feature mapping
+
+OCR, multimodal input, RAG, and text generation. Safety and warranty answers must cite source records.
+
+## 11. Filmable course demonstration
+
+Register a water heater manually; then process a fixture label and receipt, review extracted facts, and answer a question from its stored manual.
+
+## 12. Research evidence
+
+[QVAC OCR](https://docs.qvac.tether.io/ai-capabilities/ocr/), [QVAC RAG](https://docs.qvac.tether.io/ai-capabilities/rag/), [HomeZada](https://www.homezada.com/), and homeowner discussions about [scattered records and missed warranties](https://www.reddit.com/r/FirstTimeHomeBuyer/comments/1syjwh3/how_do_you_actually_keep_track_of_everything_with/) and [binders plus reminders](https://www.reddit.com/r/homeowner/comments/1v6ivkh/how_do_you_keep_track_of_appliance_warranties/).
+
+These sources are evidence of capabilities, existing workflows, or first-person pain signals; they are not presented as market-size proof.
+
+## 13. Alternatives and differentiation
+
+HomeZada is comprehensive; calendars, folders, and spreadsheets work for disciplined users. Homebook emphasizes room-and-asset context and a calm binder metaphor.
+
+## 14. Technical feasibility and boundaries
+
+Fixture attachments and metadata only. It is not a safety inspector, contractor marketplace, insurer, or repository for irreplaceable originals.
+
+## 15. Safety, privacy, and failure modes
+
+Model numbers, warranty terms, and maintenance instructions can be misread. Source documents and professional guidance remain authoritative.
+
+## 16. Course-fit score
+
+**9.00/10.** The portfolio score weights relatability, local/privacy necessity, filmable transformation, coherent QVAC coverage, implementation feasibility, and case-study depth. See the [portfolio ranking](../README.md#ranked-course-sequence).
+
+## 17. Run, test, and reset
+
+```bash
+npm install
+npm run dev
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The binder saves to `localStorage` through one adapter (`src/features/homebook/storage.ts`). The header has a visible **Reset demo data** action. Every home, brand, serial number, and manual in `src/features/homebook/binder.ts` and `public/test-files/homebook/` is fictional.
+````
+
+</Accordion>
+<Accordion title="public/test-files/homebook/aquaterra-at50g-manual.txt">
+
+```text
+FICTIONAL SAMPLE DOCUMENT. Aquaterra is an invented brand for the Homebook course.
+=== page 1 ===
+Aquaterra AT-50G gas water heater. Owner's manual. Keep this manual near the heater.
+Model AT-50G holds 50 US gallons. Read every safety notice before lighting the pilot.
+=== page 4 ===
+Lighting the pilot. Turn the gas control knob to OFF and wait five minutes for gas to clear.
+Turn the knob to PILOT, press and hold it, and press the igniter button until the pilot lights.
+Keep holding the knob for 60 seconds after the pilot lights, then turn it to ON.
+If the pilot will not stay lit after three attempts, close the gas supply and call a qualified technician.
+=== page 7 ===
+Flushing sediment. Flush the tank once every 12 months.
+Turn the gas control to VACATION, close the cold water supply valve, attach a hose to the drain valve,
+and drain about four gallons until the water runs clear. Refill the tank completely before returning to ON.
+=== page 9 ===
+Anode rod. Inspect the anode rod every 24 months. Replace it when more than six inches of core wire is exposed.
+=== page 12 ===
+Warranty. The tank is covered for six years from installation. Parts are covered for one year.
+Keep the dated receipt. The warranty does not cover damage from sediment when the tank was never flushed.
+```
+
+</Accordion>
+<Accordion title="public/test-files/homebook/brightwash-bw300-manual.txt">
+
+```text
+FICTIONAL SAMPLE DOCUMENT. Brightwash is an invented brand for the Homebook course.
+=== page 2 ===
+Brightwash BW-300 dishwasher. Use and care guide.
+=== page 6 ===
+Cleaning the filter. Clean the filter once a month. Twist the cylindrical filter counter-clockwise and lift it out.
+Rinse it under warm running water. Do not use a wire brush. Refit the filter and twist clockwise until it locks.
+=== page 8 ===
+Error code E4 means water has collected in the base. Turn off the dishwasher and the water supply.
+Do not run the dishwasher again until the leak is found.
+=== page 11 ===
+Warranty. Parts and labour are covered for two years from the date of purchase shown on the receipt.
+```
+
+</Accordion>
+<Accordion title="src/app/layout.tsx">
+
+```tsx
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Homebook",
+  description: "The living binder for a home.",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/app/page.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { Homebook } from "@/features/homebook/Homebook";
+import { memoryStore } from "@/features/homebook/test-store";
+
+describe("Homebook binder", () => {
+  it("opens on the asset register with the water heater plate", () => {
+    render(<Homebook store={memoryStore()} today="2026-10-23" />);
+    expect(screen.getByRole("heading", { level: 1, name: "Homebook" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Water heater" })).toBeInTheDocument();
+    expect(screen.getByText("AT50-2291-0457")).toBeInTheDocument();
+  });
+
+  it("registers a new asset in a room and saves it", async () => {
+    const store = memoryStore();
+    render(<Homebook store={store} today="2026-10-23" />);
+    const form = screen.getByRole("form", { name: "Register an asset" });
+    await userEvent.type(within(form).getByLabelText("Asset name"), "Extractor fan");
+    await userEvent.selectOptions(within(form).getByLabelText("Room"), "kitchen");
+    await userEvent.click(within(form).getByRole("button", { name: "Register" }));
+    expect(screen.getByRole("heading", { name: "Extractor fan" })).toBeInTheDocument();
+    expect(store.saved.at(-1)?.assets.some((a) => a.name === "Extractor fan")).toBe(true);
+  });
+
+  it("stamps a maintenance task into the service history", async () => {
+    render(<Homebook store={memoryStore()} today="2026-10-23" />);
+    await userEvent.click(screen.getByRole("button", { name: "Stamp done: Flush sediment from the tank" }));
+    const history = screen.getByRole("list", { name: "Service history" });
+    expect(within(history).getByText("2026-10-23")).toBeInTheDocument();
+    expect(screen.getByText(/due 2027-10-23/)).toBeInTheDocument();
+  });
+
+  it("filters the register by room tab", async () => {
+    render(<Homebook store={memoryStore()} today="2026-10-23" />);
+    await userEvent.click(screen.getByRole("button", { name: "Kitchen" }));
+    const register = screen.getByRole("region", { name: "Asset register" });
+    expect(within(register).queryByText("Water heater")).not.toBeInTheDocument();
+    expect(within(register).getByText("Dishwasher")).toBeInTheDocument();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/app/page.tsx">
+
+```tsx
+import { Homebook } from "@/features/homebook/Homebook";
+
+export default function Home() {
+  return (
+    <main className="min-h-screen bg-amber-50/40">
+      <Homebook />
+    </main>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/Homebook.tsx">
+
+```tsx
+"use client";
+
+import { useState, useSyncExternalStore, type FormEvent } from "react";
+
+import {
+  ASSET_CATEGORIES,
+  completeTask,
+  dueState,
+  fileDocument,
+  historyFor,
+  recordProject,
+  registerAsset,
+  type AssetCategory,
+  type Binder,
+  type DocumentKind,
+} from "./binder";
+import { browserStore, type BinderStore } from "./storage";
+
+const noopSubscribe = () => () => undefined;
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function Homebook({ store, today }: { store?: BinderStore; today?: string }) {
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!mounted) return <p className="p-6">Opening the binder…</p>;
+  return <BinderView store={store ?? browserStore()} today={today ?? todayIso()} />;
+}
+
+const field = "rounded border border-stone-400 bg-white px-2 py-1 text-sm";
+const button = "rounded bg-emerald-800 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-900";
+
+function BinderView({ store, today }: { store: BinderStore; today: string }) {
+  const [binder, setBinder] = useState<Binder>(() => store.load());
+  const [roomId, setRoomId] = useState<string>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(binder.assets[0]?.id ?? null);
+  const [error, setError] = useState<string | null>(null);
+
+  function commit(next: Binder) {
+    setBinder(next);
+    store.save(next);
+    setError(null);
+  }
+
+  function attempt(change: () => Binder) {
+    try {
+      commit(change());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const assets = binder.assets.filter((a) => roomId === "all" || a.roomId === roomId);
+  const selected = binder.assets.find((a) => a.id === selectedId) ?? null;
+  const roomName = (id: string) => binder.rooms.find((r) => r.id === id)?.name ?? id;
+
+  function onRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const text = (k: string) => String(form.get(k) ?? "");
+    const id = `asset-${binder.assets.length + 1}-${Date.now().toString(36)}`;
+    attempt(() =>
+      registerAsset(
+        binder,
+        {
+          name: text("name"),
+          roomId: text("roomId"),
+          category: text("category") as AssetCategory,
+          brand: text("brand"),
+          model: text("model"),
+          serial: text("serial"),
+          installedOn: text("installedOn"),
+          notes: "",
+        },
+        id,
+      ),
+    );
+    if (text("name").trim()) {
+      setSelectedId(id);
+      event.currentTarget.reset();
+    }
+  }
+
+  function onFile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    attempt(() =>
+      fileDocument(binder, {
+        assetId: selected.id,
+        kind: String(form.get("kind")) as DocumentKind,
+        title: String(form.get("title") ?? ""),
+        file: null,
+        expiresOn: String(form.get("expiresOn") ?? "") || null,
+      }),
+    );
+    event.currentTarget.reset();
+  }
+
+  function onProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    attempt(() =>
+      recordProject(binder, {
+        roomId: roomId === "all" ? binder.rooms[0].id : roomId,
+        title: String(form.get("title") ?? ""),
+        before: String(form.get("before") ?? ""),
+        after: String(form.get("after") ?? ""),
+        finishedOn: null,
+      }),
+    );
+    event.currentTarget.reset();
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-4 text-stone-900 sm:p-6">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b-4 border-double border-stone-500 pb-3">
+        <div>
+          <h1 className="font-serif text-3xl">Homebook</h1>
+          <p className="text-sm text-stone-600">{binder.home}</p>
+        </div>
+        <button type="button" className="rounded border border-stone-500 px-3 py-1 text-sm" onClick={() => commit(store.reset())}>
+          Reset demo data
+        </button>
+      </header>
+
+      {error ? (
+        <p role="alert" className="rounded bg-red-100 px-3 py-2 text-sm text-red-900">
+          {error}
+        </p>
+      ) : null}
+
+      <nav aria-label="Rooms" className="flex flex-wrap gap-1">
+        {[{ id: "all", name: "Whole home" }, ...binder.rooms].map((room) => (
+          <button
+            key={room.id}
+            type="button"
+            aria-pressed={roomId === room.id}
+            onClick={() => setRoomId(room.id)}
+            className={`rounded-t border border-b-0 px-3 py-1 text-sm ${roomId === room.id ? "bg-amber-100 font-semibold" : "bg-stone-100"}`}
+          >
+            {room.name}
+          </button>
+        ))}
+      </nav>
+
+      <div className="grid gap-6 md:grid-cols-[16rem_1fr]">
+        <section aria-labelledby="register-heading" className="space-y-3">
+          <h2 id="register-heading" className="font-serif text-xl">Asset register</h2>
+          <ul className="space-y-2">
+            {assets.map((asset) => (
+              <li key={asset.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(asset.id)}
+                  aria-current={asset.id === selectedId}
+                  className={`w-full rounded border px-3 py-2 text-left ${asset.id === selectedId ? "border-emerald-800 bg-emerald-50" : "border-stone-300"}`}
+                >
+                  <span className="block font-medium">{asset.name}</span>
+                  <span className="text-xs text-stone-600">{roomName(asset.roomId)}</span>
+                </button>
+              </li>
+            ))}
+            {assets.length === 0 ? <li className="text-sm text-stone-600">No assets in this room yet.</li> : null}
+          </ul>
+
+          <form onSubmit={onRegister} aria-label="Register an asset" className="space-y-2 rounded border border-dashed border-stone-400 p-3">
+            <h3 className="font-medium">Register an asset</h3>
+            <input name="name" aria-label="Asset name" placeholder="Name" className={`${field} w-full`} />
+            <select name="roomId" aria-label="Room" className={`${field} w-full`} defaultValue={roomId === "all" ? binder.rooms[0]?.id : roomId}>
+              {binder.rooms.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+            <select name="category" aria-label="Category" className={`${field} w-full`} defaultValue="other">
+              {ASSET_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input name="brand" aria-label="Brand" placeholder="Brand" className={`${field} w-full`} />
+            <input name="model" aria-label="Model" placeholder="Model" className={`${field} w-full`} />
+            <input name="serial" aria-label="Serial" placeholder="Serial" className={`${field} w-full`} />
+            <input name="installedOn" aria-label="Installed on" type="date" className={`${field} w-full`} />
+            <button type="submit" className={button}>Register</button>
+          </form>
+        </section>
+
+        {selected ? (
+          <section aria-label={`${selected.name} record`} className="space-y-4">
+            <div className="rounded border-2 border-stone-700 bg-stone-50 p-4 font-mono text-sm">
+              <h2 className="mb-2 font-serif text-2xl">{selected.name}</h2>
+              <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1">
+                <dt>Room</dt><dd>{roomName(selected.roomId)}</dd>
+                <dt>Category</dt><dd>{selected.category}</dd>
+                <dt>Brand</dt><dd>{selected.brand || "—"}</dd>
+                <dt>Model</dt><dd>{selected.model || "—"}</dd>
+                <dt>Serial</dt><dd>{selected.serial || "—"}</dd>
+                <dt>Installed</dt><dd>{selected.installedOn || "—"}</dd>
+              </dl>
+              {selected.notes ? <p className="mt-2 font-sans">{selected.notes}</p> : null}
+            </div>
+
+            <div>
+              <h3 className="font-serif text-lg">Maintenance schedule</h3>
+              <ul className="divide-y">
+                {binder.tasks.filter((t) => t.assetId === selected.id).map((task) => {
+                  const state = dueState(task, today);
+                  return (
+                    <li key={task.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                      <span>
+                        {task.title} <span className="text-xs text-stone-600">every {task.everyMonths} mo · due {task.nextDue}</span>{" "}
+                        <span className={`rounded px-1 text-xs ${state === "overdue" ? "bg-red-200" : state === "due-soon" ? "bg-amber-200" : "bg-stone-200"}`}>{state}</span>
+                      </span>
+                      <button type="button" className={button} onClick={() => attempt(() => completeTask(binder, task.id, today, ""))}>
+                        Stamp done: {task.title}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="font-serif text-lg">Service history</h3>
+              <ol aria-label="Service history" className="space-y-1 text-sm">
+                {historyFor(binder, selected.id).map((r) => (
+                  <li key={r.id}><time className="font-mono">{r.date}</time> · {r.summary}</li>
+                ))}
+              </ol>
+            </div>
+
+            <div>
+              <h3 className="font-serif text-lg">Filed documents</h3>
+              <ul aria-label="Filed documents" className="space-y-1 text-sm">
+                {binder.documents.filter((d) => d.assetId === selected.id).map((d) => (
+                  <li key={d.id}>
+                    <span className="rounded bg-stone-200 px-1 text-xs uppercase">{d.kind}</span> {d.title}
+                    {d.expiresOn ? <span className="text-stone-600"> · expires {d.expiresOn}</span> : null}
+                  </li>
+                ))}
+              </ul>
+              <form onSubmit={onFile} aria-label="File a document" className="mt-2 flex flex-wrap gap-2">
+                <select name="kind" aria-label="Document kind" className={field} defaultValue="manual">
+                  <option value="manual">manual</option>
+                  <option value="receipt">receipt</option>
+                  <option value="warranty">warranty</option>
+                </select>
+                <input name="title" aria-label="Document title" placeholder="Title" className={field} />
+                <input name="expiresOn" aria-label="Expires on" type="date" className={field} />
+                <button type="submit" className={button}>File</button>
+              </form>
+            </div>
+          </section>
+        ) : (
+          <p>Select or register an asset.</p>
+        )}
+      </div>
+
+      <section aria-labelledby="projects-heading" className="space-y-2">
+        <h2 id="projects-heading" className="font-serif text-xl">Before and after</h2>
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {binder.projects.filter((p) => roomId === "all" || p.roomId === roomId).map((p) => (
+            <li key={p.id} className="rounded border border-stone-300 p-3 text-sm">
+              <p className="font-medium">{p.title} <span className="text-xs text-stone-600">· {roomName(p.roomId)} · {p.finishedOn ?? "in progress"}</span></p>
+              <p><strong>Before:</strong> {p.before || "—"}</p>
+              <p><strong>After:</strong> {p.after || "—"}</p>
+            </li>
+          ))}
+        </ul>
+        <form onSubmit={onProject} aria-label="Record a project" className="flex flex-wrap gap-2">
+          <input name="title" aria-label="Project title" placeholder="Project" className={field} />
+          <input name="before" aria-label="Before" placeholder="Before" className={field} />
+          <input name="after" aria-label="After" placeholder="After" className={field} />
+          <button type="submit" className={button}>Record project</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/binder.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { addMonths, cloneBinder, completeTask, dueState, registerAsset, sampleBinder } from "./binder";
+import { createLocalStore, STORAGE_KEY } from "./storage";
+
+describe("binder", () => {
+  it("adds months without overflowing short months", () => {
+    expect(addMonths("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonths("2026-03-14", 12)).toBe("2027-03-14");
+  });
+
+  it("classifies due dates", () => {
+    const task = sampleBinder.tasks[0];
+    expect(dueState({ ...task, nextDue: "2026-01-01" }, "2026-10-23")).toBe("overdue");
+    expect(dueState({ ...task, nextDue: "2026-11-10" }, "2026-10-23")).toBe("due-soon");
+    expect(dueState({ ...task, nextDue: "2027-06-01" }, "2026-10-23")).toBe("scheduled");
+  });
+
+  it("stamps history and moves the schedule when a task is completed", () => {
+    const next = completeTask(cloneBinder(sampleBinder), "task-wh-flush", "2026-10-23", "");
+    expect(next.tasks.find((t) => t.id === "task-wh-flush")?.nextDue).toBe("2027-10-23");
+    expect(next.history.at(-1)).toMatchObject({ assetId: "water-heater", date: "2026-10-23" });
+  });
+
+  it("refuses an asset without a name or a known room", () => {
+    const base = { roomId: "kitchen", category: "other" as const, brand: "", model: "", serial: "", installedOn: "", notes: "" };
+    expect(() => registerAsset(sampleBinder, { ...base, name: " " })).toThrow("needs a name");
+    expect(() => registerAsset(sampleBinder, { ...base, name: "Fan", roomId: "attic" })).toThrow("Choose a room");
+  });
+});
+
+describe("local store adapter", () => {
+  function memory() {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+      map,
+    };
+  }
+
+  it("round-trips a saved binder and resets to the sample", () => {
+    const storage = memory();
+    const store = createLocalStore(storage);
+    const changed = { ...store.load(), home: "Changed" };
+    store.save(changed);
+    expect(store.load().home).toBe("Changed");
+    expect(store.reset().home).toBe(sampleBinder.home);
+    expect(storage.map.has(STORAGE_KEY)).toBe(false);
+  });
+
+  it("falls back to the sample when storage holds something else", () => {
+    const storage = memory();
+    storage.setItem(STORAGE_KEY, "{not json");
+    expect(createLocalStore(storage).load().assets).toHaveLength(sampleBinder.assets.length);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/binder.ts">
+
+```typescript
+// Homebook's binder: rooms, an asset register, maintenance, filed documents,
+// and before-and-after projects. Every record below is fictional.
+
+export type Room = { id: string; name: string; floor: string };
+
+export type Asset = {
+  id: string;
+  roomId: string;
+  name: string;
+  category: AssetCategory;
+  brand: string;
+  model: string;
+  serial: string;
+  installedOn: string;
+  notes: string;
+};
+
+export const ASSET_CATEGORIES = [
+  "water-heater",
+  "dishwasher",
+  "furnace",
+  "refrigerator",
+  "washer",
+  "smoke-alarm",
+  "other",
+] as const;
+export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
+
+export type DocumentKind = "manual" | "receipt" | "warranty";
+export type FiledDocument = {
+  id: string;
+  assetId: string;
+  kind: DocumentKind;
+  title: string;
+  file: string | null;
+  expiresOn: string | null;
+};
+
+export type MaintenanceTask = {
+  id: string;
+  assetId: string;
+  title: string;
+  everyMonths: number;
+  nextDue: string;
+};
+
+export type ServiceRecord = {
+  id: string;
+  assetId: string;
+  taskId: string | null;
+  date: string;
+  summary: string;
+  by: string;
+};
+
+export type Project = {
+  id: string;
+  roomId: string;
+  title: string;
+  before: string;
+  after: string;
+  finishedOn: string | null;
+};
+
+export type Binder = {
+  version: 1;
+  home: string;
+  rooms: Room[];
+  assets: Asset[];
+  documents: FiledDocument[];
+  tasks: MaintenanceTask[];
+  history: ServiceRecord[];
+  projects: Project[];
+};
+
+export const sampleBinder: Binder = {
+  version: 1,
+  home: "Fern Hollow Cottage (fictional)",
+  rooms: [
+    { id: "kitchen", name: "Kitchen", floor: "Ground" },
+    { id: "utility", name: "Utility room", floor: "Ground" },
+    { id: "hall", name: "Upstairs hall", floor: "First" },
+  ],
+  assets: [
+    {
+      id: "water-heater",
+      roomId: "utility",
+      name: "Water heater",
+      category: "water-heater",
+      brand: "Aquaterra",
+      model: "AT-50G",
+      serial: "AT50-2291-0457",
+      installedOn: "2021-03-14",
+      notes: "Gas, 50 gallon. Shut-off valve is on the left pipe.",
+    },
+    {
+      id: "dishwasher",
+      roomId: "kitchen",
+      name: "Dishwasher",
+      category: "dishwasher",
+      brand: "Brightwash",
+      model: "BW-300",
+      serial: "BW3-88120-K",
+      installedOn: "2022-09-02",
+      notes: "",
+    },
+    {
+      id: "smoke-alarm-hall",
+      roomId: "hall",
+      name: "Smoke alarm",
+      category: "smoke-alarm",
+      brand: "Lumen Safe",
+      model: "LS-10",
+      serial: "LS10-55012",
+      installedOn: "2020-11-20",
+      notes: "Ten-year sealed battery.",
+    },
+  ],
+  documents: [
+    { id: "doc-wh-manual", assetId: "water-heater", kind: "manual", title: "Aquaterra AT-50G owner's manual", file: "aquaterra-at50g-manual.txt", expiresOn: null },
+    { id: "doc-wh-warranty", assetId: "water-heater", kind: "warranty", title: "Tank warranty, 6 years", file: null, expiresOn: "2027-03-14" },
+    { id: "doc-dw-manual", assetId: "dishwasher", kind: "manual", title: "Brightwash BW-300 use and care guide", file: "brightwash-bw300-manual.txt", expiresOn: null },
+    { id: "doc-dw-receipt", assetId: "dishwasher", kind: "receipt", title: "Receipt, Maple Street Appliances", file: null, expiresOn: null },
+  ],
+  tasks: [
+    { id: "task-wh-flush", assetId: "water-heater", title: "Flush sediment from the tank", everyMonths: 12, nextDue: "2026-03-14" },
+    { id: "task-wh-anode", assetId: "water-heater", title: "Inspect the anode rod", everyMonths: 24, nextDue: "2027-03-14" },
+    { id: "task-dw-filter", assetId: "dishwasher", title: "Clean the filter", everyMonths: 1, nextDue: "2026-11-01" },
+    { id: "task-sa-test", assetId: "smoke-alarm-hall", title: "Press the test button", everyMonths: 1, nextDue: "2026-10-15" },
+  ],
+  history: [
+    { id: "rec-1", assetId: "water-heater", taskId: "task-wh-flush", date: "2025-03-10", summary: "Flushed tank. Water ran clear after four minutes.", by: "Resident" },
+    { id: "rec-2", assetId: "water-heater", taskId: null, date: "2025-08-22", summary: "Pilot went out twice. Relit following the label instructions.", by: "Resident" },
+    { id: "rec-3", assetId: "dishwasher", taskId: "task-dw-filter", date: "2026-10-01", summary: "Filter cleaned. Some glass fragments removed.", by: "Resident" },
+  ],
+  projects: [
+    { id: "proj-1", roomId: "kitchen", title: "Replace splashback", before: "Cracked white tiles behind the sink.", after: "Green zellige tiles, sealed grout.", finishedOn: "2025-05-30" },
+    { id: "proj-2", roomId: "utility", title: "Insulate hot water pipes", before: "Bare copper pipes, cold drafts.", after: "", finishedOn: null },
+  ],
+};
+
+export function cloneBinder(binder: Binder): Binder {
+  return JSON.parse(JSON.stringify(binder)) as Binder;
+}
+
+export function addMonths(isoDate: string, months: number): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(d, lastDay));
+  return date.toISOString().slice(0, 10);
+}
+
+export type DueState = "overdue" | "due-soon" | "scheduled";
+export function dueState(task: MaintenanceTask, today: string): DueState {
+  if (task.nextDue < today) return "overdue";
+  if (task.nextDue <= addMonths(today, 1)) return "due-soon";
+  return "scheduled";
+}
+
+let counter = 0;
+export function newId(prefix: string): string {
+  counter += 1;
+  return `${prefix}-${Date.now().toString(36)}-${counter}`;
+}
+
+export type AssetDraft = Omit<Asset, "id">;
+
+export function registerAsset(binder: Binder, draft: AssetDraft, id = newId("asset")): Binder {
+  if (!draft.name.trim()) throw new Error("An asset needs a name");
+  if (!binder.rooms.some((r) => r.id === draft.roomId)) throw new Error("Choose a room");
+  return { ...binder, assets: [...binder.assets, { ...draft, name: draft.name.trim(), id }] };
+}
+
+export function updateAsset(binder: Binder, asset: Asset): Binder {
+  return { ...binder, assets: binder.assets.map((a) => (a.id === asset.id ? asset : a)) };
+}
+
+// Completing a task stamps the history and moves the schedule forward.
+export function completeTask(binder: Binder, taskId: string, date: string, summary: string): Binder {
+  const task = binder.tasks.find((t) => t.id === taskId);
+  if (!task) throw new Error("Unknown task");
+  const record: ServiceRecord = {
+    id: newId("rec"),
+    assetId: task.assetId,
+    taskId,
+    date,
+    summary: summary.trim() || `${task.title}: done.`,
+    by: "Resident",
+  };
+  return {
+    ...binder,
+    tasks: binder.tasks.map((t) => (t.id === taskId ? { ...t, nextDue: addMonths(date, t.everyMonths) } : t)),
+    history: [...binder.history, record],
+  };
+}
+
+export function fileDocument(binder: Binder, doc: Omit<FiledDocument, "id">): Binder {
+  if (!doc.title.trim()) throw new Error("A document needs a title");
+  return { ...binder, documents: [...binder.documents, { ...doc, id: newId("doc") }] };
+}
+
+export function recordProject(binder: Binder, project: Omit<Project, "id">): Binder {
+  if (!project.title.trim()) throw new Error("A project needs a title");
+  return { ...binder, projects: [...binder.projects, { ...project, id: newId("proj") }] };
+}
+
+export function historyFor(binder: Binder, assetId: string): ServiceRecord[] {
+  return binder.history.filter((r) => r.assetId === assetId).sort((a, b) => b.date.localeCompare(a.date));
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/storage.ts">
+
+```typescript
+import { cloneBinder, sampleBinder, type Binder } from "./binder";
+
+// The one place Homebook touches persistence. Swap this adapter, keep the app.
+export type BinderStore = {
+  load(): Binder;
+  save(binder: Binder): void;
+  reset(): Binder;
+};
+
+export const STORAGE_KEY = "homebook.binder.v1";
+
+type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function isBinder(value: unknown): value is Binder {
+  const v = value as Partial<Binder> | null;
+  return (
+    !!v &&
+    v.version === 1 &&
+    Array.isArray(v.rooms) &&
+    Array.isArray(v.assets) &&
+    Array.isArray(v.documents) &&
+    Array.isArray(v.tasks) &&
+    Array.isArray(v.history) &&
+    Array.isArray(v.projects)
+  );
+}
+
+export function createLocalStore(storage: KeyValue | null): BinderStore {
+  return {
+    load() {
+      try {
+        const raw = storage?.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed: unknown = JSON.parse(raw);
+          if (isBinder(parsed)) return parsed;
+        }
+      } catch {
+        // Corrupt or blocked storage falls back to the sample binder.
+      }
+      return cloneBinder(sampleBinder);
+    },
+    save(binder) {
+      try {
+        storage?.setItem(STORAGE_KEY, JSON.stringify(binder));
+      } catch {
+        // Storage can be full or blocked; the binder stays usable in memory.
+      }
+    },
+    reset() {
+      try {
+        storage?.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      return cloneBinder(sampleBinder);
+    },
+  };
+}
+
+export function browserStore(): BinderStore {
+  let storage: KeyValue | null = null;
+  try {
+    storage = typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    storage = null;
+  }
+  return createLocalStore(storage);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/homebook/test-store.ts">
+
+```typescript
+import { cloneBinder, sampleBinder, type Binder } from "./binder";
+import type { BinderStore } from "./storage";
+
+// An in-memory adapter for component tests.
+export function memoryStore(initial: Binder = sampleBinder): BinderStore & { saved: Binder[] } {
+  const saved: Binder[] = [];
+  return {
+    saved,
+    load: () => cloneBinder(initial),
+    save: (b) => void saved.push(b),
+    reset: () => cloneBinder(sampleBinder),
+  };
+}
+```
+
+</Accordion>
+<Accordion title="vitest.setup.ts">
+
+```typescript
+import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => cleanup());
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test
+```
+
+Expected result: 2 test files pass, 10 tests pass.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 01: Build the Homebook starter"
+```
+
+## Before continuing
+
+- [ ] The binder opens on the water heater plate.
+- [ ] Stamping a task adds history and moves the due date.
+- [ ] Reset demo data restores the sample binder.
+
+Continue to [Read an appliance label with OCR](/docs/homebook/02-read-label).

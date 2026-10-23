@@ -1,0 +1,499 @@
+---
+title: "02. Ingest private notes for retrieval"
+description: "We will split three private planning notes into cited sections and embed them locally with QVAC, so later chapters can ground cards in them."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Deck · 02. Ingest private notes for retrieval" />
+
+The facts behind a launch deck live in private notes: a strategy memo, a diary study, a trial log. They are exactly what you should not paste into a public deck generator.
+
+This chapter adds QVAC for the first time, in a standalone script. It splits each note into sections, embeds them with `GTE_LARGE_FP16` on your machine, and writes a small index. Nothing in the app uses it yet.
+
+**Source checkpoint:** `16fa854` · **Starting checkpoint:** `fbc58e0`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `public/test-files/deck/*.md` | Three fictional private notes with `##` sections |
+| `src/features/deck/notes-index.ts` | `chunkNote` (one chunk per section, id `note#section`), `buildNotesIndex`, cosine `searchNotes` with a score floor |
+| `qvac-service/ingest-notes.mjs` | Loads `GTE_LARGE_FP16`, embeds every section in one batch, writes `.qvac/notes-index.json` |
+| `package.json` | Pins `@qvac/sdk` to exactly `0.22.0`, adds `b4a` as a direct dependency, adds `qvac:ingest-notes` |
+| `tsconfig.json` | `allowImportingTsExtensions`, so Node can load app modules from the scripts |
+| `.gitignore` | Ignores `.qvac/`: config, model cache, index, and adapters stay local |
+
+## Build and observe
+
+### 1. Install the pinned SDK
+
+```bash
+npm install
+```
+
+On Linux, two quirks: keep `b4a` as a direct dependency (the SDK expects to resolve it), and make the bundled runtime executable once:
+
+```bash
+chmod +x node_modules/bare-runtime-linux-x64/bin/bare
+```
+
+### 2. Look at the sections
+
+Open `public/test-files/deck/diary-study-notes.md`. Each `##` heading becomes one chunk with a stable id such as `diary-study-notes#unattended-boiling`. That id is what every later citation points to.
+
+### 3. Ingest the notes
+
+```bash
+npm run qvac:ingest-notes
+```
+
+The first run downloads `GTE_LARGE_FP16` into `.qvac/models`. It then prints the model, the vector dimensions, `notes: 3`, `chunks: 9`, the elapsed time, and the index path. Record those numbers from your own machine.
+
+### 4. Know which boundary failed
+
+If the command sits at download, that is a network problem, not a code problem. If it fails with a vector count message, the embedder returned the wrong batch size and `buildNotesIndex` refused to write a misaligned index.
+
+## Read the checkpoint implementation
+
+These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+
+<AccordionGroup>
+<Accordion title=".gitignore">
+
+```text
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local QVAC config, model cache, notes index, and adapters
+/.qvac/
+```
+
+</Accordion>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "deck",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:ingest-notes": "node --no-warnings qvac-service/ingest-notes.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "^22.22.0 || ^24.15.0 || >=26.0.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="public/test-files/deck/diary-study-notes.md">
+
+```markdown
+# Kitchen diary study notes (fictional)
+
+## Who took part
+Twelve households kept a two-week morning diary. Eight had children at home.
+
+## Unattended boiling
+In 9 of 12 homes the kettle boiled while nobody was in the kitchen. People reboiled water an average of 1.6 times per morning.
+
+## Temperature guessing
+Tea drinkers guessed the water temperature by sound. Most said they waited "until it stops rumbling".
+```
+
+</Accordion>
+<Accordion title="public/test-files/deck/lumen-strategy-memo.md">
+
+```markdown
+# Lumen Kettle strategy memo (fictional, internal)
+
+## Retail position
+Lumen sits between the two best-selling kettles on shelf price. Partner buyers told us they lack a mid-priced model with a visible feature to demo.
+
+## Launch window
+We plan a twelve-week pilot in 40 partner stores starting in March. Store staff get a ten-minute demo script in week one.
+
+## Margin plan
+Target retail margin is 34 percent. Replacement lids and bases are sold separately and keep the kettle in use longer.
+```
+
+</Accordion>
+<Accordion title="public/test-files/deck/prototype-trial-log.md">
+
+```markdown
+# Prototype trial log (fictional)
+
+## Setup
+Twenty testers used the light-ring prototype for one week at home.
+
+## First-try temperature
+Testers hit the target temperature on the first try in 8 of 10 attempts, against 4 of 10 with their own kettle.
+
+## Repair test
+Fourteen of twenty testers swapped the lid without tools in under one minute.
+```
+
+</Accordion>
+<Accordion title="qvac-service/ingest-notes.mjs">
+
+```javascript
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const indexPath = path.join(qvacDirectory, "notes-index.json");
+const notesDirectory = path.join(appDirectory, "public/test-files/deck");
+
+let sdk;
+let modelId;
+try {
+  const { SAMPLE_NOTES, buildNotesIndex, chunkNote } = await import("../src/features/deck/notes-index.ts");
+  const chunks = [];
+  for (const note of SAMPLE_NOTES) {
+    chunks.push(...chunkNote(note, await readFile(path.join(notesDirectory, note.file), "utf8")));
+  }
+
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.GTE_LARGE_FP16,
+    modelType: "embeddings",
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const startedAt = Date.now();
+  const index = await buildNotesIndex(chunks, "GTE_LARGE_FP16", async (texts) => {
+    const { embedding } = await sdk.embed({ modelId, text: texts });
+    return embedding;
+  });
+  await writeFile(indexPath, `${JSON.stringify(index)}\n`, "utf8");
+  process.stdout.write(
+    `${JSON.stringify(
+      { model: index.model, dimensions: index.dimensions, notes: SAMPLE_NOTES.length, chunks: index.entries.length, elapsedMs: Date.now() - startedAt, indexPath },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`QVAC notes ingest failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/deck/notes-index.test.ts">
+
+```typescript
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { buildNotesIndex, chunkNote, SAMPLE_NOTES, searchNotes } from "./notes-index";
+
+const dir = path.join(process.cwd(), "public/test-files/deck");
+const chunks = SAMPLE_NOTES.flatMap((note) => chunkNote(note, readFileSync(path.join(dir, note.file), "utf8")));
+
+// FIXTURE vectors: hand-written, three dimensions, not model output.
+// Dimension 0 = retail, 1 = diary study, 2 = prototype.
+function fixtureEmbed(texts: string[]): Promise<number[][]> {
+  return Promise.resolve(
+    texts.map((t) => [t.includes("strategy memo") ? 1 : 0, t.includes("diary study") ? 1 : 0, t.includes("Prototype") ? 1 : 0]),
+  );
+}
+
+describe("notes index", () => {
+  it("chunks each sample note by section with stable ids", () => {
+    expect(chunks).toHaveLength(9);
+    expect(chunks[0]).toMatchObject({ id: "lumen-strategy-memo#retail-position", section: "Retail position" });
+    expect(chunks.map((c) => c.id)).toContain("diary-study-notes#unattended-boiling");
+  });
+
+  it("returns only chunks above the score floor, best first", async () => {
+    const index = await buildNotesIndex(chunks, "fixture", fixtureEmbed);
+    const hits = searchNotes(index, [0, 1, 0.1], { limit: 3, minScore: 0.5 });
+    expect(hits.map((h) => h.noteId)).toEqual(["diary-study-notes", "diary-study-notes", "diary-study-notes"]);
+    expect(searchNotes(index, [0, 0, 0], { minScore: 0.1 })).toEqual([]);
+  });
+
+  it("rejects a mismatched query vector and a short embedding batch", async () => {
+    const index = await buildNotesIndex(chunks, "fixture", fixtureEmbed);
+    expect(() => searchNotes(index, [1, 0])).toThrow("dimensions");
+    await expect(buildNotesIndex(chunks, "fixture", async () => [[1, 0, 0]])).rejects.toThrow("Expected 9 vectors");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/deck/notes-index.ts">
+
+```typescript
+// Private notes become small cited chunks. Each chunk keeps the note and the
+// section it came from, so every later proposal can point back to it.
+
+export type Note = { id: string; title: string; file: string };
+
+export type NoteChunk = {
+  id: string; // `${noteId}#${sectionSlug}`
+  noteId: string;
+  noteTitle: string;
+  section: string;
+  text: string;
+};
+
+export type NotesIndex = {
+  model: string;
+  dimensions: number;
+  entries: (NoteChunk & { vector: number[] })[];
+};
+
+export type ScoredChunk = NoteChunk & { score: number };
+
+export const SAMPLE_NOTES: Note[] = [
+  { id: "lumen-strategy-memo", title: "Lumen Kettle strategy memo", file: "lumen-strategy-memo.md" },
+  { id: "diary-study-notes", title: "Kitchen diary study notes", file: "diary-study-notes.md" },
+  { id: "prototype-trial-log", title: "Prototype trial log", file: "prototype-trial-log.md" },
+];
+
+function slug(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+// One chunk per `## ` section. Text before the first section is ignored.
+export function chunkNote(note: Note, markdown: string): NoteChunk[] {
+  const chunks: NoteChunk[] = [];
+  let section: string | null = null;
+  let lines: string[] = [];
+  const flush = () => {
+    const text = lines.join(" ").replace(/\s+/g, " ").trim();
+    if (section && text) {
+      chunks.push({ id: `${note.id}#${slug(section)}`, noteId: note.id, noteTitle: note.title, section, text });
+    }
+    lines = [];
+  };
+  for (const line of markdown.split(/\r?\n/)) {
+    const heading = /^##\s+(.+)$/.exec(line);
+    if (heading) {
+      flush();
+      section = heading[1].trim();
+    } else if (section) {
+      lines.push(line);
+    }
+  }
+  flush();
+  return chunks;
+}
+
+export function cosine(a: readonly number[], b: readonly number[]): number {
+  if (a.length !== b.length || a.length === 0) throw new Error(`Vector size mismatch: ${a.length} vs ${b.length}`);
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
+}
+
+// Embedding text includes the note and section, so a chunk keeps its context.
+export function embeddingText(chunk: NoteChunk): string {
+  return `${chunk.noteTitle} — ${chunk.section}: ${chunk.text}`;
+}
+
+export async function buildNotesIndex(
+  chunks: NoteChunk[],
+  model: string,
+  embedBatch: (texts: string[]) => Promise<number[][]>,
+): Promise<NotesIndex> {
+  if (chunks.length === 0) throw new Error("No note sections to index");
+  const vectors = await embedBatch(chunks.map(embeddingText));
+  if (vectors.length !== chunks.length) {
+    throw new Error(`Expected ${chunks.length} vectors, received ${vectors.length}`);
+  }
+  const dimensions = vectors[0].length;
+  if (!vectors.every((v) => v.length === dimensions && v.every(Number.isFinite))) {
+    throw new Error("Embedding vectors are inconsistent");
+  }
+  return { model, dimensions, entries: chunks.map((chunk, i) => ({ ...chunk, vector: vectors[i] })) };
+}
+
+export function searchNotes(
+  index: NotesIndex,
+  query: readonly number[],
+  { limit = 3, minScore = 0.3 }: { limit?: number; minScore?: number } = {},
+): ScoredChunk[] {
+  if (query.length !== index.dimensions) {
+    throw new Error(`Query has ${query.length} dimensions; the index has ${index.dimensions}`);
+  }
+  return index.entries
+    .map(({ vector, ...chunk }) => ({ ...chunk, score: cosine(query, vector) }))
+    .filter((c) => c.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+```
+
+</Accordion>
+<Accordion title="tsconfig.json">
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/deck/notes-index.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass. The vectors in this test are three-dimensional fixtures written by hand, not model output.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 02: Ingest private notes for retrieval"
+```
+
+## Before continuing
+
+- [ ] The index has one entry per note section.
+- [ ] `.qvac/` is not committed.
+
+Continue to [Add the local service boundary](/docs/deck/03-local-service).

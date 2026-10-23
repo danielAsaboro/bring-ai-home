@@ -1,0 +1,131 @@
+---
+title: "Your first QVAC app"
+description: "Install the QVAC SDK, run a language model on your own machine, then read text from an image. No API key, no account."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Your first QVAC app" />
+
+In fifteen minutes you will run two models on your own machine: a small language model that answers a question, and an OCR model that reads an image. Nothing you send leaves the computer, and there is no key to paste.
+
+This is the smallest possible QVAC program. Every project on this site grows from the same four calls: `loadModel`, an inference call, `unloadModel`, and `close`.
+
+## What you need
+
+- Node.js **22.17 or newer** and npm
+- A recent Mac with Apple Silicon, or another machine [QVAC supports](https://docs.qvac.tether.io/)
+- Internet for the first run only, to download the model files
+
+## 1. Create the project
+
+```bash
+mkdir first-qvac && cd first-qvac
+npm init -y
+npm pkg set type=module
+npm install @qvac/sdk@0.17.1
+```
+
+We pin the version so this lesson keeps working when the SDK moves on.
+
+## 2. Ask a local model a question
+
+Create `chat.mjs`:
+
+```javascript chat.mjs
+import {
+  loadModel,
+  completion,
+  unloadModel,
+  close,
+  LLAMA_3_2_1B_INST_Q4_0,
+} from "@qvac/sdk";
+
+let modelId;
+try {
+  // Downloads the model on the first run, then loads it into memory.
+  modelId = await loadModel({
+    modelSrc: LLAMA_3_2_1B_INST_Q4_0,
+    modelType: "llm",
+  });
+
+  const run = completion({
+    modelId,
+    history: [{ role: "user", content: "In one sentence, why run AI locally?" }],
+    stream: true,
+  });
+
+  for await (const token of run.tokenStream) process.stdout.write(token);
+
+  const stats = await run.stats;
+  console.log(`\n\n${stats?.tokensPerSecond?.toFixed(1)} tokens/s on ${stats?.backendDevice}`);
+} finally {
+  if (modelId) await unloadModel({ modelId });
+  await close();
+}
+```
+
+Run it twice:
+
+```bash
+node chat.mjs
+node chat.mjs
+```
+
+The first run downloads the model, so it is slow. The second reuses the cached file and starts much faster. That difference is the lifecycle from [AI is not one box](/docs/start-here/ai-is-not-one-box): downloaded is not loaded.
+
+<Tip>
+Turn off Wi-Fi and run it a third time. It still answers.
+</Tip>
+
+## 3. Read text from an image
+
+Save any screenshot with text in it as `sample.png`, then create `read.mjs`:
+
+```javascript read.mjs
+import { loadModel, ocr, unloadModel, close, OCR_LATIN } from "@qvac/sdk";
+
+let modelId;
+try {
+  modelId = await loadModel({
+    modelSrc: OCR_LATIN,
+    modelConfig: { langList: ["en"] },
+  });
+
+  const run = ocr({ modelId, image: "sample.png", options: { paragraph: false } });
+  const blocks = await run.blocks;
+
+  for (const block of blocks) console.log(block);
+} finally {
+  if (modelId) await unloadModel({ modelId });
+  await close();
+}
+```
+
+```bash
+node read.mjs
+```
+
+Each block carries the recognised text, where it sits in the image, and a confidence score. Compare a few of them with the image. Some will be imperfect, and that is the point: model output is **evidence**, and your application decides what to do with it.
+
+## What just happened
+
+| Call | What it does |
+|---|---|
+| `loadModel` | Downloads the model if needed, loads it into memory, returns an ID |
+| `completion` / `ocr` | Runs inference with that ID |
+| `unloadModel` | Frees memory; the file stays cached on disk |
+| `close` | Shuts the SDK down cleanly, even after an error |
+
+The `finally` block matters. A model left loaded keeps its memory until the process exits.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Build Redact" icon="file-shield" href="/docs/redact/overview">
+    Turn this OCR call into a complete, reviewed redaction workflow.
+  </Card>
+  <Card title="Inside Leash" icon="trophy" href="/docs/leash/overview">
+    See what a full local assistant on QVAC looks like.
+  </Card>
+</CardGroup>

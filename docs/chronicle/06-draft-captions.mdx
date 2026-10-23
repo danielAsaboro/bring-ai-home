@@ -1,0 +1,263 @@
+---
+title: "06. Draft captions you can edit"
+description: "We will ask a small local language model to draft a caption from facts the family already wrote. The draft is text in a box. Nothing changes in the archive until a person edits and accepts it."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Chronicle · 06. Draft captions you can edit" />
+
+We will ask a small local language model to draft a caption from facts the family already wrote. The draft is text in a box. Nothing changes in the archive until a person edits and accepts it.
+
+Generated captions can be wrong or insensitive. So the app decides what the model sees, checks what comes back, and keeps the old caption in history.
+
+**Source checkpoint:** `d413c3a` · **Starting checkpoint:** `bc64970`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `qvac-service/caption-draft.ts` | Build the message history and check the raw reply |
+| `src/features/chronicle/caption-review.ts` | Propose, accept with edited text, or reject. Accepting records a revision |
+| `qvac-service/caption-smoke.mjs` | Draft one caption with `LLAMA_3_2_1B_INST_Q4_0` |
+| `package.json` | Add `qvac:caption-smoke` |
+
+## Build and observe
+
+### 1. Draft one caption
+
+```bash
+npm run qvac:caption-smoke
+npm run qvac:caption-smoke -- m-snow-2010
+```
+
+The first run downloads the model. Read `currentCaption` and `draft` side by side. Look for any name, place, or event that is not in the facts. A 1B model can make things up.
+
+### 2. Read what the model is told
+
+Open `buildCaptionHistory`. The system message says to use only the given facts. The user message lists the title, date, people, and the family's caption. Text from Chapters 2 and 3 is marked "Unconfirmed", so the model knows it was not checked.
+
+### 3. Read what the app accepts
+
+`parseCaptionDraft` removes a leading `Caption:` label, quotes, and extra spaces. It rejects an empty reply and anything over 160 characters. A rejected reply is an error, not a shorter caption.
+
+### 4. Read who decides
+
+`acceptCaption` takes the text the person approved, not the raw draft. It refuses a draft that was already resolved or belongs to another memory. It returns a revision with the previous caption, so nothing is lost.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/caption-draft.ts">
+
+```typescript
+import type { Memory } from "../src/features/chronicle/archive";
+
+export const MAX_CAPTION_LENGTH = 160;
+
+export type CaptionContext = {
+  memory: Memory;
+  // Optional proposals from earlier chapters. They are labelled as such.
+  photoDescription?: string;
+  spokenTranscript?: string;
+};
+
+export function buildCaptionHistory(context: CaptionContext) {
+  const { memory } = context;
+  const facts = [
+    `Title: ${memory.title}`,
+    `Date: ${memory.date}`,
+    `People: ${memory.people.join(", ")}`,
+    `Current caption (written by the family): ${memory.caption}`,
+  ];
+  if (context.photoDescription) {
+    facts.push(`Unconfirmed photo description: ${context.photoDescription}`);
+  }
+  if (context.spokenTranscript) {
+    facts.push(`Unconfirmed spoken memory: ${context.spokenTranscript}`);
+  }
+  return [
+    {
+      role: "system" as const,
+      content:
+        "You write short captions for a private family magazine. Use only the facts given. Do not invent names, places, or events. Reply with the caption only, one or two sentences.",
+    },
+    { role: "user" as const, content: facts.join("\n") },
+  ];
+}
+
+// Raw model text becomes a draft only if it passes these checks.
+export function parseCaptionDraft(raw: string): string {
+  const text = raw
+    .replace(/^\s*(caption|draft)\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^["“']+|["”']+$/g, "")
+    .trim();
+  if (text.length === 0) throw new Error("The model returned an empty caption");
+  if (text.length > MAX_CAPTION_LENGTH) {
+    throw new Error(
+      `The draft is ${text.length} characters; captions are limited to ${MAX_CAPTION_LENGTH}`,
+    );
+  }
+  return text;
+}
+```
+
+</Accordion>
+<Accordion title="src/features/chronicle/caption-review.ts">
+
+```typescript
+import type { Memory } from "./archive";
+
+export type CaptionProposal = {
+  memoryId: string;
+  draft: string;
+  status: "proposed" | "accepted" | "rejected";
+};
+
+export type CaptionRevision = {
+  memoryId: string;
+  previous: string;
+  next: string;
+  source: "edited-draft" | "manual";
+  at: string;
+};
+
+export function proposeCaption(memoryId: string, draft: string): CaptionProposal {
+  return { memoryId, draft, status: "proposed" };
+}
+
+// Only this function changes a caption, and only with the text a person approved.
+export function acceptCaption(
+  memory: Memory,
+  proposal: CaptionProposal,
+  approvedText: string,
+  at: string,
+): { memory: Memory; proposal: CaptionProposal; revision: CaptionRevision } {
+  if (proposal.memoryId !== memory.id) {
+    throw new Error("This draft belongs to a different memory");
+  }
+  if (proposal.status !== "proposed") {
+    throw new Error("This draft has already been resolved");
+  }
+  const next = approvedText.trim();
+  if (next.length === 0) throw new Error("A caption cannot be empty");
+  return {
+    memory: { ...memory, caption: next },
+    proposal: { ...proposal, status: "accepted" },
+    revision: {
+      memoryId: memory.id,
+      previous: memory.caption,
+      next,
+      source: "edited-draft",
+      at,
+    },
+  };
+}
+
+export function rejectCaption(proposal: CaptionProposal): CaptionProposal {
+  if (proposal.status !== "proposed") {
+    throw new Error("This draft has already been resolved");
+  }
+  return { ...proposal, status: "rejected" };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/caption-smoke.mjs">
+
+```javascript
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const memoryId = process.argv[2] ?? "m-beach-1998";
+
+let modelId;
+let sdk;
+try {
+  const { sampleArchive } = await import("../src/features/chronicle/archive.ts");
+  const { buildCaptionHistory, parseCaptionDraft } = await import("./caption-draft.ts");
+  const memory = sampleArchive.find((m) => m.id === memoryId);
+  if (!memory) throw new Error(`No memory with id ${memoryId}`);
+
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+
+  sdk = await import("@qvac/sdk");
+  modelId = await sdk.loadModel({
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelType: "llm",
+    onProgress: (p) => process.stderr.write(`Downloading ${p.percentage.toFixed(0)}%\n`),
+  });
+  const run = sdk.completion({ modelId, history: buildCaptionHistory({ memory }), stream: true });
+  let raw = "";
+  for await (const token of run.tokenStream) raw += token;
+  const stats = await run.stats;
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        kind: "proposed-caption",
+        memoryId,
+        currentCaption: memory.caption,
+        draft: parseCaptionDraft(raw),
+        model: "LLAMA_3_2_1B_INST_Q4_0",
+        stats: stats ?? null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`QVAC caption smoke failed: ${message}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/caption-draft.test.ts src/features/chronicle/caption-review.test.ts
+```
+
+Expected result: 2 test files pass, 6 tests pass.
+
+These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+
+Run the broader checks separately, from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 06: Draft captions you can edit"
+```
+
+## Before continuing
+
+- [ ] You drafted a caption locally and compared it with the family's caption.
+- [ ] You can explain why the edited text, not the draft, is saved.
+
+Continue to [Review and publish an issue](/docs/chronicle/07-review-publish).

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Builds the deployable site: landing page at /, Mintlify docs at /docs.
+# Usage: scripts/build-site.sh [out-dir]   (default: dist)
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out="${1:-$root/dist}"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+cd "$root"
+mint export --output "$tmp/export.zip"
+mkdir -p "$out"
+unzip -q -o "$tmp/export.zip" -d "$out"
+rm -rf "$out/Start Docs.bat" "$out/Start Docs.command" "$out/serve.js" "$out/.gitignore" "$out/landing" "$out/scripts"
+cp landing/index.html landing/vercel.json "$out/"
+echo "Built $out"
