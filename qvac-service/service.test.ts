@@ -11,7 +11,7 @@ describe("local service boundary", () => {
     const res = await handle("GET", "/health", undefined);
     expect(res).toEqual({
       status: 200,
-      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false, retrieve: false } },
+      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false, retrieve: false, draft: false } },
     });
   });
 

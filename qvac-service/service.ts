@@ -1,4 +1,5 @@
 import type { ContextMatch, Passage } from "../src/features/circle/context";
+import type { FollowUpDraft } from "../src/features/circle/followup";
 import type { ExtractionResult, KnownPerson } from "../src/features/circle/extraction";
 import type { RecapDraft } from "./recap";
 
@@ -15,6 +16,11 @@ export type Capabilities = {
     query: string;
     passages: Passage[];
   }) => Promise<{ model: string; matches: ContextMatch[] }>;
+  draft?: (input: {
+    personName: string;
+    intent: string;
+    context: Passage[];
+  }) => Promise<FollowUpDraft>;
 };
 
 export type ServiceResponse = { status: number; body: unknown };
@@ -32,6 +38,15 @@ function people(body: Record<string, unknown>): KnownPerson[] {
   return list.map((p) => {
     const r = record(p);
     return { id: text(r, "id", 200), name: text(r, "name", 200) };
+  });
+}
+
+function passages(body: Record<string, unknown>, key: string): Passage[] {
+  const list = body[key];
+  if (!Array.isArray(list) || list.length > 200) throw new BadRequest(`Missing ${key}`);
+  return list.map((p) => {
+    const r = record(p);
+    return { id: text(r, "id", 200), text: text(r, "text", 2000) };
   });
 }
 
@@ -83,15 +98,19 @@ const routes: Record<string, Route> = {
   "/context/retrieve": {
     capability: "retrieve",
     run: (caps, body) => {
-      const list = body.passages;
-      if (!Array.isArray(list) || list.length > 200) throw new BadRequest("Missing passages");
-      const passages = list.map((p) => {
-        const r = record(p);
-        return { id: text(r, "id", 200), text: text(r, "text", 2000) };
-      });
-      if (passages.length === 0) return Promise.resolve({ model: "none", matches: [] });
-      return caps.retrieve({ query: text(body, "query", 500), passages });
+      const list = passages(body, "passages");
+      if (list.length === 0) return Promise.resolve({ model: "none", matches: [] });
+      return caps.retrieve({ query: text(body, "query", 500), passages: list });
     },
+  },
+  "/followup/draft": {
+    capability: "draft",
+    run: (caps, body) =>
+      caps.draft({
+        personName: text(body, "personName", 200),
+        intent: text(body, "intent", 500),
+        context: passages(body, "context"),
+      }),
   },
 };
 

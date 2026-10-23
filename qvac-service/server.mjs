@@ -10,6 +10,7 @@ import {
   parseExtraction,
   PROPOSAL_SCHEMA,
 } from "../src/features/circle/extraction.ts";
+import { buildFollowUpPrompt, cleanDraft } from "../src/features/circle/followup.ts";
 import { buildRecapDraft } from "./recap.ts";
 import { createService, MAX_BODY_BYTES, SERVICE_PORT } from "./service.ts";
 
@@ -95,6 +96,20 @@ capabilities.retrieve = async ({ query, passages }) => {
     model: "GTE_LARGE_FP16",
     matches: rankContext(queryVector, passages, vectors, { limit: 3, minScore: 0.3 }),
   };
+};
+
+capabilities.draft = async ({ personName, intent, context }) => {
+  const modelId = await model("LLAMA_3_2_1B_INST_Q4_0", {
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelConfig: { ctx_size: 4096 },
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: buildFollowUpPrompt(personName, intent, context) }],
+    stream: false,
+  });
+  const final = await run.final;
+  return cleanDraft(final.contentText, "LLAMA_3_2_1B_INST_Q4_0", context);
 };
 
 const handle = createService(capabilities);

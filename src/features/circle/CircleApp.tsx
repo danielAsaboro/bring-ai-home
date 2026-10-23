@@ -12,6 +12,7 @@ import {
   toggleCircle,
 } from "./state";
 import { BeforeWeMeet } from "./BeforeWeMeet";
+import { FollowUp } from "./FollowUp";
 import { RecapPanel } from "./RecapPanel";
 import { createServiceClient, type ServiceClient } from "./service-client";
 import { browserStore, type CircleStore } from "./storage";
@@ -292,6 +293,7 @@ function PersonCard({
       {error && <p role="alert">{error}</p>}
 
       <BeforeWeMeet person={person} state={state} client={client} />
+      <FollowUp person={person} state={state} client={client} />
 
       <h3 className="font-serif text-lg">Timeline</h3>
       <ol aria-label="Timeline" className="space-y-1">

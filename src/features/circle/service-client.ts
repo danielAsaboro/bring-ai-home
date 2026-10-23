@@ -1,4 +1,5 @@
 import type { ContextMatch, Passage } from "./context";
+import type { FollowUpDraft } from "./followup";
 import type { ExtractionResult, KnownPerson } from "./extraction";
 
 // The browser never imports @qvac/sdk. It talks to the loopback service.
@@ -88,6 +89,17 @@ export function createServiceClient(
       };
       if (!Array.isArray(body.matches)) {
         throw new ServiceError("Unexpected retrieval response", "bad-response");
+      }
+      return body;
+    },
+    async draftFollowUp(
+      personName: string,
+      intent: string,
+      context: Passage[],
+    ): Promise<FollowUpDraft> {
+      const body = (await post("/followup/draft", { personName, intent, context })) as FollowUpDraft;
+      if (body.status !== "draft" || typeof body.text !== "string") {
+        throw new ServiceError("Unexpected draft response", "bad-response");
       }
       return body;
     },
