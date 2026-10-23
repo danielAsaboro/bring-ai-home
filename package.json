@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "qvac:describe-smoke": "node qvac-service/describe-photo-smoke.mjs"
+    "qvac:describe-smoke": "node qvac-service/describe-photo-smoke.mjs",
+    "qvac:transcribe-smoke": "node qvac-service/transcribe-memory-smoke.mjs"
   },
   "dependencies": {
     "@qvac/sdk": "0.22.0",
