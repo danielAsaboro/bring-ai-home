@@ -1,1 +1,6 @@
-.draft/
+node_modules/
+.mint/
+.env
+.env.*
+!.env.example
+.DS_Store

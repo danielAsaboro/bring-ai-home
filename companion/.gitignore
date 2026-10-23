@@ -1,9 +1,0 @@
-node_modules/
-dist/
-.cache/
-evidence/*.jsonl
-workspace/
-qvac/worker.bundle.js
-qvac/addons.manifest.json
-.DS_Store
-
