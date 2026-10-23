@@ -1,3 +1,5 @@
+import type { ExtractionResult, KnownPerson } from "./extraction";
+
 // The browser never imports @qvac/sdk. It talks to the loopback service.
 export const DEFAULT_SERVICE_URL = "http://127.0.0.1:4327";
 
@@ -61,6 +63,17 @@ export function createServiceClient(
       const body = (await post("/recap/transcribe", { audioBase64, fileName })) as ProposedRecap;
       if (body.status !== "proposed" || typeof body.transcript !== "string") {
         throw new ServiceError("Unexpected transcription response", "bad-response");
+      }
+      return body;
+    },
+    async extract(
+      transcript: string,
+      people: KnownPerson[],
+      today: string,
+    ): Promise<ExtractionResult> {
+      const body = (await post("/recap/extract", { transcript, people, today })) as ExtractionResult;
+      if (body.status !== "proposed" || !Array.isArray(body.proposals)) {
+        throw new ServiceError("Unexpected extraction response", "bad-response");
       }
       return body;
     },

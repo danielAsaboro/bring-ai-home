@@ -11,7 +11,7 @@ describe("local service boundary", () => {
     const res = await handle("GET", "/health", undefined);
     expect(res).toEqual({
       status: 200,
-      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false } },
+      body: { ok: true, service: "circle-qvac", capabilities: { transcribe: false, extract: false } },
     });
   });
 
@@ -58,5 +58,20 @@ describe("local service boundary", () => {
       status: 502,
       body: { error: "model-failed", message: "No speech was recognised in this recap" },
     });
+  });
+
+  it("validates extract requests and forwards them", async () => {
+    const handle = createService({
+      // FIXTURE extractor: echoes its input, no model involved.
+      extract: async ({ people, today }) => ({ status: "proposed", model: `FIXTURE ${today}`, proposals: [], rejected: people.map((item) => ({ item, reason: "fixture" })) }),
+    });
+    const bad = await handle("POST", "/recap/extract", { transcript: "hi", people: [], today: "2026-10-23" });
+    expect(bad.status).toBe(400);
+    const ok = await handle("POST", "/recap/extract", {
+      transcript: "hi",
+      people: [{ id: "dev-raman", name: "Dev Raman" }],
+      today: "2026-10-23",
+    });
+    expect(ok).toMatchObject({ status: 200, body: { model: "FIXTURE 2026-10-23" } });
   });
 });

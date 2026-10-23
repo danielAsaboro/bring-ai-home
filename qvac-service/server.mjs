@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  buildExtractionPrompt,
+  parseExtraction,
+  PROPOSAL_SCHEMA,
+} from "../src/features/circle/extraction.ts";
 import { buildRecapDraft } from "./recap.ts";
 import { createService, MAX_BODY_BYTES, SERVICE_PORT } from "./service.ts";
 
@@ -50,6 +55,29 @@ const capabilities = {
       await rm(dir, { recursive: true, force: true });
     }
   },
+};
+
+capabilities.extract = async ({ transcript, people, today }) => {
+  const modelId = await model("LLAMA_3_2_1B_INST_Q4_0", {
+    modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0,
+    modelConfig: { ctx_size: 4096 },
+  });
+  const run = sdk.completion({
+    modelId,
+    history: [{ role: "user", content: buildExtractionPrompt(transcript, people, today) }],
+    stream: false,
+    responseFormat: {
+      type: "json_schema",
+      json_schema: { name: "circle_proposals", schema: PROPOSAL_SCHEMA },
+    },
+  });
+  const final = await run.final;
+  return parseExtraction(final.contentText, {
+    transcript,
+    people,
+    today,
+    model: "LLAMA_3_2_1B_INST_Q4_0",
+  });
 };
 
 const handle = createService(capabilities);

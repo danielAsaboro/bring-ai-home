@@ -1,9 +1,15 @@
+import type { ExtractionResult, KnownPerson } from "../src/features/circle/extraction";
 import type { RecapDraft } from "./recap";
 
 // Everything the native runtime can do for Circle. A missing entry means
 // "not configured", never "pretend".
 export type Capabilities = {
   transcribe?: (audio: Uint8Array, fileName: string) => Promise<RecapDraft>;
+  extract?: (input: {
+    transcript: string;
+    people: KnownPerson[];
+    today: string;
+  }) => Promise<ExtractionResult>;
 };
 
 export type ServiceResponse = { status: number; body: unknown };
@@ -12,6 +18,23 @@ export const SERVICE_PORT = 4327;
 export const MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 class BadRequest extends Error {}
+
+function people(body: Record<string, unknown>): KnownPerson[] {
+  const list = body.people;
+  if (!Array.isArray(list) || list.length === 0 || list.length > 500) {
+    throw new BadRequest("Missing people");
+  }
+  return list.map((p) => {
+    const r = record(p);
+    return { id: text(r, "id", 200), name: text(r, "name", 200) };
+  });
+}
+
+function isoDay(body: Record<string, unknown>, key: string): string {
+  const value = text(body, key, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new BadRequest(`${key} must be YYYY-MM-DD`);
+  return value;
+}
 
 function record(body: unknown): Record<string, unknown> {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -42,6 +65,15 @@ const routes: Record<string, Route> = {
       if (audio.length === 0) throw new BadRequest("Empty recording");
       return caps.transcribe(new Uint8Array(audio), text(body, "fileName", 200));
     },
+  },
+  "/recap/extract": {
+    capability: "extract",
+    run: (caps, body) =>
+      caps.extract({
+        transcript: text(body, "transcript"),
+        people: people(body),
+        today: isoDay(body, "today"),
+      }),
   },
 };
 
