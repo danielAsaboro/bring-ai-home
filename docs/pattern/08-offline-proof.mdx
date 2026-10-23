@@ -1,0 +1,260 @@
+---
+title: "08. Prove it offline"
+description: "We will run proposal, gate, and similarity with the process denied network access by the operating system."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Pattern · 08. Prove it offline" />
+
+We will run proposal, gate, and similarity with the process denied network access by the operating system.
+
+A warm cache is not an offline proof. The proof needs three things: the cache really holds the models (not zero-byte leftovers from a blocked download), the operating system really denies this process the network, and the full path (propose, gate, replay, rank) still completes.
+
+On macOS, `sandbox-exec` with `qvac-service/offline.sb` denies all outbound connections except loopback. The check probes a public host first and only continues if the connection is denied; a DNS failure does not count.
+
+**Source checkpoint:** `55ff2f6` · **Starting checkpoint:** `675f040`
+
+## What you change
+
+| File | Responsibility |
+| --- | --- |
+| `qvac-service/offline-proof.ts` | Warmed-cache check (non-empty files) and probe classification |
+| `qvac-service/offline.sb` | Deny outbound network except loopback |
+| `qvac-service/offline-check.mjs` | Probe, then propose, gate, replay, and rank under denial |
+| `package.json` | `qvac:offline` and `qvac:service:offline` |
+
+## Build and observe
+
+### 1. Warm the cache online
+
+```bash
+git checkout 55ff2f6
+npm run qvac:propose-smoke
+npm run qvac:service   # until /health shows embedding: true, then stop it
+```
+
+### 2. Run the proof
+
+```bash
+npm run qvac:offline
+```
+
+The JSON shows `"network": "network-denied"`, the raw proposal, the gate result, the replay result, and similar patterns.
+
+### 3. Run the whole app offline
+
+```bash
+npm run qvac:service:offline
+```
+
+With `npm run dev` in another terminal, propose, apply, restore, and find similar patterns. The browser reaches the service over loopback, which the profile allows.
+
+### 4. On Linux
+
+`sandbox-exec` is macOS only. On Linux, a network namespace such as `unshare -rn` gives the same process-level denial, but it also removes loopback, so run the proof script rather than the service there. This variant was not verified in the course build.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "pattern",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:propose-smoke": "node --no-warnings qvac-service/propose-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/serve.mjs",
+    "qvac:finetune": "node --no-warnings qvac-service/finetune.mjs",
+    "qvac:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:service:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/serve.mjs"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-check.mjs">
+
+```javascript
+// Run under sandbox-exec (macOS): propose, gate, and rank similar patterns with no network.
+import { readdir, stat } from "node:fs/promises";
+import https from "node:https";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const runtime = await import("./qvac-runtime.ts");
+const { assertWarmedCache, classifyProbe } = await import("./offline-proof.ts");
+const { buildProposalHistory, extractProposal } = await import("./proposal.ts");
+const { checkProposal } = await import("../src/features/pattern/rule-schema.ts");
+const { replayGate, samplePatterns } = await import("../src/features/pattern/patterns.ts");
+const { patternText, rankSimilar } = await import("../src/features/pattern/similar.ts");
+
+function probe() {
+  return new Promise((resolve) => {
+    const req = https.get("https://example.com/", { timeout: 5000 }, (res) => {
+      res.resume();
+      resolve({ ok: true });
+    });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
+    req.on("error", (error) => resolve({ ok: false, code: error.code }));
+  });
+}
+
+let sdk;
+const loaded = [];
+try {
+  const { cacheDirectory, configPath } = runtime.resolveLocalQvacPaths(appDirectory);
+  const names = await readdir(cacheDirectory);
+  assertWarmedCache(await Promise.all(names.map(async (name) => ({ name, bytes: (await stat(path.join(cacheDirectory, name))).size }))));
+
+  const network = classifyProbe(await probe());
+  if (network !== "network-denied") throw new Error(`Expected process network denial, got ${network}`);
+
+  process.env.QVAC_CONFIG_PATH = configPath; // reuse the warmed config; do not rewrite it
+  sdk = await import("@qvac/sdk");
+  const startedAt = Date.now();
+  const pattern = samplePatterns.find((p) => p.id === "p-contacts");
+  const llm = await runtime.loadProposalModel(sdk);
+  loaded.push(llm);
+  const raw = await runtime.completeText(sdk, llm, buildProposalHistory(pattern.examples));
+  let check;
+  try {
+    check = checkProposal(extractProposal(raw));
+  } catch (error) {
+    check = { ok: false, reasons: [error.message] };
+  }
+  const gate = check.ok ? replayGate(check.rules, pattern) : null;
+
+  const embedder = await runtime.loadEmbeddingModel(sdk);
+  loaded.push(embedder);
+  const vectors = await runtime.embedTexts(sdk, embedder, samplePatterns.map(patternText));
+  const similar = rankSimilar(samplePatterns, vectors, pattern.id, { limit: 3, minScore: 0 });
+
+  process.stdout.write(
+    `${JSON.stringify({ network, patternId: pattern.id, raw, check, gate, similar, elapsedMs: Date.now() - startedAt }, null, 2)}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`Offline proof failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  for (const modelId of loaded) await sdk?.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.ts">
+
+```typescript
+// Each pattern must match at least one non-empty file in the model cache.
+export const REQUIRED_MODELS: Record<string, RegExp> = {
+  proposals: /llama-3\.2-1b/i,
+  embeddings: /gte-large/i,
+};
+
+export function assertWarmedCache(
+  files: readonly { name: string; bytes: number }[],
+  required: Record<string, RegExp> = REQUIRED_MODELS,
+) {
+  const missing = Object.entries(required)
+    .filter(([, pattern]) => !files.some((f) => pattern.test(f.name) && f.bytes > 0))
+    .map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(
+      `QVAC cache is incomplete (${missing.join(", ")}). Warm it online with qvac:propose-smoke and qvac:service first.`,
+    );
+  }
+}
+
+// Classify a probe to a public host. Only a refused or blocked connection counts as denied.
+export function classifyProbe(result: { ok: true } | { ok: false; code: string | undefined }) {
+  if (result.ok) return "network-allowed" as const;
+  if (result.code === "ENOTFOUND" || result.code === "EAI_AGAIN") return "dns-failed" as const;
+  return "network-denied" as const;
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline.sb">
+
+```scheme
+(version 1)
+(allow default)
+; Deny every outbound connection except loopback and local sockets.
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/offline-proof.test.ts
+```
+
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+**Receipt:** at `55ff2f6`, lint and typecheck pass and the full suite passes 36 tests. The guard tests are deterministic. Our build environment left a zero-byte Llama file after a blocked download; the cache check refuses exactly that. The sandbox proof itself must run on your macOS machine with a warmed cache.
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 08: Prove it offline"
+```
+
+## Before continuing
+
+- [ ] Your proof printed `network-denied` and a gated proposal.
+- [ ] You can explain why a DNS failure is not a network-denial proof.
+
+This completes the Pattern course. Every proposal stayed a proposal: the app checked it, and a person applied it.

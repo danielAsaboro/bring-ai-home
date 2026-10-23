@@ -1,0 +1,1163 @@
+---
+title: "03. Add the local service boundary"
+description: "We will put a small loopback HTTP service between the browser and QVAC, then connect the editor's new Demonstration panel to it with typed failures."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Replay · 03. Add the local service boundary" />
+
+The SDK runs native code and holds models in memory. That does not belong inside React. We give QVAC its own Node process on `127.0.0.1`, and the browser talks to it over a tiny, validated contract.
+
+React never imports `@qvac/sdk`. If the service is down, Replay says so and manual editing keeps working.
+
+**Source checkpoint:** `753544e` · **Starting checkpoint:** `986f94b`
+
+## What changes
+
+- `src/features/replay/service-contract.ts`: request and response shapes with hand-written runtime validation.
+- `src/features/replay/service-client.ts`: `postJson` separates three failures: service unreachable, a typed service error, and a malformed answer.
+- `qvac-service/server.ts`: routes registered only for models that were injected. Health, loopback-only origins, `413`, `400`, `422 no_speech`, `500 model_failed`.
+- `qvac-service/qvac-models.ts`: the only service file that imports QVAC. `lazyModel` loads on first use and reports state honestly.
+- `qvac-service/main.ts`: starts the service with the Whisper transcriber.
+- `src/features/replay/demonstration-panel.tsx`: pick a `.wav`, click **Transcribe locally**, see timestamped narration labelled "not steps yet".
+
+To compare with the previous checkpoint: `git diff 986f94b 753544e`.
+
+## Build and observe
+
+### 1. Start the service
+
+```bash
+git checkout 753544e
+npm run qvac:service
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:4319/health
+```
+
+```json
+{"service":"ready","models":[{"kind":"transcription","id":"WHISPER_TINY","state":"not_loaded"}]}
+```
+
+The process is ready. The model is not loaded yet. Those are different facts, and the health route reports both.
+
+### 2. Send a bad request on purpose
+
+```bash
+curl -X POST http://127.0.0.1:4319/v1/transcribe -d '{"fileName":"a.mp3","audioBase64":"eA=="}'
+```
+
+Expected: `{"error":{"code":"invalid_request","message":"Only .wav recordings are supported"}}`.
+
+### 3. Use it from the app
+
+Run `npm run dev`, open a tape, and find **Draft from a demonstration**. Choose your `.wav` and click **Transcribe locally**. The narration appears with timestamps. The tape does not change.
+
+Now stop the service and try again. The panel shows "The local QVAC service is not running…" with the code `service_unreachable`. Nothing is invented.
+
+### 4. Why Node can run the TypeScript
+
+`main.ts` imports files from `src/`. Node 22 strips types, but it cannot run TypeScript-only syntax such as constructor parameter properties, and it needs explicit `.ts` extensions on relative imports. That is why `RequestError` assigns its fields by hand and why `src/features/replay` imports end in `.ts`.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "replay",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:transcribe-smoke": "node --no-warnings qvac-service/transcribe-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/main.ts"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "^22.22.0 || ^24.15.0 || >=26.0.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/main.ts">
+
+```typescript
+import { fileURLToPath } from "node:url";
+
+import { SERVICE_PORT } from "../src/features/replay/service-contract.ts";
+import { createQvacTranscriber, closeSdk, prepareQvacConfig } from "./qvac-models.ts";
+import { createReplayServer } from "./server.ts";
+
+prepareQvacConfig(fileURLToPath(new URL("../", import.meta.url)));
+
+const transcriber = createQvacTranscriber();
+const closers = [transcriber];
+const server = createReplayServer({ transcriber });
+
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stdout.write(`Replay QVAC service listening on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+function shutdown() {
+  server.close(async () => {
+    for (const c of closers) await c.close();
+    await closeSdk();
+    process.exit(0);
+  });
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-models.ts">
+
+```typescript
+// The only file that imports @qvac/sdk for the service. Every model loads on first use.
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+import type { ModelState } from "../src/features/replay/service-contract.ts";
+import type { Transcriber } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+export function prepareQvacConfig(appDirectory: string) {
+  const cacheDirectory = path.join(appDirectory, ".qvac", "models");
+  const configPath = path.join(appDirectory, ".qvac", "config.json");
+  mkdirSync(cacheDirectory, { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  return { cacheDirectory, configPath };
+}
+
+let sdkPromise: Promise<Sdk> | undefined;
+export function sdk() {
+  sdkPromise ??= import("@qvac/sdk");
+  return sdkPromise;
+}
+
+// Close the SDK only if something actually loaded it.
+export async function closeSdk() {
+  if (!sdkPromise) return;
+  try {
+    await (await sdkPromise).close();
+  } catch {
+    // The SDK never loaded or is already closed; nothing is left to release.
+  }
+}
+
+// One lazy model: load once, report state honestly, unload on shutdown.
+export function lazyModel(kind: string, id: string, load: (qvac: Sdk) => Promise<string>) {
+  let modelId: string | undefined;
+  let state: ModelState["state"] = "not_loaded";
+  let loading: Promise<string> | undefined;
+  return {
+    modelState: (): ModelState => ({ kind, id, state }),
+    async ensure() {
+      if (modelId) return modelId;
+      loading ??= (async () => {
+        state = "loading";
+        modelId = await load(await sdk());
+        state = "ready";
+        return modelId;
+      })().catch((error: unknown) => {
+        state = "error";
+        loading = undefined;
+        throw error;
+      });
+      return loading;
+    },
+    async close() {
+      if (modelId) await (await sdk()).unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+    },
+  };
+}
+
+export function createQvacTranscriber(): Transcriber & { close(): Promise<void> } {
+  const model = lazyModel("transcription", "WHISPER_TINY", (q) =>
+    q.loadModel({
+      modelSrc: q.WHISPER_TINY,
+      modelConfig: { language: "en", translate: false, temperature: 0.0 },
+    }),
+  );
+  return {
+    modelState: model.modelState,
+    async transcribe(wavPath) {
+      const modelId = await model.ensure();
+      const segments = await (await sdk()).transcribe({ modelId, audioChunk: wavPath, metadata: true });
+      return segments.map((s) => ({ text: s.text, startMs: s.startMs, endMs: s.endMs }));
+    },
+    close: model.close,
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { WEEKLY_REPORT_NARRATION_FIXTURE } from "../src/features/replay/fixtures/narration.fixture";
+import { createReplayServer, type ServiceModels } from "./server";
+
+let close: (() => void) | undefined;
+afterEach(() => close?.());
+
+async function start(models: ServiceModels) {
+  const server = createReplayServer(models);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  close = () => server.close();
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+// FIXTURE transcriber: returns hand-written segments. Not a model.
+const fixtureTranscriber = {
+  modelState: () => ({ kind: "transcription", id: "WHISPER_TINY", state: "ready" as const }),
+  transcribe: async () => WEEKLY_REPORT_NARRATION_FIXTURE,
+};
+
+const wav = { fileName: "narration.wav", audioBase64: Buffer.from("RIFF-fixture").toString("base64") };
+
+describe("replay QVAC service boundary", () => {
+  it("reports health and model state separately", async () => {
+    const url = await start({ transcriber: fixtureTranscriber });
+    const res = await fetch(`${url}/health`);
+    expect(await res.json()).toEqual({
+      service: "ready",
+      models: [{ kind: "transcription", id: "WHISPER_TINY", state: "ready" }],
+    });
+  });
+
+  it("transcribes through the injected door and digests the received bytes", async () => {
+    const url = await start({ transcriber: fixtureTranscriber });
+    const res = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify(wav) });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.sourceDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.narration.segments).toHaveLength(5);
+  });
+
+  it("rejects bad requests, foreign origins, and silent recordings with typed errors", async () => {
+    const silent = { ...fixtureTranscriber, transcribe: async () => [{ text: "[BLANK_AUDIO]", startMs: 0, endMs: 1 }] };
+    const url = await start({ transcriber: silent });
+    const bad = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify({ fileName: "a.mp3", audioBase64: "eA==" }) });
+    expect(bad.status).toBe(400);
+    const foreign = await fetch(`${url}/health`, { headers: { origin: "https://example.com" } });
+    expect(foreign.status).toBe(403);
+    const quiet = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify(wav) });
+    expect(quiet.status).toBe(422);
+    expect((await quiet.json()).error.code).toBe("no_speech");
+  });
+
+  it("turns a model crash into model_failed and leaves unknown routes at 404", async () => {
+    const broken = { ...fixtureTranscriber, transcribe: async () => Promise.reject(new Error("native runtime crashed")) };
+    const url = await start({ transcriber: broken });
+    const res = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify(wav) });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toEqual({ code: "model_failed", message: "native runtime crashed" });
+    expect((await fetch(`${url}/v1/propose-steps`, { method: "POST", body: "{}" })).status).toBe(404);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { toNarration, type NarrationSegment } from "../src/features/replay/narration.ts";
+import { parseTranscribeRequest, type ModelState } from "../src/features/replay/service-contract.ts";
+
+// Each model sits behind its own small door. Tests inject fakes; main.ts injects QVAC.
+export type Transcriber = {
+  modelState(): ModelState;
+  transcribe(wavPath: string): Promise<NarrationSegment[]>;
+};
+
+export type ServiceModels = { transcriber?: Transcriber };
+
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+// Plain fields, not parameter properties: Node's type stripping cannot run those.
+export class RequestError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (origin) {
+    headers["access-control-allow-origin"] = origin;
+    headers["vary"] = "Origin";
+  }
+  res.writeHead(status, headers);
+  res.end(JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new RequestError(413, "too_large", "Request body is too large");
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new RequestError(400, "invalid_json", "Body must be JSON");
+  }
+}
+
+type Route = (req: IncomingMessage) => Promise<unknown>;
+
+export function createReplayServer(models: ServiceModels) {
+  const routes = new Map<string, Route>();
+
+  if (models.transcriber) {
+    const transcriber = models.transcriber;
+    routes.set("/v1/transcribe", async (req) => {
+      const parsed = parseTranscribeRequest(await readJson(req, 50_000_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const audio = Buffer.from(parsed.value.audioBase64, "base64");
+      const sourceDigest = createHash("sha256").update(audio).digest("hex");
+      // The recording lives on disk only for the length of this request.
+      const directory = await mkdtemp(path.join(tmpdir(), "replay-"));
+      try {
+        const wavPath = path.join(directory, "narration.wav");
+        await writeFile(wavPath, audio);
+        const started = Date.now();
+        const segments = await transcriber.transcribe(wavPath);
+        let narration;
+        try {
+          narration = toNarration(segments);
+        } catch (cause) {
+          throw new RequestError(422, "no_speech", (cause as Error).message);
+        }
+        return { sourceDigest, model: transcriber.modelState().id, transcribeMs: Date.now() - started, narration };
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (origin !== undefined && !LOOPBACK_ORIGIN.test(origin)) {
+      send(res, 403, { error: { code: "origin_rejected", message: "Only loopback origins may call this service" } });
+      return;
+    }
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": origin ?? "",
+        "access-control-allow-methods": "GET, POST",
+        "access-control-allow-headers": "content-type",
+      });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/health") {
+      const states = Object.values(models).map((m) => m.modelState());
+      send(res, 200, { service: "ready", models: states }, origin);
+      return;
+    }
+    const route = req.method === "POST" && req.url ? routes.get(req.url) : undefined;
+    if (!route) {
+      send(res, 404, { error: { code: "not_found", message: "Unknown route" } }, origin);
+      return;
+    }
+    try {
+      send(res, 200, await route(req), origin);
+    } catch (cause) {
+      if (cause instanceof RequestError) {
+        send(res, cause.status, { error: { code: cause.code, message: cause.message } }, origin);
+        return;
+      }
+      const message = cause instanceof Error ? cause.message : String(cause);
+      send(res, 500, { error: { code: "model_failed", message } }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/demonstration-panel.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { formatTimestamp } from "./narration";
+import { transcribeRecording } from "./service-client";
+import type { TranscribeResponse } from "./service-contract";
+
+type Status = { kind: "idle" } | { kind: "working"; label: string } | { kind: "error"; code: string; message: string };
+
+// Evidence from a demonstration. Nothing here changes the tape by itself.
+export function DemonstrationPanel() {
+  const [recording, setRecording] = useState<File | null>(null);
+  const [narration, setNarration] = useState<TranscribeResponse | null>(null);
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const btn = "rounded border border-stone-700 px-3 py-1 text-sm disabled:opacity-40";
+
+  async function transcribe() {
+    if (!recording) return;
+    setStatus({ kind: "working", label: "Transcribing on this machine…" });
+    const result = await transcribeRecording(recording);
+    if (result.ok) {
+      setNarration(result.value);
+      setStatus({ kind: "idle" });
+    } else {
+      setStatus({ kind: "error", code: result.code, message: result.message });
+    }
+  }
+
+  return (
+    <section aria-label="Demonstration" className="space-y-3 rounded border border-dashed border-stone-700 p-3">
+      <h2 className="font-semibold">Draft from a demonstration</h2>
+      <p className="text-sm text-stone-400">
+        Narrate the job once. The local QVAC service listens; you decide what becomes a frame.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-sm">
+          Narration (.wav)
+          <input
+            type="file"
+            accept=".wav,audio/wav"
+            className="ml-2 text-sm"
+            onChange={(e) => setRecording(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        <button type="button" className={btn} disabled={!recording || status.kind === "working"} onClick={transcribe}>
+          Transcribe locally
+        </button>
+      </div>
+      {status.kind === "working" && <p role="status">{status.label}</p>}
+      {status.kind === "error" && (
+        <p role="alert" className="text-sm text-red-300">
+          {status.message} <span className="font-mono text-xs">({status.code})</span>
+        </p>
+      )}
+      {narration && (
+        <div>
+          <p className="text-xs text-stone-400">
+            Narration evidence from {narration.model} · not steps yet
+          </p>
+          <ol aria-label="Narration" className="space-y-1 text-sm">
+            {narration.narration.segments.map((s) => (
+              <li key={s.startMs}>
+                <span className="mr-2 font-mono text-xs text-amber-400">{formatTimestamp(s.startMs)}</span>
+                {s.text}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/replay-app.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { DemonstrationPanel } from "./demonstration-panel";
+import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
+import {
+  addStep,
+  advanceRun,
+  blankTape,
+  moveStep,
+  removeStep,
+  startRun,
+  summarizeRun,
+  updateStep,
+  updateTape,
+  type Run,
+  type RunAction,
+  type Tape,
+} from "./tape";
+
+type Mode = "edit" | "play" | "history";
+
+const now = () => new Date().toISOString();
+
+function lines(text: string) {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+export function ReplayApp({ store }: { store?: LibraryStore }) {
+  const [library] = useState(() => store ?? createLocalStore(globalThis.localStorage));
+  const [state, setState] = useState<LibraryState>(() => library.load());
+  const [selectedId, setSelectedId] = useState<string>(() => state.tapes[0]?.id ?? "");
+  const [mode, setMode] = useState<Mode>("edit");
+  const [runId, setRunId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => library.save(state), [library, state]);
+
+  const tape = state.tapes.find((t) => t.id === selectedId) ?? null;
+  const run = state.runs.find((r) => r.id === runId) ?? null;
+
+  function commitTape(next: Tape) {
+    setState((s) => ({ ...s, tapes: s.tapes.map((t) => (t.id === next.id ? next : t)) }));
+  }
+
+  function attempt(fn: () => void) {
+    try {
+      setError(null);
+      fn();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  function play(t: Tape) {
+    attempt(() => {
+      const r = startRun(t, now());
+      setState((s) => ({ ...s, runs: [r, ...s.runs] }));
+      setRunId(r.id);
+      setMode("play");
+    });
+  }
+
+  function act(action: RunAction) {
+    if (!run) return;
+    attempt(() => {
+      const next = advanceRun(run, action, now());
+      setState((s) => ({ ...s, runs: s.runs.map((r) => (r.id === next.id ? next : r)) }));
+    });
+  }
+
+  function newTape() {
+    const t = blankTape("Untitled tape", now());
+    setState((s) => ({ ...s, tapes: [t, ...s.tapes] }));
+    setSelectedId(t.id);
+    setMode("edit");
+  }
+
+  function resetDemo() {
+    const fresh = library.reset();
+    setState(fresh);
+    setSelectedId(fresh.tapes[0]?.id ?? "");
+    setRunId(null);
+    setMode("edit");
+  }
+
+  return (
+    <div className="min-h-screen bg-stone-950 text-stone-100">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-800 px-4 py-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Replay</h1>
+          <p className="text-sm text-stone-400">A tape library for repeatable work.</p>
+        </div>
+        <button type="button" onClick={resetDemo} className="rounded border border-stone-700 px-3 py-1 text-sm">
+          Reset demo data
+        </button>
+      </header>
+      <div className="grid gap-4 p-4 md:grid-cols-[18rem_1fr]">
+        <nav aria-label="Tape shelf" className="space-y-2">
+          <button type="button" onClick={newTape} className="w-full rounded bg-amber-500 px-3 py-2 font-semibold text-stone-950">
+            New tape
+          </button>
+          <ul className="space-y-2">
+            {state.tapes.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  aria-pressed={t.id === selectedId}
+                  onClick={() => {
+                    setSelectedId(t.id);
+                    setMode("edit");
+                  }}
+                  className={`w-full rounded border px-3 py-2 text-left ${
+                    t.id === selectedId ? "border-amber-500 bg-stone-900" : "border-stone-800"
+                  }`}
+                >
+                  <span className="block font-medium">{t.title}</span>
+                  <span className="text-xs text-stone-400">
+                    {t.steps.length} frames · rev {t.revision}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <main className="min-w-0 space-y-4">
+          {error && (
+            <p role="alert" className="rounded border border-red-700 bg-red-950 px-3 py-2 text-sm">
+              {error}
+            </p>
+          )}
+          {tape ? (
+            <>
+              <div role="tablist" aria-label="Tape views" className="flex gap-2">
+                {(["edit", "play", "history"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === m}
+                    onClick={() => (m === "play" && (!run || run.tapeId !== tape.id) ? play(tape) : setMode(m))}
+                    className={`rounded px-3 py-1 text-sm capitalize ${mode === m ? "bg-stone-100 text-stone-950" : "bg-stone-800"}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {mode === "edit" && <TapeEditor key={tape.id} tape={tape} onChange={(t) => attempt(() => commitTape(t))} attempt={attempt} />}
+              {mode === "play" && run && run.tapeId === tape.id && (
+                <Player tape={tape} run={run} onAction={act} onReplay={() => play(tape)} />
+              )}
+              {mode === "history" && <History tape={tape} runs={state.runs.filter((r) => r.tapeId === tape.id)} />}
+            </>
+          ) : (
+            <p>Choose a tape from the shelf.</p>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function TapeEditor({
+  tape,
+  onChange,
+  attempt,
+}: {
+  tape: Tape;
+  onChange: (t: Tape) => void;
+  attempt: (fn: () => void) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const field = "w-full rounded border border-stone-700 bg-stone-900 px-2 py-1";
+
+  return (
+    <section aria-label="Tape editor" className="space-y-4">
+      <label className="block text-sm">
+        Tape title
+        <input
+          className={field}
+          value={tape.title}
+          onChange={(e) => attempt(() => onChange(updateTape(tape, { title: e.target.value }, now())))}
+        />
+      </label>
+      <label className="block text-sm">
+        Summary
+        <textarea
+          className={field}
+          value={tape.summary}
+          onChange={(e) => onChange(updateTape(tape, { summary: e.target.value }, now()))}
+        />
+      </label>
+      <DemonstrationPanel />
+      <ol aria-label="Frames" className="space-y-2">
+        {tape.steps.map((s, i) => (
+          <li key={s.id} className="rounded border border-stone-800 p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-amber-400">{String(i + 1).padStart(2, "0")}</span>
+              <input
+                aria-label={`Frame ${i + 1} title`}
+                className={`${field} flex-1`}
+                value={s.title}
+                onChange={(e) => attempt(() => onChange(updateStep(tape, s.id, { title: e.target.value }, now())))}
+              />
+              <button type="button" aria-label={`Move frame ${i + 1} up`} onClick={() => onChange(moveStep(tape, s.id, -1, now()))}>
+                ↑
+              </button>
+              <button type="button" aria-label={`Move frame ${i + 1} down`} onClick={() => onChange(moveStep(tape, s.id, 1, now()))}>
+                ↓
+              </button>
+              <button type="button" aria-label={`Remove frame ${i + 1}`} onClick={() => onChange(removeStep(tape, s.id, now()))}>
+                ✕
+              </button>
+            </div>
+            <textarea
+              aria-label={`Frame ${i + 1} detail`}
+              className={`${field} mt-1 text-sm`}
+              value={s.detail}
+              onChange={(e) => onChange(updateStep(tape, s.id, { detail: e.target.value }, now()))}
+            />
+          </li>
+        ))}
+      </ol>
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(() => {
+            onChange(addStep(tape, { title, detail }, now()));
+            setTitle("");
+            setDetail("");
+          });
+        }}
+      >
+        <input aria-label="New frame title" placeholder="New frame title" className={`${field} flex-1`} value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input aria-label="New frame detail" placeholder="Detail (optional)" className={`${field} flex-1`} value={detail} onChange={(e) => setDetail(e.target.value)} />
+        <button type="submit" className="rounded bg-stone-100 px-3 py-1 text-stone-950">
+          Add frame
+        </button>
+      </form>
+      <div className="grid gap-3 md:grid-cols-3">
+        <ListField
+          label="Parameters (name = example)"
+          value={tape.parameters.map((p) => `${p.name} = ${p.example}`).join("\n")}
+          onCommit={(text) =>
+            onChange(
+              updateTape(
+                tape,
+                {
+                  parameters: lines(text).map((l) => {
+                    const [name, ...rest] = l.split("=");
+                    return { name: name.trim(), example: rest.join("=").trim() };
+                  }),
+                },
+                now(),
+              ),
+            )
+          }
+        />
+        <ListField
+          label="Preconditions"
+          value={tape.preconditions.join("\n")}
+          onCommit={(text) => onChange(updateTape(tape, { preconditions: lines(text) }, now()))}
+        />
+        <ListField
+          label="Stop conditions"
+          value={tape.stopConditions.join("\n")}
+          onCommit={(text) => onChange(updateTape(tape, { stopConditions: lines(text) }, now()))}
+        />
+      </div>
+    </section>
+  );
+}
+
+function ListField({ label, value, onCommit }: { label: string; value: string; onCommit: (text: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <label className="block text-sm">
+      {label}
+      <textarea
+        className="h-24 w-full rounded border border-stone-700 bg-stone-900 px-2 py-1"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== value) onCommit(draft);
+        }}
+      />
+    </label>
+  );
+}
+
+function Player({ tape, run, onAction, onReplay }: { tape: Tape; run: Run; onAction: (a: RunAction) => void; onReplay: () => void }) {
+  const [note, setNote] = useState("");
+  const [reason, setReason] = useState("");
+  const steps = useMemo(() => new Map(tape.steps.map((s) => [s.id, s])), [tape.steps]);
+  const current = run.frames[run.playhead];
+  const step = steps.get(current.stepId);
+  const ended = run.status === "finished" || run.status === "stopped";
+  const btn = "rounded border border-stone-700 px-3 py-1 text-sm disabled:opacity-40";
+
+  return (
+    <section aria-label="Player" className="space-y-4">
+      <p className="text-sm text-stone-400">
+        Replay guides you. It never performs a step for you. Status: <strong>{run.status}</strong>
+      </p>
+      {tape.stopConditions.length > 0 && (
+        <div className="rounded border border-amber-700 p-2 text-sm">
+          <p className="font-semibold">Stop safely if</p>
+          <ul className="list-disc pl-5">
+            {tape.stopConditions.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <ol aria-label="Tape frames" className="flex gap-1 overflow-x-auto pb-1">
+        {run.frames.map((f, i) => (
+          <li
+            key={f.stepId}
+            aria-current={i === run.playhead && !ended ? "step" : undefined}
+            title={steps.get(f.stepId)?.title}
+            className={`min-w-10 rounded px-2 py-1 text-center font-mono text-xs ${
+              i === run.playhead && !ended
+                ? "bg-amber-500 text-stone-950"
+                : i < run.playhead || run.status === "finished"
+                  ? f.outcome === "done"
+                    ? "bg-emerald-800"
+                    : f.outcome === "failed"
+                      ? "bg-red-800"
+                      : "bg-stone-700"
+                  : "bg-stone-900"
+            }`}
+          >
+            {String(i + 1).padStart(2, "0")}
+          </li>
+        ))}
+      </ol>
+      {!ended && step && (
+        <div className="rounded border border-stone-700 p-3">
+          <p className="text-xs text-stone-400">
+            Frame {run.playhead + 1} of {run.frames.length}
+            {current.outcome === "failed" && " · marked failed"}
+          </p>
+          <h2 className="text-lg font-semibold">{step.title}</h2>
+          <p className="text-sm text-stone-300">{step.detail}</p>
+        </div>
+      )}
+      {!ended ? (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btn} disabled={run.status === "paused" || current.outcome === "failed"} onClick={() => onAction({ type: "done" })}>
+            Done
+          </button>
+          <button type="button" className={btn} disabled={run.status === "paused"} onClick={() => onAction({ type: "skip" })}>
+            Skip
+          </button>
+          <button type="button" className={btn} disabled={run.status === "paused" || current.outcome === "failed"} onClick={() => onAction({ type: "fail" })}>
+            Mark failed
+          </button>
+          <button type="button" className={btn} disabled={current.outcome !== "failed" || run.status === "paused"} onClick={() => onAction({ type: "retry" })}>
+            Retry
+          </button>
+          {run.status === "paused" ? (
+            <button type="button" className={btn} onClick={() => onAction({ type: "resume" })}>
+              Resume
+            </button>
+          ) : (
+            <button type="button" className={btn} onClick={() => onAction({ type: "pause" })}>
+              Pause
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p role="status">
+            {run.status === "finished" ? "Run finished." : `Run stopped: ${run.stopReason}`}{" "}
+            {(() => {
+              const s = summarizeRun(run);
+              return `${s.done} done, ${s.skipped} skipped, ${s.failed} failed.`;
+            })()}
+          </p>
+          <button type="button" className={btn} onClick={onReplay}>
+            Play again
+          </button>
+        </div>
+      )}
+      {!ended && (
+        <div className="grid gap-2 md:grid-cols-2">
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAction({ type: "annotate", note });
+              setNote("");
+            }}
+          >
+            <input aria-label="Frame note" placeholder={current.note || "Note for this frame"} className="flex-1 rounded border border-stone-700 bg-stone-900 px-2" value={note} onChange={(e) => setNote(e.target.value)} />
+            <button type="submit" className={btn}>
+              Save note
+            </button>
+          </form>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAction({ type: "stop", reason });
+            }}
+          >
+            <input aria-label="Stop reason" placeholder="Why stop?" className="flex-1 rounded border border-stone-700 bg-stone-900 px-2" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <button type="submit" className={btn}>
+              Stop safely
+            </button>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function History({ tape, runs }: { tape: Tape; runs: Run[] }) {
+  if (runs.length === 0) return <p className="text-sm text-stone-400">No runs of “{tape.title}” yet.</p>;
+  return (
+    <ul aria-label="Run history" className="space-y-2">
+      {runs.map((r) => {
+        const s = summarizeRun(r);
+        return (
+          <li key={r.id} className="rounded border border-stone-800 p-2 text-sm">
+            <p>
+              <strong>{r.status}</strong> · {new Date(r.startedAt).toLocaleString()} · rev {r.tapeRevision}
+            </p>
+            <p>
+              {s.done} done, {s.skipped} skipped, {s.failed} failed of {s.total}
+              {r.stopReason ? ` · stopped: ${r.stopReason}` : ""}
+            </p>
+            {r.frames.some((f) => f.note) && (
+              <ul className="list-disc pl-5 text-stone-400">
+                {r.frames
+                  .filter((f) => f.note)
+                  .map((f) => (
+                    <li key={f.stepId}>
+                      {tape.steps.find((st) => st.id === f.stepId)?.title ?? "Removed frame"}: {f.note}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/service-client.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { WEEKLY_REPORT_NARRATION_FIXTURE } from "./fixtures/narration.fixture";
+import { toNarration } from "./narration";
+import { transcribeRecording } from "./service-client";
+
+const file = new File([new Uint8Array([82, 73, 70, 70])], "narration.wav", { type: "audio/wav" });
+
+describe("service client", () => {
+  it("says the service is unreachable instead of inventing a transcript", async () => {
+    const result = await transcribeRecording(file, async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(result).toMatchObject({ ok: false, code: "service_unreachable" });
+  });
+
+  it("passes typed service errors through and validates successful bodies", async () => {
+    const err = await transcribeRecording(file, async () =>
+      Response.json({ error: { code: "no_speech", message: "No speech" } }, { status: 422 }),
+    );
+    expect(err).toEqual({ ok: false, code: "no_speech", message: "No speech" });
+
+    const malformed = await transcribeRecording(file, async () => Response.json({ narration: { transcript: 4 } }));
+    expect(malformed).toMatchObject({ ok: false, code: "invalid_response" });
+
+    const good = await transcribeRecording(file, async (_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ fileName: "narration.wav", audioBase64: "UklGRg==" });
+      return Response.json({
+        sourceDigest: "f".repeat(64),
+        model: "WHISPER_TINY",
+        transcribeMs: 1,
+        narration: toNarration(WEEKLY_REPORT_NARRATION_FIXTURE),
+      });
+    });
+    expect(good.ok).toBe(true);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/replay/service-client.ts">
+
+```typescript
+import {
+  parseServiceError,
+  parseTranscribeResponse,
+  SERVICE_URL,
+  type Parsed,
+  type TranscribeResponse,
+} from "./service-contract.ts";
+
+export type ClientResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
+
+// Every call can fail in three different ways, and the UI says which one happened.
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+  parse: (json: unknown) => Parsed<T>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ClientResult<T>> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${SERVICE_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return {
+      ok: false,
+      code: "service_unreachable",
+      message: "The local QVAC service is not running. Start it with npm run qvac:service. Manual editing still works.",
+    };
+  }
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    return { ok: false, code: "invalid_response", message: "The service answered with something that is not JSON" };
+  }
+  if (!response.ok) {
+    const error = parseServiceError(json);
+    return { ok: false, code: error?.code ?? "service_error", message: error?.message ?? `HTTP ${response.status}` };
+  }
+  const parsed = parse(json);
+  return parsed.ok ? parsed : { ok: false, code: "invalid_response", message: parsed.message };
+}
+
+export async function fileToBase64(file: Blob) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export async function transcribeRecording(
+  file: File,
+  fetchImpl?: typeof fetch,
+): Promise<ClientResult<TranscribeResponse>> {
+  const audioBase64 = await fileToBase64(file);
+  return postJson("/v1/transcribe", { fileName: file.name, audioBase64 }, parseTranscribeResponse, fetchImpl);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/service-contract.ts">
+
+```typescript
+// Shapes that cross the loopback boundary between the browser and the QVAC service.
+// JSON from another process can be anything, so both sides validate at runtime.
+import type { Narration } from "./narration.ts";
+
+export const SERVICE_PORT = 4319;
+export const SERVICE_URL = `http://127.0.0.1:${SERVICE_PORT}`;
+
+export type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
+
+export type ModelState = { kind: string; id: string; state: "not_loaded" | "loading" | "ready" | "error" };
+
+export type ServiceError = { error: { code: string; message: string } };
+
+export type TranscribeRequest = { fileName: string; audioBase64: string };
+export type TranscribeResponse = {
+  sourceDigest: string;
+  model: string;
+  transcribeMs: number;
+  narration: Narration;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= max;
+}
+
+export function parseTranscribeRequest(json: unknown): Parsed<TranscribeRequest> {
+  if (!isRecord(json)) return { ok: false, message: "Body must be an object" };
+  if (!nonEmptyString(json.fileName, 200)) return { ok: false, message: "fileName is required" };
+  if (!/\.wav$/i.test(json.fileName)) return { ok: false, message: "Only .wav recordings are supported" };
+  if (!nonEmptyString(json.audioBase64, 40_000_000)) return { ok: false, message: "audioBase64 is required" };
+  return { ok: true, value: { fileName: json.fileName, audioBase64: json.audioBase64 } };
+}
+
+export function parseTranscribeResponse(json: unknown): Parsed<TranscribeResponse> {
+  if (!isRecord(json) || !isRecord(json.narration)) return { ok: false, message: "Missing narration" };
+  const n = json.narration;
+  if (typeof n.transcript !== "string" || !Array.isArray(n.segments)) {
+    return { ok: false, message: "Narration is malformed" };
+  }
+  const segmentsOk = n.segments.every(
+    (s) => isRecord(s) && typeof s.text === "string" && typeof s.startMs === "number" && typeof s.endMs === "number",
+  );
+  if (!segmentsOk || typeof json.model !== "string" || typeof json.sourceDigest !== "string") {
+    return { ok: false, message: "Narration is malformed" };
+  }
+  return { ok: true, value: json as TranscribeResponse };
+}
+
+export function parseServiceError(json: unknown): ServiceError["error"] | null {
+  if (isRecord(json) && isRecord(json.error) && typeof json.error.code === "string" && typeof json.error.message === "string") {
+    return { code: json.error.code, message: json.error.message };
+  }
+  return null;
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 7 passed (7)`, `Tests 17 passed (17)`. The server tests start a real HTTP server on a random port with a fixture transcriber. They prove health, the digest of received bytes, `400`, `403`, `422 no_speech`, and `500 model_failed`.
+
+## Before continuing
+
+- [ ] `/health` reports the service and model state separately.
+- [ ] A stopped service gives an honest error and the editor still works.
+- [ ] React never imports the SDK.
+
+Continue to [Read screenshots with a local vision model](/replay/04-read-screenshots).

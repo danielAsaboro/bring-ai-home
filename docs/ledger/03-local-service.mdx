@@ -1,0 +1,533 @@
+---
+title: "03. Add the local service boundary"
+description: "We will put a small loopback HTTP service between the browser and QVAC. Health works, bad requests are rejected, and reading deliberately reports unavailable."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Ledger · 03. Add the local service boundary" />
+
+We will put a small HTTP service between the browser and QVAC. At the end of this chapter, health works, bad requests are rejected, and reading a receipt deliberately returns "unavailable". That is the correct result. OCR is not connected yet.
+
+React never imports QVAC. The native runtime lives in its own Node process on `127.0.0.1`.
+
+**Source checkpoint:** `e7a734b` · **Starting checkpoint:** `90a8494`
+
+## What changes
+
+- `src/features/ledger/receipt-contract.ts`: the request and response shapes, with hand-written runtime validation.
+- `src/features/ledger/receipt-client.ts`: the browser-side client.
+- `qvac-service/server.ts`: the HTTP server. It takes a `ReceiptReader` as a parameter.
+- `qvac-service/main.ts`: starts the server with a reader that always refuses.
+- `qvac-service/package.json`: marks the service folder as ES modules.
+- `tsconfig.json`: `allowImportingTsExtensions`, so Node can run the `.ts` files directly.
+- Tests for the server and client.
+
+To compare with the checkpoint: `git diff 90a8494 e7a734b`.
+
+## Build and observe
+
+### 1. Define the contract first
+
+Read `receipt-contract.ts`. A request carries a receipt ID, a file name, and the PNG as base64. It never carries a file path.
+
+A response carries the receipt ID, the SHA-256 of the bytes the service actually received, the OCR model name, the time taken, and the raw blocks.
+
+TypeScript types vanish at runtime. JSON from another process can be anything. So both sides validate with plain functions that return `{ ok: true, value }` or `{ ok: false, message }`.
+
+### 2. Inject the reader
+
+Open `server.ts`. The server does not know about QVAC. It calls `reader.read(png)`. In this chapter, `main.ts` passes `unavailableReader`, which throws `ReaderUnavailableError`. The server turns that into a typed `503`:
+
+```json
+{ "error": { "code": "ocr_unavailable", "message": "OCR is not connected yet" } }
+```
+
+The UI can show that honestly. It never needs to invent a result.
+
+### 3. Start the service
+
+```bash
+npm run qvac:service
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:4318/health
+```
+
+You should see:
+
+```json
+{"service":"ready","models":[{"kind":"ocr","id":"not-configured","state":"not_loaded"}]}
+```
+
+The process is ready. The model is not. Those are different things.
+
+Now try a read:
+
+```bash
+curl -X POST http://127.0.0.1:4318/v1/read-receipt \
+  -d '{"receiptId":"r1","fileName":"x.png","pngBase64":"aGk="}'
+```
+
+Expected: the `ocr_unavailable` error above.
+
+### 4. Check the local boundary
+
+The service binds to `127.0.0.1` only. Browser requests from any origin other than `localhost`, `127.0.0.1`, or `[::1]` get `403`. This stops a random website from calling your receipt reader.
+
+This is not authentication. Other software on your own machine can still call it. Keep it on your development machine.
+
+You may see a Node warning about module type for `receipt-contract.ts`. It is harmless. Node reparses the file as an ES module.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="src/features/ledger/receipt-contract.ts">
+
+```typescript
+// The HTTP contract between the Ledger UI and the local QVAC service.
+// TypeScript types disappear at runtime, so both sides validate JSON by hand.
+
+export type OcrBlock = {
+  text: string;
+  bbox: [number, number, number, number] | null;
+  confidence: number | null;
+};
+
+export type ModelState = {
+  kind: "ocr";
+  id: string;
+  state: "not_loaded" | "loading" | "ready" | "error";
+};
+
+export type HealthResponse = {
+  service: "ready";
+  models: ModelState[];
+};
+
+export type ReadReceiptRequest = {
+  receiptId: string;
+  fileName: string;
+  pngBase64: string;
+};
+
+export type ReadReceiptResponse = {
+  receiptId: string;
+  sourceDigest: string;
+  ocrModel: string;
+  ocrMs: number | null;
+  blocks: OcrBlock[];
+};
+
+export type ServiceError = { error: { code: string; message: string } };
+
+type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+export const MAX_PNG_BASE64_LENGTH = 8_000_000;
+
+export function parseReadReceiptRequest(value: unknown): Result<ReadReceiptRequest> {
+  if (!isRecord(value)) return { ok: false, message: "Request body must be a JSON object" };
+  const { receiptId, fileName, pngBase64 } = value;
+  if (!isNonEmptyString(receiptId)) return { ok: false, message: "receiptId is required" };
+  if (!isNonEmptyString(fileName)) return { ok: false, message: "fileName is required" };
+  if (!isNonEmptyString(pngBase64)) return { ok: false, message: "pngBase64 is required" };
+  if (pngBase64.length > MAX_PNG_BASE64_LENGTH) {
+    return { ok: false, message: "Receipt image is too large" };
+  }
+  return { ok: true, value: { receiptId, fileName, pngBase64 } };
+}
+
+function parseBlock(value: unknown): OcrBlock | null {
+  if (!isRecord(value) || typeof value.text !== "string") return null;
+  const bbox = value.bbox;
+  const validBbox =
+    Array.isArray(bbox) &&
+    bbox.length === 4 &&
+    bbox.every((n) => typeof n === "number" && Number.isFinite(n));
+  if (bbox !== null && bbox !== undefined && !validBbox) return null;
+  const confidence = value.confidence;
+  if (
+    confidence !== null &&
+    confidence !== undefined &&
+    (typeof confidence !== "number" || confidence < 0 || confidence > 1)
+  ) {
+    return null;
+  }
+  return {
+    text: value.text,
+    bbox: validBbox ? (bbox as [number, number, number, number]) : null,
+    confidence: typeof confidence === "number" ? confidence : null,
+  };
+}
+
+export function parseReadReceiptResponse(value: unknown): Result<ReadReceiptResponse> {
+  if (!isRecord(value)) return { ok: false, message: "Response must be a JSON object" };
+  const { receiptId, sourceDigest, ocrModel, ocrMs, blocks } = value;
+  if (!isNonEmptyString(receiptId) || !isNonEmptyString(sourceDigest) || !isNonEmptyString(ocrModel)) {
+    return { ok: false, message: "Response is missing receipt identity" };
+  }
+  if (ocrMs !== null && (typeof ocrMs !== "number" || ocrMs < 0)) {
+    return { ok: false, message: "ocrMs must be a non-negative number or null" };
+  }
+  if (!Array.isArray(blocks)) return { ok: false, message: "blocks must be an array" };
+  const parsed: OcrBlock[] = [];
+  for (const block of blocks) {
+    const item = parseBlock(block);
+    if (!item) return { ok: false, message: "A block has an invalid shape" };
+    parsed.push(item);
+  }
+  return {
+    ok: true,
+    value: { receiptId, sourceDigest, ocrModel, ocrMs: ocrMs as number | null, blocks: parsed },
+  };
+}
+
+export function parseHealthResponse(value: unknown): Result<HealthResponse> {
+  if (!isRecord(value) || value.service !== "ready" || !Array.isArray(value.models)) {
+    return { ok: false, message: "Invalid health response" };
+  }
+  return { ok: true, value: value as HealthResponse };
+}
+
+export function parseServiceError(value: unknown): ServiceError | null {
+  if (!isRecord(value) || !isRecord(value.error)) return null;
+  const { code, message } = value.error;
+  if (!isNonEmptyString(code) || !isNonEmptyString(message)) return null;
+  return { error: { code, message } };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/ledger/receipt-client.ts">
+
+```typescript
+import {
+  parseHealthResponse,
+  parseReadReceiptResponse,
+  parseServiceError,
+  type HealthResponse,
+  type ReadReceiptResponse,
+} from "./receipt-contract";
+
+export type ReceiptClient = {
+  health(signal?: AbortSignal): Promise<HealthResponse>;
+  readReceipt(
+    input: { receiptId: string; fileName: string; pngBytes: ArrayBuffer },
+    signal?: AbortSignal,
+  ): Promise<ReadReceiptResponse>;
+};
+
+function bytesToBase64(bytes: ArrayBuffer): string {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  for (let offset = 0; offset < view.length; offset += 0x8000) {
+    binary += String.fromCharCode(...view.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export function createReceiptClient(
+  options: { baseUrl?: string; fetchImpl?: typeof fetch } = {},
+): ReceiptClient {
+  const baseUrl = (
+    options.baseUrl ??
+    process.env.NEXT_PUBLIC_LEDGER_QVAC_URL ??
+    "http://127.0.0.1:4318"
+  ).replace(/\/$/, "");
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  async function readJson(response: Response, invalid: string): Promise<unknown> {
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new Error(invalid);
+    }
+    if (!response.ok) {
+      throw new Error(parseServiceError(value)?.error.message ?? invalid);
+    }
+    return value;
+  }
+
+  return {
+    async health(signal) {
+      const response = await fetchImpl(`${baseUrl}/health`, { signal });
+      const parsed = parseHealthResponse(
+        await readJson(response, "Local service returned an invalid health response"),
+      );
+      if (!parsed.ok) throw new Error(parsed.message);
+      return parsed.value;
+    },
+    async readReceipt(input, signal) {
+      const response = await fetchImpl(`${baseUrl}/v1/read-receipt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          receiptId: input.receiptId,
+          fileName: input.fileName,
+          pngBase64: bytesToBase64(input.pngBytes),
+        }),
+        signal,
+      });
+      const parsed = parseReadReceiptResponse(
+        await readJson(response, "Local service returned an invalid receipt response"),
+      );
+      if (!parsed.ok) throw new Error(parsed.message);
+      return parsed.value;
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createHash } from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+import {
+  parseReadReceiptRequest,
+  type ModelState,
+  type OcrBlock,
+} from "../src/features/ledger/receipt-contract.ts";
+
+export class ReaderUnavailableError extends Error {}
+
+// The only door to QVAC. Lesson 03 injects a reader that always refuses.
+export type ReceiptReader = {
+  modelState(): ModelState;
+  read(png: Buffer): Promise<{ blocks: OcrBlock[]; ocrMs: number | null }>;
+};
+
+export const unavailableReader: ReceiptReader = {
+  modelState: () => ({ kind: "ocr", id: "not-configured", state: "not_loaded" }),
+  async read() {
+    throw new ReaderUnavailableError("OCR is not connected yet");
+  },
+};
+
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (origin) {
+    headers["access-control-allow-origin"] = origin;
+    headers["vary"] = "Origin";
+  }
+  res.writeHead(status, headers);
+  res.end(JSON.stringify(body));
+}
+
+function error(code: string, message: string) {
+  return { error: { code, message } };
+}
+
+async function readBody(req: IncomingMessage, limit: number): Promise<string> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new Error("too_large");
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export function createReceiptServer(reader: ReceiptReader) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (origin !== undefined && !LOOPBACK_ORIGIN.test(origin)) {
+      send(res, 403, error("origin_rejected", "Only loopback origins may call this service"));
+      return;
+    }
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": origin ?? "",
+        "access-control-allow-methods": "GET, POST",
+        "access-control-allow-headers": "content-type",
+      });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/health") {
+      send(res, 200, { service: "ready", models: [reader.modelState()] }, origin);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/read-receipt") {
+      let json: unknown;
+      try {
+        json = JSON.parse(await readBody(req, 10_000_000));
+      } catch {
+        send(res, 400, error("invalid_json", "Body must be JSON under 10 MB"), origin);
+        return;
+      }
+      const parsed = parseReadReceiptRequest(json);
+      if (!parsed.ok) {
+        send(res, 400, error("invalid_request", parsed.message), origin);
+        return;
+      }
+      const png = Buffer.from(parsed.value.pngBase64, "base64");
+      const sourceDigest = createHash("sha256").update(png).digest("hex");
+      try {
+        const { blocks, ocrMs } = await reader.read(png);
+        send(
+          res,
+          200,
+          {
+            receiptId: parsed.value.receiptId,
+            sourceDigest,
+            ocrModel: reader.modelState().id,
+            ocrMs,
+            blocks,
+          },
+          origin,
+        );
+      } catch (cause) {
+        if (cause instanceof ReaderUnavailableError) {
+          send(res, 503, error("ocr_unavailable", cause.message), origin);
+          return;
+        }
+        const message = cause instanceof Error ? cause.message : String(cause);
+        send(res, 500, error("ocr_failed", message), origin);
+      }
+      return;
+    }
+    send(res, 404, error("not_found", "Unknown route"), origin);
+  });
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/main.ts">
+
+```typescript
+import { createReceiptServer, unavailableReader } from "./server.ts";
+
+const port = Number(process.env.LEDGER_QVAC_PORT ?? 4318);
+const server = createReceiptServer(unavailableReader);
+
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write(`Ledger QVAC service listening on http://127.0.0.1:${port}\n`);
+});
+
+function shutdown() {
+  server.close(() => process.exit(0));
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+// @vitest-environment node
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { createReceiptServer, unavailableReader, type ReceiptReader } from "./server.ts";
+
+const servers: ReturnType<typeof createReceiptServer>[] = [];
+
+async function start(reader: ReceiptReader) {
+  const server = createReceiptServer(reader);
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+});
+
+const validBody = JSON.stringify({
+  receiptId: "r1",
+  fileName: "receipt.png",
+  pngBase64: Buffer.from("png bytes").toString("base64"),
+});
+
+describe("local receipt service", () => {
+  it("reports process health separately from model readiness", async () => {
+    const url = await start(unavailableReader);
+    const response = await fetch(`${url}/health`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      service: "ready",
+      models: [{ kind: "ocr", id: "not-configured", state: "not_loaded" }],
+    });
+  });
+
+  it("returns typed unavailability instead of inventing OCR", async () => {
+    const url = await start(unavailableReader);
+    const response = await fetch(`${url}/v1/read-receipt`, { method: "POST", body: validBody });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: "ocr_unavailable", message: "OCR is not connected yet" },
+    });
+  });
+
+  it("rejects invalid requests before calling the reader", async () => {
+    const read = vi.fn();
+    const url = await start({ ...unavailableReader, read });
+    const response = await fetch(`${url}/v1/read-receipt`, {
+      method: "POST",
+      body: JSON.stringify({ receiptId: "r1" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-loopback browser origins", async () => {
+    const url = await start(unavailableReader);
+    const response = await fetch(`${url}/health`, {
+      headers: { origin: "https://example.com" },
+    });
+
+    expect(response.status).toBe(403);
+  });
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm test -- qvac-service/server.test.ts src/features/ledger/receipt-client.test.ts
+```
+
+Expected: 7 tests pass. The server tests prove health, typed unavailability, request rejection before the reader is called, and origin rejection. These use a real HTTP server on a random port and no model.
+
+Full set:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 5 passed (5)`, `Tests 11 passed (11)`.
+
+## Before continuing
+
+- [ ] `/health` reports the service ready and the model not loaded.
+- [ ] Reading a receipt returns `ocr_unavailable`, not fake text.
+- [ ] An invalid request never reaches the reader.
+
+Continue to [Turn OCR into draft transactions](/ledger/04-draft-transactions).

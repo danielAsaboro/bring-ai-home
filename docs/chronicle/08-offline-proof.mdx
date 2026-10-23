@@ -1,0 +1,219 @@
+---
+title: "08. Prove it offline"
+description: "We will run Chronicle's local AI with the process denied network access by the operating system. Then a passing run shows the models really are local, not just cached by luck."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Chronicle · 08. Prove it offline" />
+
+We will run Chronicle's local AI with the process denied network access by the operating system. Then a passing run shows the models really are local, not just cached by luck.
+
+A warm cache is not an offline proof. The SDK could still reach out for something. So we deny the network to the process and check that the denial is real before we trust the result.
+
+**Source checkpoint:** `2982ce3` · **Starting checkpoint:** `e503d4b`
+
+## What you change
+
+| File | Change |
+| --- | --- |
+| `qvac-service/offline.sb` | macOS sandbox profile: deny outbound network except loopback and local sockets |
+| `qvac-service/offline-proof.ts` | Check the cache is warm and classify a network probe |
+| `qvac-service/offline-check.mjs` | Probe the network, then index and retrieve with the cached embedding model |
+| `package.json` | Add `qvac:offline` and `qvac:service:offline` |
+
+## Build and observe
+
+### 1. Warm the cache while online
+
+```bash
+npm run qvac:index-smoke
+npm run qvac:caption-smoke
+ls -l .qvac/models
+```
+
+Both `gte-large_fp16.gguf` and `Llama-3.2-1B-Instruct-Q4_0.gguf` must be there and larger than 0 bytes. A 0-byte file is a download that never finished. `assertWarmedCache` treats it as missing.
+
+### 2. Read the policy before running it
+
+This lesson needs macOS, because it uses `sandbox-exec`. Apple marks the tool as deprecated, but it still works on current macOS. The same command is not an offline proof on Linux or Windows.
+
+Open `qvac-service/offline.sb`. It denies outbound network for the process and its children. It still allows loopback and Unix sockets, which the QVAC worker and the browser-to-service link need.
+
+### 3. Run the offline check
+
+```bash
+npm run qvac:offline
+```
+
+The script first connects to `https://example.com`. That host exists, so a failure means the sandbox blocked the connection, not that the name did not resolve. `classifyProbe` reports `dns-failed` separately, and the script stops in that case. Then it builds the index and runs one recollection with the cached model. Read `network`, `moments`, and `elapsedMs`.
+
+If the worker fails to start under the policy, the profile may be blocking local worker communication. Fix the profile, not the app.
+
+### 4. Run the app against an offline service
+
+```bash
+npm run qvac:service:offline
+```
+
+In another terminal, run `npm run dev`. Draft, review, and publish an issue as in Chapter 7. The service process cannot reach the internet. The browser can, so open your browser's network panel and confirm that the only call is to `127.0.0.1:4318`.
+
+### 5. Know what this proves
+
+It proves the QVAC process ran inference with outbound network denied. It does not prove the whole computer was offline. It does not prove the model is right. A person still reviews every draft.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+
+<AccordionGroup>
+<Accordion title="qvac-service/offline-proof.ts">
+
+```typescript
+// Each pattern must match at least one non-empty file in the model cache.
+export const REQUIRED_MODELS: Record<string, RegExp> = {
+  embeddings: /gte-large/i,
+  captions: /llama-3\.2-1b/i,
+};
+
+export function assertWarmedCache(
+  files: readonly { name: string; bytes: number }[],
+  required: Record<string, RegExp> = REQUIRED_MODELS,
+) {
+  const missing = Object.entries(required)
+    .filter(([, pattern]) => !files.some((f) => pattern.test(f.name) && f.bytes > 0))
+    .map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(
+      `QVAC cache is incomplete (${missing.join(", ")}). Warm it online with qvac:index-smoke and qvac:caption-smoke first.`,
+    );
+  }
+}
+
+// Classify a probe to a reachable public host. Only a refused connection counts.
+export function classifyProbe(result: { ok: true } | { ok: false; code: string | undefined }) {
+  if (result.ok) return "network-allowed" as const;
+  if (result.code === "ENOTFOUND" || result.code === "EAI_AGAIN") return "dns-failed" as const;
+  return "network-denied" as const;
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-check.mjs">
+
+```javascript
+import { readdir, stat } from "node:fs/promises";
+import https from "node:https";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const qvacDirectory = path.join(appDirectory, ".qvac");
+const cacheDirectory = path.join(qvacDirectory, "models");
+const configPath = path.join(qvacDirectory, "config.json");
+const recollection = "that time on the sand with the red blanket";
+
+const { assertWarmedCache, classifyProbe } = await import("./offline-proof.ts");
+const { sampleArchive } = await import("../src/features/chronicle/archive.ts");
+const { buildMemoryIndex } = await import("../src/features/chronicle/memory-index.ts");
+const { retrieveMoments } = await import("../src/features/chronicle/retrieve.ts");
+
+function probe() {
+  return new Promise((resolve) => {
+    const req = https.get("https://example.com/", { timeout: 5000 }, (res) => {
+      res.resume();
+      resolve({ ok: true });
+    });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
+    req.on("error", (error) => resolve({ ok: false, code: error.code }));
+  });
+}
+
+let sdk;
+let modelId;
+try {
+  const names = await readdir(cacheDirectory);
+  const files = await Promise.all(
+    names.map(async (name) => ({ name, bytes: (await stat(path.join(cacheDirectory, name))).size })),
+  );
+  assertWarmedCache(files);
+
+  const network = classifyProbe(await probe());
+  if (network !== "network-denied") {
+    throw new Error(`Expected the process to be denied network access, got ${network}`);
+  }
+
+  process.env.QVAC_CONFIG_PATH = configPath;
+  sdk = await import("@qvac/sdk");
+  const startedAt = Date.now();
+  modelId = await sdk.loadModel({ modelSrc: sdk.GTE_LARGE_FP16, modelType: "embeddings" });
+  const index = await buildMemoryIndex(sampleArchive, "GTE_LARGE_FP16", async (texts) => {
+    const { embedding } = await sdk.embed({ modelId, text: texts });
+    return embedding;
+  });
+  const { embedding } = await sdk.embed({ modelId, text: recollection });
+  const moments = retrieveMoments(index, embedding, { limit: 3, minScore: 0.3 });
+  process.stdout.write(
+    `${JSON.stringify(
+      { network, recollection, moments, elapsedMs: Date.now() - startedAt },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`Offline proof failed: ${message}\n`);
+  process.exitCode = 1;
+} finally {
+  if (sdk && modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline.sb">
+
+```scheme
+(version 1)
+(allow default)
+; Deny every outbound connection except loopback and local sockets.
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- qvac-service/offline-proof.test.ts
+```
+
+Expected result: 1 test file passes, 3 tests pass. They use hand-written file listings and probe results, not a real sandbox run.
+
+These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+
+Run the broader checks separately, from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 08: Prove it offline"
+```
+
+## Before continuing
+
+- [ ] `npm run qvac:offline` reported `network-denied` and returned moments.
+- [ ] You drafted and published an issue with the service under the policy.
+
+You finished the Chronicle course.

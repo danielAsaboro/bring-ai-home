@@ -1,0 +1,51 @@
+---
+title: "Build Lookout"
+description: "An event-first control room for cameras and visual sources you own."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**Written course: 8 lessons.** Every lesson is written and tested against fixtures. Videos are being filmed in order.
+</Info>
+
+<LessonVideo title="Lookout: Tell me if the stove is left on, with no cloud" />
+
+Motion alerts are noisy, rules are brittle, and the event you care about disappears inside hours of footage.
+
+**QVAC capabilities:** Multimodal · Image classification · Text generation
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Arm sources and configure time and motion rules by hand. |
+| **With QVAC** | Describe a condition in plain words, inspect the proposed watcher, replay recorded events, and tune out false positives. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | [Build the Lookout starter](/lookout/01-starter) | Written · video in production |
+| 02 | [Check one frame against a plain-language condition](/lookout/02-check-frame) | Written · video in production |
+| 03 | [Add the local service boundary](/lookout/03-local-service) | Written · video in production |
+| 04 | [Turn a sentence into an inspectable watcher rule](/lookout/04-watcher-rule) | Written · video in production |
+| 05 | [Evaluate watchers on the event tape](/lookout/05-evaluate-watchers) | Written · video in production |
+| 06 | [Measure and tune false positives](/lookout/06-tune-false-positives) | Written · video in production |
+| 07 | [Hand inference to a stronger device](/lookout/07-delegated-inference) | Written · video in production |
+| 08 | [Prove footage never leaves the machine](/lookout/08-offline-proof) | Written · video in production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Borrow your Mac's GPU" icon="sparkles">
+    A small camera device hands inference to your Mac through QVAC delegated inference, so footage stays home.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+<Card title="Start lesson 01" icon="play" href="/lookout/01-starter">
+  Build the app first, then add QVAC one lesson at a time.
+</Card>

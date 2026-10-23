@@ -1,0 +1,335 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Bring AI Home",
+  "description": "Learn local AI by building real apps with QVAC: video lessons, written walkthroughs, and tested checkpoints.",
+  "colors": {
+    "primary": "#D4513D",
+    "light": "#F07761",
+    "dark": "#B64030"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Start here",
+        "groups": [
+          {
+            "group": "Welcome",
+            "pages": [
+              "index",
+              "start-here/how-it-works",
+              "local-ai"
+            ]
+          },
+          {
+            "group": "All projects",
+            "pages": [
+              "apps"
+            ]
+          },
+          {
+            "group": "Foundations",
+            "pages": [
+              "start-here/ai-is-not-one-box",
+              "start-here/first-qvac-app"
+            ]
+          },
+          {
+            "group": "Case study",
+            "pages": [
+              "leash/overview"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Redact",
+        "icon": "file-shield",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "redact/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "redact/01-starter",
+              "redact/02-first-ocr",
+              "redact/03-local-service",
+              "redact/04-connect-ocr",
+              "redact/05-coordinate-mapping",
+              "redact/06-sensitive-suggestions",
+              "redact/07-human-review",
+              "redact/08-failure-recovery",
+              "redact/09-evaluation",
+              "redact/10-offline-proof"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": [
+              "redact/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Ledger",
+        "icon": "book",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "ledger/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "ledger/01-starter",
+              "ledger/02-first-ocr",
+              "ledger/03-local-service",
+              "ledger/04-draft-transactions",
+              "ledger/05-categories",
+              "ledger/06-similar-entries",
+              "ledger/07-review-and-accept",
+              "ledger/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chronicle",
+        "icon": "book-open",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "chronicle/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "chronicle/01-starter",
+              "chronicle/02-describe-photo",
+              "chronicle/03-transcribe-memory",
+              "chronicle/04-index-archive",
+              "chronicle/05-retrieve-moments",
+              "chronicle/06-draft-captions",
+              "chronicle/07-review-publish",
+              "chronicle/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Circle",
+        "icon": "address-book",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "circle/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "circle/01-starter",
+              "circle/02-transcribe-recap",
+              "circle/03-local-service",
+              "circle/04-structured-extraction",
+              "circle/05-confirm-proposals",
+              "circle/06-retrieve-context",
+              "circle/07-draft-followup",
+              "circle/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Homebook",
+        "icon": "house",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "homebook/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "homebook/01-starter",
+              "homebook/02-read-label",
+              "homebook/03-local-service",
+              "homebook/04-identify-photo",
+              "homebook/05-ingest-manuals",
+              "homebook/06-cited-answers",
+              "homebook/07-maintenance-summaries",
+              "homebook/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Pattern",
+        "icon": "shuffle",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "pattern/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "pattern/01-starter",
+              "pattern/02-propose-rules",
+              "pattern/03-local-service",
+              "pattern/04-readable-rules",
+              "pattern/05-counterexamples",
+              "pattern/06-similar-patterns",
+              "pattern/07-lora-finetune",
+              "pattern/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Replay",
+        "icon": "cassette-tape",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "replay/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "replay/01-starter",
+              "replay/02-transcribe-narration",
+              "replay/03-local-service",
+              "replay/04-read-screenshots",
+              "replay/05-propose-steps",
+              "replay/06-parameters-and-stop-conditions",
+              "replay/07-find-a-tape",
+              "replay/08-export-skill",
+              "replay/09-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Closet",
+        "icon": "shirt",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "closet/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "closet/01-starter",
+              "closet/02-describe-garment",
+              "closet/03-local-service",
+              "closet/04-reviewed-details",
+              "closet/05-wardrobe-classifier",
+              "closet/06-retrieve-looks",
+              "closet/07-propose-outfits",
+              "closet/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Lookout",
+        "icon": "eye",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "lookout/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "lookout/01-starter",
+              "lookout/02-check-frame",
+              "lookout/03-local-service",
+              "lookout/04-watcher-rule",
+              "lookout/05-evaluate-watchers",
+              "lookout/06-tune-false-positives",
+              "lookout/07-delegated-inference",
+              "lookout/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Deck",
+        "icon": "layer-group",
+        "groups": [
+          {
+            "group": "Start",
+            "pages": [
+              "deck/overview"
+            ]
+          },
+          {
+            "group": "Build it",
+            "pages": [
+              "deck/01-starter",
+              "deck/02-ingest-notes",
+              "deck/03-local-service",
+              "deck/04-cited-claims",
+              "deck/05-reusable-evidence",
+              "deck/06-beats-and-pacing",
+              "deck/07-house-rubric-lora",
+              "deck/08-offline-proof"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contribute",
+        "groups": [
+          {
+            "group": "Working locally",
+            "pages": [
+              "development"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Leash",
+        "href": "https://github.com/danielAsaboro/leash"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Start learning",
+      "href": "/start-here/how-it-works"
+    }
+  }
+}

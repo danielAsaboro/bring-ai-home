@@ -1,0 +1,912 @@
+---
+title: "01. Build the Closet starter"
+description: "We will build Closet without any AI: a private fashion feed of clothes you own, with a garment catalogue, outfit posts, garment states, and a packing carousel."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Closet · 01. Build the Closet starter" />
+
+Most people own more outfits than they remember. The shirt that only works with one pair of trousers, the jacket that is always in the wash on the morning you need it, the weekend bag that ends up with three pairs of shoes. Closet is a private fashion feed built from clothes you actually own.
+
+This chapter builds the whole product without AI. That is on purpose. Every later chapter adds one local capability, and the app must keep working when that capability is missing.
+
+**Source checkpoint:** `807dd99` · **Starting checkpoint:** `24c8b36`
+
+## What changes
+
+| File | Change |
+| --- | --- |
+| `src/features/closet/model.ts` | The domain: categories, garment states and their allowed transitions, looks, and the packing limit |
+| `src/features/closet/sample-closet.ts` | A fictional twelve-garment wardrobe, four outfit posts, and one trip |
+| `src/features/closet/closet-store.ts` | The only code that touches `localStorage`, with reset and corrupt-data recovery |
+| `src/features/closet/ClosetApp.tsx` | Feed, Garments, Assemble, and Packing tabs |
+| `public/garments/*.png` | Twelve flat drawings of fictional garments |
+| `vitest.setup.ts` | Clean up rendered components between tests |
+| `package-lock.json` | Lock the starter dependencies |
+
+To compare with the previous checkpoint: `git diff 24c8b36 807dd99`.
+
+## Build and observe
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/danielAsaboro/bring-ai-home
+cd bring-ai-home/apps/closet
+git checkout 807dd99
+node --version
+npm ci
+npm run dev
+```
+
+The app lives in `apps/closet` of the Bring AI Home repository. The repository publishes soon; until then the link may not open.
+
+Use Node 22.22.2 or newer. Open `http://localhost:3000`.
+
+### 2. Read the feed
+
+The Feed tab shows four outfit posts, newest first, and a row of stories counting garments that are worn, washing, or in repair. Every garment and image is invented. The drawings in `public/garments` are simple shapes, safe to share and easy to judge by eye.
+
+### 3. Move a garment through its states
+
+Open **Garments**. The grey tee is `worn`. Its buttons only offer `washing`, `clean`, and `repair`. Open `model.ts` and find `TRANSITIONS`. A clean shirt cannot jump straight into the wash; it has to be worn first. Repair is reachable from anywhere.
+
+Mark the grey tee `washing` and reload the page. It stays `washing`. `closet-store.ts` saved it. That file is the only one that knows about `localStorage`; swap it and the rest of the app does not change.
+
+### 4. Assemble a look
+
+Open **Assemble**, give the look a title, tick two garments, and press **Post look**. It appears at the top of the feed. `createLook` refuses a look with fewer than two garments, and refuses ids that are not in your closet. Keep that rule in mind; a later chapter relies on it when a model proposes garment ids.
+
+### 5. Pack the carousel
+
+Open **Packing**. The Lisbon weekend has a limit of six. Only clean garments appear under **Clean and ready**. Mark a packed garment `worn` in the Garments tab and it leaves the carousel, because you would not pack it.
+
+### 6. Reset
+
+**Reset demo data** clears saved storage and restores the fictional wardrobe.
+
+### 7. Write down the rule for this course
+
+> QVAC may describe, label, rank, and propose. Only Closet's own rules decide what is valid, and only a person adds a garment, posts a look, or packs a bag.
+
+We will test this rule in every chapter.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+
+<AccordionGroup>
+<Accordion title="src/features/closet/model.ts">
+
+```typescript
+// Closet's domain model. Every rule about what a garment, look, or trip may
+// contain lives here, so the UI and (later) any local model can only propose.
+
+export const CATEGORIES = ["top", "bottom", "dress", "outerwear", "shoes", "accessory"] as const;
+export type Category = (typeof CATEGORIES)[number];
+
+export const GARMENT_STATES = ["clean", "worn", "washing", "repair"] as const;
+export type GarmentState = (typeof GARMENT_STATES)[number];
+
+export type Garment = {
+  id: string;
+  name: string;
+  category: Category;
+  colour: string;
+  material: string;
+  notes: string;
+  state: GarmentState;
+  image: string | null;
+};
+
+export type Look = {
+  id: string;
+  title: string;
+  occasion: string;
+  garmentIds: string[];
+  createdAt: string;
+};
+
+export type Trip = {
+  name: string;
+  limit: number;
+  garmentIds: string[];
+};
+
+export type Closet = {
+  garments: Garment[];
+  looks: Look[];
+  trip: Trip;
+};
+
+// Which state a garment may move to next. Repair is reachable from anywhere.
+const TRANSITIONS: Record<GarmentState, GarmentState[]> = {
+  clean: ["worn", "repair"],
+  worn: ["washing", "clean", "repair"],
+  washing: ["clean", "repair"],
+  repair: ["clean"],
+};
+
+export function nextStates(state: GarmentState): GarmentState[] {
+  return TRANSITIONS[state];
+}
+
+export function isCategory(value: unknown): value is Category {
+  return typeof value === "string" && (CATEGORIES as readonly string[]).includes(value);
+}
+
+export function setGarmentState(closet: Closet, id: string, state: GarmentState): Closet {
+  const garment = closet.garments.find((g) => g.id === id);
+  if (!garment) throw new Error(`Unknown garment ${id}`);
+  if (!TRANSITIONS[garment.state].includes(state)) {
+    throw new Error(`${garment.name} cannot go from ${garment.state} to ${state}`);
+  }
+  // A garment that is no longer clean leaves the packing carousel.
+  const trip =
+    state === "clean"
+      ? closet.trip
+      : { ...closet.trip, garmentIds: closet.trip.garmentIds.filter((g) => g !== id) };
+  return {
+    ...closet,
+    trip,
+    garments: closet.garments.map((g) => (g.id === id ? { ...g, state } : g)),
+  };
+}
+
+export type GarmentDraft = Omit<Garment, "id" | "state"> & { state?: GarmentState };
+
+function slug(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "item";
+}
+
+function uniqueId(base: string, taken: Set<string>) {
+  let id = base;
+  for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`;
+  return id;
+}
+
+export function addGarment(closet: Closet, draft: GarmentDraft): Closet {
+  const name = draft.name.trim();
+  if (!name) throw new Error("A garment needs a name");
+  if (!isCategory(draft.category)) throw new Error("Choose a category");
+  const id = uniqueId(slug(name), new Set(closet.garments.map((g) => g.id)));
+  const garment: Garment = {
+    id,
+    name,
+    category: draft.category,
+    colour: draft.colour.trim(),
+    material: draft.material.trim(),
+    notes: draft.notes.trim(),
+    state: draft.state ?? "clean",
+    image: draft.image,
+  };
+  return { ...closet, garments: [...closet.garments, garment] };
+}
+
+export function updateGarment(
+  closet: Closet,
+  id: string,
+  patch: Partial<Pick<Garment, "name" | "category" | "colour" | "material" | "notes">>,
+): Closet {
+  if (patch.name !== undefined && !patch.name.trim()) throw new Error("A garment needs a name");
+  if (patch.category !== undefined && !isCategory(patch.category)) throw new Error("Choose a category");
+  return {
+    ...closet,
+    garments: closet.garments.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+  };
+}
+
+export function createLook(
+  closet: Closet,
+  input: { title: string; occasion: string; garmentIds: string[] },
+  now: Date = new Date(),
+): Closet {
+  const title = input.title.trim();
+  if (!title) throw new Error("A look needs a title");
+  const ids = [...new Set(input.garmentIds)];
+  if (ids.length < 2) throw new Error("A look needs at least two garments");
+  const known = new Set(closet.garments.map((g) => g.id));
+  const unknown = ids.filter((id) => !known.has(id));
+  if (unknown.length) throw new Error(`Unknown garments: ${unknown.join(", ")}`);
+  const id = uniqueId(`look-${slug(title)}`, new Set(closet.looks.map((l) => l.id)));
+  const look: Look = {
+    id,
+    title,
+    occasion: input.occasion.trim(),
+    garmentIds: ids,
+    createdAt: now.toISOString(),
+  };
+  return { ...closet, looks: [look, ...closet.looks] };
+}
+
+export function packGarment(closet: Closet, id: string): Closet {
+  const garment = closet.garments.find((g) => g.id === id);
+  if (!garment) throw new Error(`Unknown garment ${id}`);
+  if (closet.trip.garmentIds.includes(id)) return closet;
+  if (garment.state !== "clean") throw new Error(`${garment.name} is not clean`);
+  if (closet.trip.garmentIds.length >= closet.trip.limit) {
+    throw new Error(`The carousel is full (${closet.trip.limit} items)`);
+  }
+  return { ...closet, trip: { ...closet.trip, garmentIds: [...closet.trip.garmentIds, id] } };
+}
+
+export function unpackGarment(closet: Closet, id: string): Closet {
+  return {
+    ...closet,
+    trip: { ...closet.trip, garmentIds: closet.trip.garmentIds.filter((g) => g !== id) },
+  };
+}
+
+export function setTripLimit(closet: Closet, limit: number): Closet {
+  const safe = Math.max(1, Math.min(30, Math.floor(limit)));
+  return {
+    ...closet,
+    trip: { ...closet.trip, limit: safe, garmentIds: closet.trip.garmentIds.slice(0, safe) },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/sample-closet.ts">
+
+```typescript
+import type { Closet } from "./model";
+
+// A fictional wardrobe. Every garment and image is invented for this course.
+export function sampleCloset(): Closet {
+  return {
+    garments: [
+      { id: "navy-blazer", name: "Navy blazer", category: "outerwear", colour: "navy", material: "wool", notes: "Slightly long in the sleeve.", state: "clean", image: "/garments/navy-blazer.png" },
+      { id: "white-oxford", name: "White oxford shirt", category: "top", colour: "white", material: "cotton", notes: "", state: "clean", image: "/garments/white-oxford.png" },
+      { id: "grey-tee", name: "Grey tee", category: "top", colour: "grey", material: "cotton", notes: "", state: "worn", image: "/garments/grey-tee.png" },
+      { id: "striped-breton", name: "Striped breton", category: "top", colour: "white and navy", material: "cotton", notes: "", state: "clean", image: "/garments/striped-breton.png" },
+      { id: "linen-shirt", name: "Linen shirt", category: "top", colour: "sand", material: "linen", notes: "Creases fast.", state: "washing", image: "/garments/linen-shirt.png" },
+      { id: "dark-jeans", name: "Dark jeans", category: "bottom", colour: "indigo", material: "denim", notes: "", state: "clean", image: "/garments/dark-jeans.png" },
+      { id: "olive-chinos", name: "Olive chinos", category: "bottom", colour: "olive", material: "cotton twill", notes: "", state: "clean", image: "/garments/olive-chinos.png" },
+      { id: "black-dress", name: "Black dress", category: "dress", colour: "black", material: "crepe", notes: "", state: "repair", image: "/garments/black-dress.png" },
+      { id: "yellow-raincoat", name: "Yellow raincoat", category: "outerwear", colour: "yellow", material: "waxed cotton", notes: "", state: "clean", image: "/garments/yellow-raincoat.png" },
+      { id: "white-sneakers", name: "White sneakers", category: "shoes", colour: "white", material: "leather", notes: "", state: "clean", image: "/garments/white-sneakers.png" },
+      { id: "brown-boots", name: "Brown boots", category: "shoes", colour: "brown", material: "suede", notes: "", state: "clean", image: "/garments/brown-boots.png" },
+      { id: "red-scarf", name: "Red scarf", category: "accessory", colour: "red", material: "wool", notes: "", state: "clean", image: "/garments/red-scarf.png" },
+    ],
+    looks: [
+      { id: "look-gallery-opening", title: "Gallery opening", occasion: "evening event, smart casual", garmentIds: ["navy-blazer", "white-oxford", "dark-jeans", "brown-boots"], createdAt: "2026-09-18T19:00:00.000Z" },
+      { id: "look-rainy-commute", title: "Rainy commute", occasion: "work day in the rain", garmentIds: ["yellow-raincoat", "striped-breton", "olive-chinos", "brown-boots"], createdAt: "2026-09-12T08:00:00.000Z" },
+      { id: "look-saturday-market", title: "Saturday market", occasion: "relaxed weekend errands", garmentIds: ["grey-tee", "dark-jeans", "white-sneakers"], createdAt: "2026-09-06T10:00:00.000Z" },
+      { id: "look-winter-walk", title: "Winter walk", occasion: "cold outdoor walk", garmentIds: ["navy-blazer", "striped-breton", "olive-chinos", "red-scarf", "brown-boots"], createdAt: "2026-08-30T15:00:00.000Z" },
+    ],
+    trip: { name: "Lisbon weekend", limit: 6, garmentIds: ["white-oxford", "dark-jeans"] },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/closet-store.ts">
+
+```typescript
+import { CATEGORIES, GARMENT_STATES, type Closet } from "./model";
+import { sampleCloset } from "./sample-closet";
+
+export const STORAGE_KEY = "closet:v1";
+
+type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+// The one place Closet touches browser storage. Swap the adapter, keep the app.
+export function createClosetStore(storage: KeyValue | null) {
+  return {
+    load(): Closet {
+      if (!storage) return sampleCloset();
+      try {
+        const raw = storage.getItem(STORAGE_KEY);
+        if (!raw) return sampleCloset();
+        const parsed = JSON.parse(raw) as unknown;
+        return isCloset(parsed) ? parsed : sampleCloset();
+      } catch {
+        return sampleCloset();
+      }
+    },
+    save(closet: Closet) {
+      try {
+        storage?.setItem(STORAGE_KEY, JSON.stringify(closet));
+      } catch {
+        // Storage can be full or blocked; the closet stays usable in memory.
+      }
+    },
+    reset(): Closet {
+      try {
+        storage?.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      return sampleCloset();
+    },
+  };
+}
+
+function isCloset(value: unknown): value is Closet {
+  const v = value as Closet | null;
+  return (
+    !!v &&
+    Array.isArray(v.garments) &&
+    v.garments.every(
+      (g) =>
+        typeof g.id === "string" &&
+        typeof g.name === "string" &&
+        (CATEGORIES as readonly string[]).includes(g.category) &&
+        (GARMENT_STATES as readonly string[]).includes(g.state),
+    ) &&
+    Array.isArray(v.looks) &&
+    !!v.trip &&
+    Array.isArray(v.trip.garmentIds) &&
+    typeof v.trip.limit === "number"
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/ClosetApp.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { createClosetStore } from "./closet-store";
+import {
+  addGarment,
+  CATEGORIES,
+  createLook,
+  nextStates,
+  packGarment,
+  setGarmentState,
+  setTripLimit,
+  unpackGarment,
+  updateGarment,
+  type Category,
+  type Closet,
+  type Garment,
+} from "./model";
+import { sampleCloset } from "./sample-closet";
+
+type Tab = "feed" | "garments" | "assemble" | "packing";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "feed", label: "Feed" },
+  { id: "garments", label: "Garments" },
+  { id: "assemble", label: "Assemble" },
+  { id: "packing", label: "Packing" },
+];
+
+const STATE_STYLE: Record<Garment["state"], string> = {
+  clean: "bg-emerald-100 text-emerald-900",
+  worn: "bg-amber-100 text-amber-900",
+  washing: "bg-sky-100 text-sky-900",
+  repair: "bg-rose-100 text-rose-900",
+};
+
+function browserStorage() {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function ClosetApp() {
+  const store = useMemo(() => createClosetStore(browserStorage()), []);
+  const [closet, setCloset] = useState<Closet>(sampleCloset);
+  const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState<Tab>("feed");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Read saved wardrobe after hydration so server and client markup match.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCloset(store.load());
+    setLoaded(true);
+  }, [store]);
+
+  useEffect(() => {
+    if (loaded) store.save(closet);
+  }, [closet, loaded, store]);
+
+  // Run every change synchronously so domain errors surface in the UI.
+  function act(change: (c: Closet) => Closet) {
+    try {
+      setCloset(change(closet));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const byId = new Map(closet.garments.map((g) => [g.id, g]));
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-6 text-stone-900">
+      <header className="mb-4 flex items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold tracking-tight">Closet</h1>
+        <button
+          type="button"
+          className="rounded border border-stone-300 px-3 py-1 text-sm"
+          onClick={() => act(() => store.reset())}
+        >
+          Reset demo data
+        </button>
+      </header>
+
+      <nav role="tablist" aria-label="Closet sections" className="mb-4 flex gap-1 overflow-x-auto">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            type="button"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={`rounded-full px-4 py-1 text-sm ${tab === t.id ? "bg-stone-900 text-white" : "bg-stone-100"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {error && (
+        <p role="alert" className="mb-3 rounded bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          {error}
+        </p>
+      )}
+
+      {tab === "feed" && <Feed closet={closet} byId={byId} />}
+      {tab === "garments" && <Garments closet={closet} act={act} />}
+      {tab === "assemble" && (
+        <Assemble closet={closet} act={act} onDone={() => setTab("feed")} />
+      )}
+      {tab === "packing" && <Packing closet={closet} byId={byId} act={act} />}
+    </div>
+  );
+}
+
+function Thumb({ garment, size = 64 }: { garment: Garment; size?: number }) {
+  return garment.image ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={garment.image} alt={garment.name} width={size} height={size} className="rounded bg-stone-100" />
+  ) : (
+    <span
+      aria-label={garment.name}
+      style={{ width: size, height: size }}
+      className="flex items-center justify-center rounded bg-stone-200 text-xs"
+    >
+      {garment.category}
+    </span>
+  );
+}
+
+function Feed({ closet, byId }: { closet: Closet; byId: Map<string, Garment> }) {
+  return (
+    <section aria-label="Feed">
+      <ul aria-label="Stories" className="mb-4 flex gap-3 overflow-x-auto pb-2">
+        {(["worn", "washing", "repair"] as const).map((state) => {
+          const count = closet.garments.filter((g) => g.state === state).length;
+          return (
+            <li key={state} className={`shrink-0 rounded-full px-3 py-1 text-sm ${STATE_STYLE[state]}`}>
+              {count} {state}
+            </li>
+          );
+        })}
+      </ul>
+      <ol aria-label="Outfit posts" className="space-y-4">
+        {closet.looks.map((look) => (
+          <li key={look.id} className="rounded-lg border border-stone-200 p-3">
+            <h2 className="font-semibold">{look.title}</h2>
+            <p className="text-sm text-stone-600">{look.occasion}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {look.garmentIds.map((id) => {
+                const g = byId.get(id);
+                return g ? <Thumb key={id} garment={g} /> : null;
+              })}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+const emptyDraft = { name: "", category: "top" as Category, colour: "", material: "", notes: "" };
+
+function Garments({ closet, act }: { closet: Closet; act: (c: (c: Closet) => Closet) => void }) {
+  const [draft, setDraft] = useState(emptyDraft);
+  const [editing, setEditing] = useState<string | null>(null);
+
+  return (
+    <section aria-label="Garments">
+      <form
+        aria-label="Add garment"
+        className="mb-4 grid grid-cols-2 gap-2 rounded-lg bg-stone-50 p-3 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          act((c) => addGarment(c, { ...draft, image: null }));
+          setDraft(emptyDraft);
+        }}
+      >
+        <label className="flex flex-col">
+          Name
+          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="rounded border px-2 py-1" />
+        </label>
+        <label className="flex flex-col">
+          Category
+          <select
+            value={draft.category}
+            onChange={(e) => setDraft({ ...draft, category: e.target.value as Category })}
+            className="rounded border px-2 py-1"
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col">
+          Colour
+          <input value={draft.colour} onChange={(e) => setDraft({ ...draft, colour: e.target.value })} className="rounded border px-2 py-1" />
+        </label>
+        <label className="flex flex-col">
+          Material
+          <input value={draft.material} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className="rounded border px-2 py-1" />
+        </label>
+        <button type="submit" className="col-span-2 rounded bg-stone-900 px-3 py-1 text-white">
+          Add garment
+        </button>
+      </form>
+
+      <ul aria-label="Catalogue" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {closet.garments.map((g) => (
+          <li key={g.id} className="flex gap-3 rounded-lg border border-stone-200 p-2">
+            <Thumb garment={g} />
+            <div className="min-w-0 flex-1 text-sm">
+              {editing === g.id ? (
+                <input
+                  aria-label={`Rename ${g.name}`}
+                  defaultValue={g.name}
+                  autoFocus
+                  onBlur={(e) => {
+                    act((c) => updateGarment(c, g.id, { name: e.target.value }));
+                    setEditing(null);
+                  }}
+                  className="w-full rounded border px-1"
+                />
+              ) : (
+                <button type="button" className="font-semibold" onClick={() => setEditing(g.id)}>
+                  {g.name}
+                </button>
+              )}
+              <p className="text-stone-600">
+                {g.category} · {g.colour} · {g.material}
+              </p>
+              <p className="mt-1 flex flex-wrap items-center gap-1">
+                <span className={`rounded px-2 ${STATE_STYLE[g.state]}`}>{g.state}</span>
+                {nextStates(g.state).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    aria-label={`Mark ${g.name} ${s}`}
+                    onClick={() => act((c) => setGarmentState(c, g.id, s))}
+                    className="rounded border border-stone-300 px-2"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Assemble({
+  closet,
+  act,
+  onDone,
+}: {
+  closet: Closet;
+  act: (c: (c: Closet) => Closet) => void;
+  onDone: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [occasion, setOccasion] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+
+  return (
+    <section aria-label="Assemble a look">
+      <form
+        className="space-y-3 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          let ok = false;
+          act((c) => {
+            const next = createLook(c, { title, occasion, garmentIds: picked });
+            ok = true;
+            return next;
+          });
+          if (ok) onDone();
+        }}
+      >
+        <label className="flex flex-col">
+          Look title
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="rounded border px-2 py-1" />
+        </label>
+        <label className="flex flex-col">
+          Occasion
+          <input value={occasion} onChange={(e) => setOccasion(e.target.value)} className="rounded border px-2 py-1" />
+        </label>
+        <fieldset className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <legend className="mb-1">Garments</legend>
+          {closet.garments.map((g) => (
+            <label key={g.id} className="flex items-center gap-2 rounded border border-stone-200 p-1">
+              <input
+                type="checkbox"
+                checked={picked.includes(g.id)}
+                onChange={(e) =>
+                  setPicked((p) => (e.target.checked ? [...p, g.id] : p.filter((x) => x !== g.id)))
+                }
+              />
+              {g.name}
+            </label>
+          ))}
+        </fieldset>
+        <button type="submit" className="rounded bg-stone-900 px-3 py-1 text-white">
+          Post look
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function Packing({
+  closet,
+  byId,
+  act,
+}: {
+  closet: Closet;
+  byId: Map<string, Garment>;
+  act: (c: (c: Closet) => Closet) => void;
+}) {
+  const packed = closet.trip.garmentIds.map((id) => byId.get(id)).filter((g): g is Garment => !!g);
+  const available = closet.garments.filter((g) => g.state === "clean" && !closet.trip.garmentIds.includes(g.id));
+  return (
+    <section aria-label="Packing" className="text-sm">
+      <h2 className="font-semibold">
+        {closet.trip.name} · {packed.length}/{closet.trip.limit} packed
+      </h2>
+      <label className="my-2 flex items-center gap-2">
+        Packing limit
+        <input
+          type="number"
+          min={1}
+          max={30}
+          value={closet.trip.limit}
+          onChange={(e) => act((c) => setTripLimit(c, Number(e.target.value)))}
+          className="w-16 rounded border px-1"
+        />
+      </label>
+      <ul aria-label="Packing carousel" className="mb-4 flex snap-x gap-3 overflow-x-auto pb-2">
+        {packed.map((g) => (
+          <li key={g.id} className="flex shrink-0 snap-start flex-col items-center gap-1">
+            <Thumb garment={g} size={96} />
+            <button type="button" aria-label={`Unpack ${g.name}`} onClick={() => act((c) => unpackGarment(c, g.id))} className="underline">
+              Unpack
+            </button>
+          </li>
+        ))}
+      </ul>
+      <h3 className="font-semibold">Clean and ready</h3>
+      <ul className="mt-1 flex flex-wrap gap-2">
+        {available.map((g) => (
+          <li key={g.id}>
+            <button type="button" aria-label={`Pack ${g.name}`} onClick={() => act((c) => packGarment(c, g.id))} className="rounded border border-stone-300 px-2 py-1">
+              + {g.name}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/app/page.tsx">
+
+```tsx
+import { ClosetApp } from "@/features/closet/ClosetApp";
+
+export default function Home() {
+  return (
+    <main>
+      <ClosetApp />
+    </main>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/app/page.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import Home from "./page";
+
+describe("Closet home", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("opens on the outfit feed", () => {
+    render(<Home />);
+    expect(screen.getByRole("heading", { level: 1, name: "Closet" })).toBeInTheDocument();
+    const posts = screen.getByRole("list", { name: "Outfit posts" });
+    expect(within(posts).getByText("Gallery opening")).toBeInTheDocument();
+  });
+
+  it("moves a garment to the wash and remembers it", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<Home />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.click(screen.getByRole("button", { name: "Mark Grey tee washing" }));
+    unmount();
+    render(<Home />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    expect(screen.getByRole("button", { name: "Mark Grey tee clean" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark Grey tee washing" })).not.toBeInTheDocument();
+  });
+
+  it("assembles a look and posts it to the feed", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click(screen.getByRole("tab", { name: "Assemble" }));
+    await user.type(screen.getByLabelText("Look title"), "Studio day");
+    await user.click(screen.getByLabelText("Grey tee"));
+    await user.click(screen.getByLabelText("Olive chinos"));
+    await user.click(screen.getByRole("button", { name: "Post look" }));
+    expect(within(screen.getByRole("list", { name: "Outfit posts" })).getByText("Studio day")).toBeInTheDocument();
+  });
+
+  it("shows why a garment cannot be packed", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click(screen.getByRole("tab", { name: "Packing" }));
+    await user.click(screen.getByRole("button", { name: "Pack Red scarf" }));
+    expect(screen.getByRole("button", { name: "Unpack Red scarf" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pack Grey tee" })).not.toBeInTheDocument();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/closet/model.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { createClosetStore, STORAGE_KEY } from "./closet-store";
+import { addGarment, createLook, packGarment, setGarmentState, setTripLimit } from "./model";
+import { sampleCloset } from "./sample-closet";
+
+function memoryStorage() {
+  const data = new Map<string, string>();
+  return {
+    getItem: (k: string) => data.get(k) ?? null,
+    setItem: (k: string, v: string) => void data.set(k, v),
+    removeItem: (k: string) => void data.delete(k),
+    data,
+  };
+}
+
+describe("garment states", () => {
+  it("follows clean → worn → washing → clean", () => {
+    let c = sampleCloset();
+    c = setGarmentState(c, "white-oxford", "worn");
+    c = setGarmentState(c, "white-oxford", "washing");
+    c = setGarmentState(c, "white-oxford", "clean");
+    expect(c.garments.find((g) => g.id === "white-oxford")?.state).toBe("clean");
+  });
+
+  it("refuses a jump the wardrobe does not allow", () => {
+    expect(() => setGarmentState(sampleCloset(), "white-oxford", "washing")).toThrow("cannot go");
+  });
+
+  it("drops a garment from the carousel when it stops being clean", () => {
+    const c = setGarmentState(sampleCloset(), "white-oxford", "worn");
+    expect(c.trip.garmentIds).not.toContain("white-oxford");
+  });
+});
+
+describe("looks and packing", () => {
+  it("posts a look only from garments you own", () => {
+    const c = createLook(sampleCloset(), { title: "Dinner", occasion: "date", garmentIds: ["navy-blazer", "dark-jeans"] });
+    expect(c.looks[0].title).toBe("Dinner");
+    expect(() =>
+      createLook(sampleCloset(), { title: "X", occasion: "", garmentIds: ["navy-blazer", "ghost"] }),
+    ).toThrow("Unknown garments: ghost");
+  });
+
+  it("packs only clean garments and respects the limit", () => {
+    let c = setTripLimit(sampleCloset(), 3);
+    c = packGarment(c, "red-scarf");
+    expect(() => packGarment(c, "brown-boots")).toThrow("full");
+    expect(() => packGarment(setTripLimit(c, 9), "grey-tee")).toThrow("not clean");
+  });
+
+  it("gives new garments unique ids", () => {
+    const draft = { name: "Navy blazer", category: "outerwear" as const, colour: "", material: "", notes: "", image: null };
+    const c = addGarment(sampleCloset(), draft);
+    expect(c.garments.at(-1)?.id).toBe("navy-blazer-2");
+  });
+});
+
+describe("closet store adapter", () => {
+  it("round-trips through storage and resets to the sample closet", () => {
+    const storage = memoryStorage();
+    const store = createClosetStore(storage);
+    const changed = setGarmentState(store.load(), "red-scarf", "worn");
+    store.save(changed);
+    expect(store.load().garments.find((g) => g.id === "red-scarf")?.state).toBe("worn");
+    expect(store.reset().garments.find((g) => g.id === "red-scarf")?.state).toBe("clean");
+    expect(storage.data.has(STORAGE_KEY)).toBe(false);
+  });
+
+  it("ignores corrupt saved data instead of crashing", () => {
+    const storage = memoryStorage();
+    storage.setItem(STORAGE_KEY, "{not json");
+    expect(createClosetStore(storage).load().garments).toHaveLength(12);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="vitest.setup.ts">
+
+```typescript
+import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => cleanup());
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/closet/model.test.ts src/app/page.test.tsx
+```
+
+Expected result: 2 test files pass, 12 tests pass. They use the fictional sample wardrobe and an in-memory storage stand-in.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 01: Build the Closet starter"
+```
+
+## Before continuing
+
+- [ ] The feed shows four outfit posts.
+- [ ] A garment state survives a reload.
+- [ ] The carousel refuses a garment that is not clean.
+
+Continue to [Describe a garment from a photo](/closet/02-describe-garment).

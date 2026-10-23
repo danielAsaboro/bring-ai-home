@@ -1,0 +1,1551 @@
+---
+title: "07. Find a tape by describing the job"
+description: "We will embed tapes and a plain description of the job with a local model, rank them with plain cosine code, and keep a word filter for when the service is down."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Replay · 07. Find a tape by describing the job" />
+
+People rarely remember a tape's title. They remember the job: "post last week's numbers". Embeddings let Replay match meaning instead of exact words.
+
+The model only turns text into vectors. Ranking, thresholds, and ties are ordinary code you can read and test.
+
+**Source checkpoint:** `0d88b0b` · **Starting checkpoint:** `08c0682`
+
+## What changes
+
+- `src/features/replay/search.ts`: `cosine`, `rankTapes` (top three, minimum score 0.5, stable ties), and `filterByWords`, the manual fallback.
+- `qvac-service/qvac-models.ts`: `createQvacEmbedder` with `GTE_LARGE_FP16`.
+- `/v1/find-tape`: the browser sends tape text, because the library lives in the browser. The service caches vectors by exact text, so an edited tape is re-embedded.
+- The shelf gains **Describe the job** and **Find tape**. If the service fails, it says so and filters by words instead.
+
+To compare with the previous checkpoint: `git diff 08c0682 0d88b0b`.
+
+## Build and observe
+
+### 1. Search by meaning
+
+```bash
+git checkout 0d88b0b
+npm run qvac:service
+npm run dev
+```
+
+Type `post last week's numbers for the ops team` and click **Find tape**. The note under the box says the results are the closest tapes by meaning and names the model.
+
+### 2. Search with nothing close
+
+Try `renew the office lease`. If nothing reaches 0.5, Replay says no tape is close enough. It does not show a weak match to look helpful.
+
+### 3. Stop the service
+
+Search again. The note says the service is not running and that word matches are shown instead. Search still works for exact words.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="qvac-service/main.ts">
+
+```typescript
+import { fileURLToPath } from "node:url";
+
+import { SERVICE_PORT } from "../src/features/replay/service-contract.ts";
+import { closeSdk, createQvacDrafter, createQvacEmbedder, createQvacTranscriber, createQvacViewer, prepareQvacConfig } from "./qvac-models.ts";
+import { createReplayServer } from "./server.ts";
+
+prepareQvacConfig(fileURLToPath(new URL("../", import.meta.url)));
+
+const transcriber = createQvacTranscriber();
+const viewer = createQvacViewer();
+const drafter = createQvacDrafter();
+const embedder = createQvacEmbedder();
+const closers = [transcriber, viewer, drafter, embedder];
+const server = createReplayServer({ transcriber, viewer, drafter, embedder });
+
+server.listen(SERVICE_PORT, "127.0.0.1", () => {
+  process.stdout.write(`Replay QVAC service listening on http://127.0.0.1:${SERVICE_PORT}\n`);
+});
+
+function shutdown() {
+  server.close(async () => {
+    for (const c of closers) await c.close();
+    await closeSdk();
+    process.exit(0);
+  });
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-models.ts">
+
+```typescript
+// The only file that imports @qvac/sdk for the service. Every model loads on first use.
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+import type { ModelState } from "../src/features/replay/service-contract.ts";
+import type { Drafter, Embedder, Transcriber, Viewer } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+export function prepareQvacConfig(appDirectory: string) {
+  const cacheDirectory = path.join(appDirectory, ".qvac", "models");
+  const configPath = path.join(appDirectory, ".qvac", "config.json");
+  mkdirSync(cacheDirectory, { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  return { cacheDirectory, configPath };
+}
+
+let sdkPromise: Promise<Sdk> | undefined;
+export function sdk() {
+  sdkPromise ??= import("@qvac/sdk");
+  return sdkPromise;
+}
+
+// Close the SDK only if something actually loaded it.
+export async function closeSdk() {
+  if (!sdkPromise) return;
+  try {
+    await (await sdkPromise).close();
+  } catch {
+    // The SDK never loaded or is already closed; nothing is left to release.
+  }
+}
+
+// One lazy model: load once, report state honestly, unload on shutdown.
+export function lazyModel(kind: string, id: string, load: (qvac: Sdk) => Promise<string>) {
+  let modelId: string | undefined;
+  let state: ModelState["state"] = "not_loaded";
+  let loading: Promise<string> | undefined;
+  return {
+    modelState: (): ModelState => ({ kind, id, state }),
+    async ensure() {
+      if (modelId) return modelId;
+      loading ??= (async () => {
+        state = "loading";
+        modelId = await load(await sdk());
+        state = "ready";
+        return modelId;
+      })().catch((error: unknown) => {
+        state = "error";
+        loading = undefined;
+        throw error;
+      });
+      return loading;
+    },
+    async close() {
+      if (modelId) await (await sdk()).unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+    },
+  };
+}
+
+export function createQvacTranscriber(): Transcriber & { close(): Promise<void> } {
+  const model = lazyModel("transcription", "WHISPER_TINY", (q) =>
+    q.loadModel({
+      modelSrc: q.WHISPER_TINY,
+      modelConfig: { language: "en", translate: false, temperature: 0.0 },
+    }),
+  );
+  return {
+    modelState: model.modelState,
+    async transcribe(wavPath) {
+      const modelId = await model.ensure();
+      const segments = await (await sdk()).transcribe({ modelId, audioChunk: wavPath, metadata: true });
+      return segments.map((s) => ({ text: s.text, startMs: s.startMs, endMs: s.endMs }));
+    },
+    close: model.close,
+  };
+}
+
+export function createQvacViewer(): Viewer & { close(): Promise<void> } {
+  const model = lazyModel("multimodal", "SMOLVLM2_500M_MULTIMODAL_Q8_0", (q) =>
+    q.loadModel({
+      modelSrc: q.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+      modelConfig: { ctx_size: 1024, projectionModelSrc: q.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+    }),
+  );
+  return {
+    modelState: model.modelState,
+    async describe(imagePath, prompt) {
+      const modelId = await model.ensure();
+      const run = (await sdk()).completion({
+        modelId,
+        history: [{ role: "user", content: prompt, attachments: [{ path: imagePath }] }],
+        stream: true,
+      });
+      return (await run.final).contentText;
+    },
+    close: model.close,
+  };
+}
+
+export function createQvacDrafter(): Drafter & { close(): Promise<void> } {
+  const model = lazyModel("llm", "LLAMA_3_2_1B_INST_Q4_0", (q) =>
+    q.loadModel({ modelSrc: q.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }),
+  );
+  return {
+    modelState: model.modelState,
+    async complete(history, schema) {
+      const modelId = await model.ensure();
+      const run = (await sdk()).completion({
+        modelId,
+        history,
+        stream: true,
+        responseFormat: { type: "json_schema", json_schema: schema },
+      });
+      return (await run.final).contentText;
+    },
+    close: model.close,
+  };
+}
+
+export function createQvacEmbedder(): Embedder & { close(): Promise<void> } {
+  const model = lazyModel("embeddings", "GTE_LARGE_FP16", (q) =>
+    q.loadModel({ modelSrc: q.GTE_LARGE_FP16, modelType: "embeddings" }),
+  );
+  return {
+    modelState: model.modelState,
+    async embed(texts) {
+      const modelId = await model.ensure();
+      const { embedding } = await (await sdk()).embed({ modelId, text: texts });
+      return embedding;
+    },
+    close: model.close,
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.test.ts">
+
+```typescript
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { WEEKLY_REPORT_NARRATION_FIXTURE } from "../src/features/replay/fixtures/narration.fixture";
+import { CONDITIONS_OUTPUT_FIXTURE, STEPS_OUTPUT_FIXTURE } from "../src/features/replay/fixtures/model-output.fixture";
+import { createReplayServer, type ServiceModels } from "./server";
+
+const closers: (() => void)[] = [];
+afterEach(() => closers.splice(0).forEach((c) => c()));
+
+async function start(models: ServiceModels) {
+  const server = createReplayServer(models);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  closers.push(() => server.close());
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+// FIXTURE transcriber: returns hand-written segments. Not a model.
+const fixtureTranscriber = {
+  modelState: () => ({ kind: "transcription", id: "WHISPER_TINY", state: "ready" as const }),
+  transcribe: async () => WEEKLY_REPORT_NARRATION_FIXTURE,
+};
+
+const wav = { fileName: "narration.wav", audioBase64: Buffer.from("RIFF-fixture").toString("base64") };
+
+// FIXTURE viewer: echoes a fixed sentence and checks it received a real file path. Not a model.
+const fixtureViewer = {
+  modelState: () => ({ kind: "multimodal", id: "SMOLVLM2_500M_MULTIMODAL_Q8_0", state: "ready" as const }),
+  describe: async (imagePath: string) => {
+    expect(imagePath).toMatch(/screen\.png$/);
+    return "Assistant: The Harbor Operations page with the Export menu open.";
+  },
+};
+
+describe("replay QVAC service boundary", () => {
+  it("reports health and model state separately", async () => {
+    const url = await start({ transcriber: fixtureTranscriber });
+    const res = await fetch(`${url}/health`);
+    expect(await res.json()).toEqual({
+      service: "ready",
+      models: [{ kind: "transcription", id: "WHISPER_TINY", state: "ready" }],
+    });
+  });
+
+  it("transcribes through the injected door and digests the received bytes", async () => {
+    const url = await start({ transcriber: fixtureTranscriber });
+    const res = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify(wav) });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.sourceDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.narration.segments).toHaveLength(5);
+  });
+
+  it("rejects bad requests, foreign origins, and silent recordings with typed errors", async () => {
+    const silent = { ...fixtureTranscriber, transcribe: async () => [{ text: "[BLANK_AUDIO]", startMs: 0, endMs: 1 }] };
+    const url = await start({ transcriber: silent });
+    const bad = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify({ fileName: "a.mp3", audioBase64: "eA==" }) });
+    expect(bad.status).toBe(400);
+    const foreign = await fetch(`${url}/health`, { headers: { origin: "https://example.com" } });
+    expect(foreign.status).toBe(403);
+    const quiet = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify(wav) });
+    expect(quiet.status).toBe(422);
+    expect((await quiet.json()).error.code).toBe("no_speech");
+  });
+
+  it("turns a model crash into model_failed and leaves unknown routes at 404", async () => {
+    const broken = { ...fixtureTranscriber, transcribe: async () => Promise.reject(new Error("native runtime crashed")) };
+    const url = await start({ transcriber: broken });
+    const res = await fetch(`${url}/v1/transcribe`, { method: "POST", body: JSON.stringify(wav) });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toEqual({ code: "model_failed", message: "native runtime crashed" });
+    expect((await fetch(`${url}/v1/propose-steps`, { method: "POST", body: "{}" })).status).toBe(404);
+  });
+
+  it("reads a screenshot through the vision door and validates the note", async () => {
+    const url = await start({ viewer: fixtureViewer });
+    const ok = await fetch(`${url}/v1/read-screenshot`, {
+      method: "POST",
+      body: JSON.stringify({ fileName: "harbor.png", imageBase64: Buffer.from("png").toString("base64") }),
+    });
+    expect((await ok.json()).note).toEqual({ text: "The Harbor Operations page with the Export menu open.", truncated: false });
+    const pdf = await fetch(`${url}/v1/read-screenshot`, {
+      method: "POST",
+      body: JSON.stringify({ fileName: "harbor.pdf", imageBase64: "eA==" }),
+    });
+    expect(pdf.status).toBe(400);
+  });
+
+  it("reports an empty vision answer as empty_note, not as a screen note", async () => {
+    const url = await start({ viewer: { ...fixtureViewer, describe: async () => "   " } });
+    const res = await fetch(`${url}/v1/read-screenshot`, {
+      method: "POST",
+      body: JSON.stringify({ fileName: "harbor.png", imageBase64: "eA==" }),
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("empty_note");
+  });
+
+  it("proposes steps through the drafter door and gates them against the transcript", async () => {
+    const seen: string[] = [];
+    const drafter = {
+      modelState: () => ({ kind: "llm", id: "LLAMA_3_2_1B_INST_Q4_0", state: "ready" as const }),
+      complete: async (_history: unknown, schema: { name: string }) => {
+        seen.push(schema.name);
+        return STEPS_OUTPUT_FIXTURE; // FIXTURE string, not a model answer
+      },
+    };
+    const url = await start({ drafter });
+    const transcript = WEEKLY_REPORT_NARRATION_FIXTURE.map((s) => s.text).join(" ");
+    const res = await fetch(`${url}/v1/propose-steps`, { method: "POST", body: JSON.stringify({ transcript, screenNotes: [] }) });
+    const body = await res.json();
+    expect(seen).toEqual(["steps"]);
+    expect(body.result.proposals).toHaveLength(4);
+    expect(body.result.rejected).toHaveLength(2);
+
+    const prose = await start({ drafter: { ...drafter, complete: async () => "Here you go!" } });
+    const bad = await fetch(`${prose}/v1/propose-steps`, { method: "POST", body: JSON.stringify({ transcript }) });
+    expect(bad.status).toBe(422);
+    expect((await bad.json()).error.code).toBe("unusable_output");
+  });
+
+  it("proposes conditions with their own schema and gate", async () => {
+    const drafter = {
+      modelState: () => ({ kind: "llm", id: "LLAMA_3_2_1B_INST_Q4_0", state: "ready" as const }),
+      complete: async (_h: unknown, schema: { name: string }) => {
+        expect(schema.name).toBe("conditions");
+        return CONDITIONS_OUTPUT_FIXTURE; // FIXTURE string, not a model answer
+      },
+    };
+    const url = await start({ drafter });
+    const transcript = WEEKLY_REPORT_NARRATION_FIXTURE.map((s) => s.text).join(" ");
+    const res = await fetch(`${url}/v1/propose-conditions`, { method: "POST", body: JSON.stringify({ transcript }) });
+    const body = await res.json();
+    expect(body.result.parameters.map((p: { name: string }) => p.name)).toEqual(["week_start"]);
+    expect(body.result.rejected).toHaveLength(2);
+  });
+
+  it("finds a tape with injected vectors and re-embeds only new text", async () => {
+    const calls: string[][] = [];
+    // FIXTURE embedder: maps words to hand-made vectors. Not a model.
+    const embedder = {
+      modelState: () => ({ kind: "embeddings", id: "GTE_LARGE_FP16", state: "ready" as const }),
+      embed: async (texts: string[]) => {
+        calls.push(texts);
+        return texts.map((t) => (/report|numbers/i.test(t) ? [1, 0] : [0, 1]));
+      },
+    };
+    const url = await start({ embedder });
+    const body = {
+      query: "post last week's numbers",
+      tapes: [
+        { id: "a", text: "Publish the weekly report" },
+        { id: "b", text: "Onboard a new contractor" },
+      ],
+    };
+    const first = await (await fetch(`${url}/v1/find-tape`, { method: "POST", body: JSON.stringify(body) })).json();
+    expect(first.matches).toEqual([{ tapeId: "a", score: 1 }]);
+    await fetch(`${url}/v1/find-tape`, { method: "POST", body: JSON.stringify(body) });
+    expect(calls[1]).toEqual(["post last week's numbers"]);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { buildConditionsHistory, CONDITIONS_JSON_SCHEMA, parseConditions } from "../src/features/replay/conditions.ts";
+import { toNarration, type NarrationSegment } from "../src/features/replay/narration.ts";
+import { buildStepsHistory, parseStepProposals, STEPS_JSON_SCHEMA, type ChatMessage } from "../src/features/replay/proposals.ts";
+import { rankTapes } from "../src/features/replay/search.ts";
+import { parseScreenNote, SCREEN_NOTE_PROMPT } from "../src/features/replay/screen-notes.ts";
+import {
+  parseFindTapeRequest,
+  parseProposeConditionsRequest,
+  parseProposeStepsRequest,
+  parseReadScreenshotRequest,
+  parseTranscribeRequest,
+  type ModelState,
+} from "../src/features/replay/service-contract.ts";
+
+// Each model sits behind its own small door. Tests inject fakes; main.ts injects QVAC.
+export type Transcriber = {
+  modelState(): ModelState;
+  transcribe(wavPath: string): Promise<NarrationSegment[]>;
+};
+
+// A multimodal model that looks at one image file and answers in plain text.
+export type Viewer = {
+  modelState(): ModelState;
+  describe(imagePath: string, prompt: string): Promise<string>;
+};
+
+// Text generation constrained by a JSON schema. It returns raw text; the server validates it.
+export type Drafter = {
+  modelState(): ModelState;
+  complete(history: ChatMessage[], schema: { name: string; schema: Record<string, unknown> }): Promise<string>;
+};
+
+// Embeddings: text in, vectors out. Ranking stays in plain code.
+export type Embedder = {
+  modelState(): ModelState;
+  embed(texts: string[]): Promise<number[][]>;
+};
+
+export type ServiceModels = { transcriber?: Transcriber; viewer?: Viewer; drafter?: Drafter; embedder?: Embedder };
+
+// Write request bytes to a private temp file for the length of one model call.
+async function withTempFile<T>(name: string, bytes: Buffer, run: (filePath: string) => Promise<T>) {
+  const directory = await mkdtemp(path.join(tmpdir(), "replay-"));
+  try {
+    const filePath = path.join(directory, name);
+    await writeFile(filePath, bytes);
+    return await run(filePath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+// Plain fields, not parameter properties: Node's type stripping cannot run those.
+export class RequestError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (origin) {
+    headers["access-control-allow-origin"] = origin;
+    headers["vary"] = "Origin";
+  }
+  res.writeHead(status, headers);
+  res.end(JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new RequestError(413, "too_large", "Request body is too large");
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new RequestError(400, "invalid_json", "Body must be JSON");
+  }
+}
+
+type Route = (req: IncomingMessage) => Promise<unknown>;
+
+export function createReplayServer(models: ServiceModels) {
+  const routes = new Map<string, Route>();
+
+  if (models.transcriber) {
+    const transcriber = models.transcriber;
+    routes.set("/v1/transcribe", async (req) => {
+      const parsed = parseTranscribeRequest(await readJson(req, 50_000_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const audio = Buffer.from(parsed.value.audioBase64, "base64");
+      const sourceDigest = createHash("sha256").update(audio).digest("hex");
+      // The recording lives on disk only for the length of this request.
+      return withTempFile("narration.wav", audio, async (wavPath) => {
+        const started = Date.now();
+        const segments = await transcriber.transcribe(wavPath);
+        let narration;
+        try {
+          narration = toNarration(segments);
+        } catch (cause) {
+          throw new RequestError(422, "no_speech", (cause as Error).message);
+        }
+        return { sourceDigest, model: transcriber.modelState().id, transcribeMs: Date.now() - started, narration };
+      });
+    });
+  }
+
+  if (models.viewer) {
+    const viewer = models.viewer;
+    routes.set("/v1/read-screenshot", async (req) => {
+      const parsed = parseReadScreenshotRequest(await readJson(req, 25_000_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const image = Buffer.from(parsed.value.imageBase64, "base64");
+      const sourceDigest = createHash("sha256").update(image).digest("hex");
+      const ext = parsed.value.fileName.toLowerCase().split(".").pop();
+      const raw = await withTempFile(`screen.${ext}`, image, (p) => viewer.describe(p, SCREEN_NOTE_PROMPT));
+      try {
+        return { sourceDigest, model: viewer.modelState().id, note: parseScreenNote(raw) };
+      } catch (cause) {
+        throw new RequestError(422, "empty_note", (cause as Error).message);
+      }
+    });
+  }
+
+  if (models.drafter) {
+    const drafter = models.drafter;
+    routes.set("/v1/propose-steps", async (req) => {
+      const parsed = parseProposeStepsRequest(await readJson(req, 100_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const raw = await drafter.complete(buildStepsHistory(parsed.value), { name: "steps", schema: STEPS_JSON_SCHEMA });
+      try {
+        return { model: drafter.modelState().id, raw, result: parseStepProposals(raw, parsed.value.transcript) };
+      } catch (cause) {
+        throw new RequestError(422, "unusable_output", (cause as Error).message);
+      }
+    });
+    routes.set("/v1/propose-conditions", async (req) => {
+      const parsed = parseProposeConditionsRequest(await readJson(req, 100_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const raw = await drafter.complete(buildConditionsHistory(parsed.value.transcript), {
+        name: "conditions",
+        schema: CONDITIONS_JSON_SCHEMA,
+      });
+      try {
+        return { model: drafter.modelState().id, raw, result: parseConditions(raw, parsed.value.transcript) };
+      } catch (cause) {
+        throw new RequestError(422, "unusable_output", (cause as Error).message);
+      }
+    });
+  }
+
+  if (models.embedder) {
+    const embedder = models.embedder;
+    // Vectors are cached by exact tape text, so an edited tape is re-embedded automatically.
+    const cache = new Map<string, number[]>();
+    routes.set("/v1/find-tape", async (req) => {
+      const parsed = parseFindTapeRequest(await readJson(req, 2_000_000));
+      if (!parsed.ok) throw new RequestError(400, "invalid_request", parsed.message);
+      const missing = [...new Set(parsed.value.tapes.map((t) => t.text).filter((t) => !cache.has(t)))];
+      const [query, ...vectors] = await embedder.embed([parsed.value.query, ...missing]);
+      missing.forEach((text, i) => cache.set(text, vectors[i]));
+      const index = parsed.value.tapes.map((t) => ({ tapeId: t.id, vector: cache.get(t.text)! }));
+      return { model: embedder.modelState().id, matches: rankTapes(index, query, { limit: 3, minScore: 0.5 }) };
+    });
+  }
+
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (origin !== undefined && !LOOPBACK_ORIGIN.test(origin)) {
+      send(res, 403, { error: { code: "origin_rejected", message: "Only loopback origins may call this service" } });
+      return;
+    }
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": origin ?? "",
+        "access-control-allow-methods": "GET, POST",
+        "access-control-allow-headers": "content-type",
+      });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/health") {
+      const states = Object.values(models).map((m) => m.modelState());
+      send(res, 200, { service: "ready", models: states }, origin);
+      return;
+    }
+    const route = req.method === "POST" && req.url ? routes.get(req.url) : undefined;
+    if (!route) {
+      send(res, 404, { error: { code: "not_found", message: "Unknown route" } }, origin);
+      return;
+    }
+    try {
+      send(res, 200, await route(req), origin);
+    } catch (cause) {
+      if (cause instanceof RequestError) {
+        send(res, cause.status, { error: { code: cause.code, message: cause.message } }, origin);
+        return;
+      }
+      const message = cause instanceof Error ? cause.message : String(cause);
+      send(res, 500, { error: { code: "model_failed", message } }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/replay-app.test.tsx">
+
+```tsx
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { sampleState, type LibraryStore } from "./library-store";
+import { ReplayApp } from "./replay-app";
+
+function memoryStore(): LibraryStore {
+  let state = sampleState();
+  return {
+    load: () => state,
+    save: (s) => {
+      state = s;
+    },
+    reset: () => (state = sampleState()),
+  };
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("ReplayApp", () => {
+  it("authors a frame, plays a guided run, and records it in history", async () => {
+    const user = userEvent.setup();
+    render(<ReplayApp store={memoryStore()} />);
+
+    await user.click(screen.getByRole("button", { name: /Onboard a new contractor/ }));
+    await user.type(screen.getByLabelText("New frame title"), "Book the intro call");
+    await user.click(screen.getByRole("button", { name: "Add frame" }));
+    expect(screen.getByDisplayValue("Book the intro call")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "play" }));
+    const frames = screen.getByRole("list", { name: "Tape frames" });
+    expect(within(frames).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(frames).getByText("01")).toHaveAttribute("aria-current", "step");
+
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(within(frames).getByText("02")).toHaveAttribute("aria-current", "step");
+    await user.click(screen.getByRole("button", { name: "Mark failed" }));
+    await user.type(screen.getByLabelText("Frame note"), "Channel was archived");
+    await user.click(screen.getByRole("button", { name: "Save note" }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Run finished. 3 done, 1 skipped, 0 failed.");
+
+    await user.click(screen.getByRole("tab", { name: "history" }));
+    const history = screen.getByRole("list", { name: "Run history" });
+    expect(history).toHaveTextContent("Channel was archived");
+  });
+
+  it("finds a tape by meaning, and falls back to words when the service is down", async () => {
+    const user = userEvent.setup();
+    // FIXTURE service answer, not live embeddings.
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ model: "GTE_LARGE_FP16", matches: [{ tapeId: "tape-checkout-bug", score: 0.81 }] })));
+    render(<ReplayApp store={memoryStore()} />);
+    const shelf = screen.getByRole("navigation", { name: "Tape shelf" });
+    await user.type(screen.getByLabelText("Describe the job"), "cart total is a cent off");
+    await user.click(screen.getByRole("button", { name: "Find tape" }));
+    expect(await within(shelf).findByText(/Closest tapes by meaning/)).toBeInTheDocument();
+    expect(within(shelf).getAllByRole("button", { pressed: false }).map((b) => b.textContent)).toEqual([
+      expect.stringContaining("Reproduce the checkout rounding bug"),
+    ]);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
+    await user.clear(screen.getByLabelText("Describe the job"));
+    await user.type(screen.getByLabelText("Describe the job"), "weekly");
+    await user.click(screen.getByRole("button", { name: "Find tape" }));
+    expect(await within(shelf).findByText(/Showing word matches instead/)).toBeInTheDocument();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/replay/replay-app.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { mergeConditions } from "./conditions";
+import { DemonstrationPanel } from "./demonstration-panel";
+import { filterByWords } from "./search";
+import { findTape } from "./service-client";
+import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
+import {
+  addStep,
+  advanceRun,
+  blankTape,
+  moveStep,
+  removeStep,
+  startRun,
+  summarizeRun,
+  tapeText,
+  updateStep,
+  updateTape,
+  type Run,
+  type RunAction,
+  type Tape,
+} from "./tape";
+
+type Mode = "edit" | "play" | "history";
+
+const now = () => new Date().toISOString();
+
+function lines(text: string) {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+export function ReplayApp({ store }: { store?: LibraryStore }) {
+  const [library] = useState(() => store ?? createLocalStore(globalThis.localStorage));
+  const [state, setState] = useState<LibraryState>(() => library.load());
+  const [selectedId, setSelectedId] = useState<string>(() => state.tapes[0]?.id ?? "");
+  const [mode, setMode] = useState<Mode>("edit");
+  const [runId, setRunId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<{ ids: string[]; note: string } | null>(null);
+
+  useEffect(() => library.save(state), [library, state]);
+
+  const tape = state.tapes.find((t) => t.id === selectedId) ?? null;
+  const run = state.runs.find((r) => r.id === runId) ?? null;
+
+  function commitTape(next: Tape) {
+    setState((s) => ({ ...s, tapes: s.tapes.map((t) => (t.id === next.id ? next : t)) }));
+  }
+
+  function attempt(fn: () => void) {
+    try {
+      setError(null);
+      fn();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  function play(t: Tape) {
+    attempt(() => {
+      const r = startRun(t, now());
+      setState((s) => ({ ...s, runs: [r, ...s.runs] }));
+      setRunId(r.id);
+      setMode("play");
+    });
+  }
+
+  function act(action: RunAction) {
+    if (!run) return;
+    attempt(() => {
+      const next = advanceRun(run, action, now());
+      setState((s) => ({ ...s, runs: s.runs.map((r) => (r.id === next.id ? next : r)) }));
+    });
+  }
+
+  async function describeJob() {
+    setFound({ ids: [], note: "Searching on this machine…" });
+    const result = await findTape({ query, tapes: state.tapes.map((t) => ({ id: t.id, text: tapeText(t) })) });
+    if (!result.ok) {
+      // The word filter below keeps working; say what failed without inventing matches.
+      setFound({ ids: [], note: `${result.message} Showing word matches instead.` });
+      return;
+    }
+    setFound({
+      ids: result.value.matches.map((m) => m.tapeId),
+      note: result.value.matches.length
+        ? `Closest tapes by meaning (${result.value.model}).`
+        : "No tape is close enough. Try other words or record a new tape.",
+    });
+  }
+
+  const shelf = found && found.ids.length
+    ? found.ids.map((id) => state.tapes.find((t) => t.id === id)).filter((t): t is Tape => Boolean(t))
+    : filterByWords(state.tapes, found ? query : "");
+
+  function newTape() {
+    const t = blankTape("Untitled tape", now());
+    setState((s) => ({ ...s, tapes: [t, ...s.tapes] }));
+    setSelectedId(t.id);
+    setMode("edit");
+  }
+
+  function resetDemo() {
+    const fresh = library.reset();
+    setState(fresh);
+    setSelectedId(fresh.tapes[0]?.id ?? "");
+    setRunId(null);
+    setMode("edit");
+  }
+
+  return (
+    <div className="min-h-screen bg-stone-950 text-stone-100">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-800 px-4 py-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Replay</h1>
+          <p className="text-sm text-stone-400">A tape library for repeatable work.</p>
+        </div>
+        <button type="button" onClick={resetDemo} className="rounded border border-stone-700 px-3 py-1 text-sm">
+          Reset demo data
+        </button>
+      </header>
+      <div className="grid gap-4 p-4 md:grid-cols-[18rem_1fr]">
+        <nav aria-label="Tape shelf" className="space-y-2">
+          <button type="button" onClick={newTape} className="w-full rounded bg-amber-500 px-3 py-2 font-semibold text-stone-950">
+            New tape
+          </button>
+          <form
+            className="space-y-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (query.trim()) void describeJob();
+            }}
+          >
+            <input
+              aria-label="Describe the job"
+              placeholder="Describe the job…"
+              className="w-full rounded border border-stone-700 bg-stone-900 px-2 py-1 text-sm"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setFound(null);
+              }}
+            />
+            <button type="submit" className="w-full rounded border border-stone-700 px-2 py-1 text-sm">
+              Find tape
+            </button>
+            {found && <p className="text-xs text-stone-400">{found.note}</p>}
+          </form>
+          <ul className="space-y-2">
+            {shelf.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  aria-pressed={t.id === selectedId}
+                  onClick={() => {
+                    setSelectedId(t.id);
+                    setMode("edit");
+                  }}
+                  className={`w-full rounded border px-3 py-2 text-left ${
+                    t.id === selectedId ? "border-amber-500 bg-stone-900" : "border-stone-800"
+                  }`}
+                >
+                  <span className="block font-medium">{t.title}</span>
+                  <span className="text-xs text-stone-400">
+                    {t.steps.length} frames · rev {t.revision}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <main className="min-w-0 space-y-4">
+          {error && (
+            <p role="alert" className="rounded border border-red-700 bg-red-950 px-3 py-2 text-sm">
+              {error}
+            </p>
+          )}
+          {tape ? (
+            <>
+              <div role="tablist" aria-label="Tape views" className="flex gap-2">
+                {(["edit", "play", "history"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === m}
+                    onClick={() => (m === "play" && (!run || run.tapeId !== tape.id) ? play(tape) : setMode(m))}
+                    className={`rounded px-3 py-1 text-sm capitalize ${mode === m ? "bg-stone-100 text-stone-950" : "bg-stone-800"}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {mode === "edit" && <TapeEditor key={tape.id} tape={tape} onChange={(t) => attempt(() => commitTape(t))} attempt={attempt} />}
+              {mode === "play" && run && run.tapeId === tape.id && (
+                <Player tape={tape} run={run} onAction={act} onReplay={() => play(tape)} />
+              )}
+              {mode === "history" && <History tape={tape} runs={state.runs.filter((r) => r.tapeId === tape.id)} />}
+            </>
+          ) : (
+            <p>Choose a tape from the shelf.</p>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function TapeEditor({
+  tape,
+  onChange,
+  attempt,
+}: {
+  tape: Tape;
+  onChange: (t: Tape) => void;
+  attempt: (fn: () => void) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const field = "w-full rounded border border-stone-700 bg-stone-900 px-2 py-1";
+
+  return (
+    <section aria-label="Tape editor" className="space-y-4">
+      <label className="block text-sm">
+        Tape title
+        <input
+          className={field}
+          value={tape.title}
+          onChange={(e) => attempt(() => onChange(updateTape(tape, { title: e.target.value }, now())))}
+        />
+      </label>
+      <label className="block text-sm">
+        Summary
+        <textarea
+          className={field}
+          value={tape.summary}
+          onChange={(e) => onChange(updateTape(tape, { summary: e.target.value }, now()))}
+        />
+      </label>
+      <DemonstrationPanel
+        onAddFrames={(steps) =>
+          attempt(() =>
+            onChange(steps.reduce((t, s) => addStep(t, { title: s.title, detail: s.detail }, now()), tape)),
+          )
+        }
+        onAddConditions={(accepted) => onChange(updateTape(tape, mergeConditions(tape, accepted), now()))}
+      />
+      <ol aria-label="Frames" className="space-y-2">
+        {tape.steps.map((s, i) => (
+          <li key={s.id} className="rounded border border-stone-800 p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-amber-400">{String(i + 1).padStart(2, "0")}</span>
+              <input
+                aria-label={`Frame ${i + 1} title`}
+                className={`${field} flex-1`}
+                value={s.title}
+                onChange={(e) => attempt(() => onChange(updateStep(tape, s.id, { title: e.target.value }, now())))}
+              />
+              <button type="button" aria-label={`Move frame ${i + 1} up`} onClick={() => onChange(moveStep(tape, s.id, -1, now()))}>
+                ↑
+              </button>
+              <button type="button" aria-label={`Move frame ${i + 1} down`} onClick={() => onChange(moveStep(tape, s.id, 1, now()))}>
+                ↓
+              </button>
+              <button type="button" aria-label={`Remove frame ${i + 1}`} onClick={() => onChange(removeStep(tape, s.id, now()))}>
+                ✕
+              </button>
+            </div>
+            <textarea
+              aria-label={`Frame ${i + 1} detail`}
+              className={`${field} mt-1 text-sm`}
+              value={s.detail}
+              onChange={(e) => onChange(updateStep(tape, s.id, { detail: e.target.value }, now()))}
+            />
+          </li>
+        ))}
+      </ol>
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(() => {
+            onChange(addStep(tape, { title, detail }, now()));
+            setTitle("");
+            setDetail("");
+          });
+        }}
+      >
+        <input aria-label="New frame title" placeholder="New frame title" className={`${field} flex-1`} value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input aria-label="New frame detail" placeholder="Detail (optional)" className={`${field} flex-1`} value={detail} onChange={(e) => setDetail(e.target.value)} />
+        <button type="submit" className="rounded bg-stone-100 px-3 py-1 text-stone-950">
+          Add frame
+        </button>
+      </form>
+      <div className="grid gap-3 md:grid-cols-3">
+        <ListField
+          label="Parameters (name = example)"
+          value={tape.parameters.map((p) => `${p.name} = ${p.example}`).join("\n")}
+          onCommit={(text) =>
+            onChange(
+              updateTape(
+                tape,
+                {
+                  parameters: lines(text).map((l) => {
+                    const [name, ...rest] = l.split("=");
+                    return { name: name.trim(), example: rest.join("=").trim() };
+                  }),
+                },
+                now(),
+              ),
+            )
+          }
+        />
+        <ListField
+          label="Preconditions"
+          value={tape.preconditions.join("\n")}
+          onCommit={(text) => onChange(updateTape(tape, { preconditions: lines(text) }, now()))}
+        />
+        <ListField
+          label="Stop conditions"
+          value={tape.stopConditions.join("\n")}
+          onCommit={(text) => onChange(updateTape(tape, { stopConditions: lines(text) }, now()))}
+        />
+      </div>
+    </section>
+  );
+}
+
+type ListFieldProps = { label: string; value: string; onCommit: (text: string) => void };
+
+// Remount when the saved value changes (for example after accepting proposals), so the draft follows it.
+function ListField(props: ListFieldProps) {
+  return <ListFieldDraft key={props.value} {...props} />;
+}
+
+function ListFieldDraft({ label, value, onCommit }: ListFieldProps) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <label className="block text-sm">
+      {label}
+      <textarea
+        className="h-24 w-full rounded border border-stone-700 bg-stone-900 px-2 py-1"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== value) onCommit(draft);
+        }}
+      />
+    </label>
+  );
+}
+
+function Player({ tape, run, onAction, onReplay }: { tape: Tape; run: Run; onAction: (a: RunAction) => void; onReplay: () => void }) {
+  const [note, setNote] = useState("");
+  const [reason, setReason] = useState("");
+  const steps = useMemo(() => new Map(tape.steps.map((s) => [s.id, s])), [tape.steps]);
+  const current = run.frames[run.playhead];
+  const step = steps.get(current.stepId);
+  const ended = run.status === "finished" || run.status === "stopped";
+  const btn = "rounded border border-stone-700 px-3 py-1 text-sm disabled:opacity-40";
+
+  return (
+    <section aria-label="Player" className="space-y-4">
+      <p className="text-sm text-stone-400">
+        Replay guides you. It never performs a step for you. Status: <strong>{run.status}</strong>
+      </p>
+      {tape.stopConditions.length > 0 && (
+        <div className="rounded border border-amber-700 p-2 text-sm">
+          <p className="font-semibold">Stop safely if</p>
+          <ul className="list-disc pl-5">
+            {tape.stopConditions.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <ol aria-label="Tape frames" className="flex gap-1 overflow-x-auto pb-1">
+        {run.frames.map((f, i) => (
+          <li
+            key={f.stepId}
+            aria-current={i === run.playhead && !ended ? "step" : undefined}
+            title={steps.get(f.stepId)?.title}
+            className={`min-w-10 rounded px-2 py-1 text-center font-mono text-xs ${
+              i === run.playhead && !ended
+                ? "bg-amber-500 text-stone-950"
+                : i < run.playhead || run.status === "finished"
+                  ? f.outcome === "done"
+                    ? "bg-emerald-800"
+                    : f.outcome === "failed"
+                      ? "bg-red-800"
+                      : "bg-stone-700"
+                  : "bg-stone-900"
+            }`}
+          >
+            {String(i + 1).padStart(2, "0")}
+          </li>
+        ))}
+      </ol>
+      {!ended && step && (
+        <div className="rounded border border-stone-700 p-3">
+          <p className="text-xs text-stone-400">
+            Frame {run.playhead + 1} of {run.frames.length}
+            {current.outcome === "failed" && " · marked failed"}
+          </p>
+          <h2 className="text-lg font-semibold">{step.title}</h2>
+          <p className="text-sm text-stone-300">{step.detail}</p>
+        </div>
+      )}
+      {!ended ? (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btn} disabled={run.status === "paused" || current.outcome === "failed"} onClick={() => onAction({ type: "done" })}>
+            Done
+          </button>
+          <button type="button" className={btn} disabled={run.status === "paused"} onClick={() => onAction({ type: "skip" })}>
+            Skip
+          </button>
+          <button type="button" className={btn} disabled={run.status === "paused" || current.outcome === "failed"} onClick={() => onAction({ type: "fail" })}>
+            Mark failed
+          </button>
+          <button type="button" className={btn} disabled={current.outcome !== "failed" || run.status === "paused"} onClick={() => onAction({ type: "retry" })}>
+            Retry
+          </button>
+          {run.status === "paused" ? (
+            <button type="button" className={btn} onClick={() => onAction({ type: "resume" })}>
+              Resume
+            </button>
+          ) : (
+            <button type="button" className={btn} onClick={() => onAction({ type: "pause" })}>
+              Pause
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p role="status">
+            {run.status === "finished" ? "Run finished." : `Run stopped: ${run.stopReason}`}{" "}
+            {(() => {
+              const s = summarizeRun(run);
+              return `${s.done} done, ${s.skipped} skipped, ${s.failed} failed.`;
+            })()}
+          </p>
+          <button type="button" className={btn} onClick={onReplay}>
+            Play again
+          </button>
+        </div>
+      )}
+      {!ended && (
+        <div className="grid gap-2 md:grid-cols-2">
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAction({ type: "annotate", note });
+              setNote("");
+            }}
+          >
+            <input aria-label="Frame note" placeholder={current.note || "Note for this frame"} className="flex-1 rounded border border-stone-700 bg-stone-900 px-2" value={note} onChange={(e) => setNote(e.target.value)} />
+            <button type="submit" className={btn}>
+              Save note
+            </button>
+          </form>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAction({ type: "stop", reason });
+            }}
+          >
+            <input aria-label="Stop reason" placeholder="Why stop?" className="flex-1 rounded border border-stone-700 bg-stone-900 px-2" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <button type="submit" className={btn}>
+              Stop safely
+            </button>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function History({ tape, runs }: { tape: Tape; runs: Run[] }) {
+  if (runs.length === 0) return <p className="text-sm text-stone-400">No runs of “{tape.title}” yet.</p>;
+  return (
+    <ul aria-label="Run history" className="space-y-2">
+      {runs.map((r) => {
+        const s = summarizeRun(r);
+        return (
+          <li key={r.id} className="rounded border border-stone-800 p-2 text-sm">
+            <p>
+              <strong>{r.status}</strong> · {new Date(r.startedAt).toLocaleString()} · rev {r.tapeRevision}
+            </p>
+            <p>
+              {s.done} done, {s.skipped} skipped, {s.failed} failed of {s.total}
+              {r.stopReason ? ` · stopped: ${r.stopReason}` : ""}
+            </p>
+            {r.frames.some((f) => f.note) && (
+              <ul className="list-disc pl-5 text-stone-400">
+                {r.frames
+                  .filter((f) => f.note)
+                  .map((f) => (
+                    <li key={f.stepId}>
+                      {tape.steps.find((st) => st.id === f.stepId)?.title ?? "Removed frame"}: {f.note}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/search.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { SAMPLE_LIBRARY } from "./sample-library";
+import { cosine, filterByWords, rankTapes } from "./search";
+
+// FIXTURE vectors: tiny hand-made 3D vectors, not embeddings from a model.
+const index = [
+  { tapeId: "tape-weekly-report", vector: [0.9, 0.1, 0] },
+  { tapeId: "tape-contractor-onboarding", vector: [0, 1, 0] },
+  { tapeId: "tape-checkout-bug", vector: [0.1, 0, 0.9] },
+];
+
+describe("tape search ranking", () => {
+  it("ranks by cosine similarity and drops weak matches", () => {
+    expect(rankTapes(index, [1, 0, 0])).toEqual([{ tapeId: "tape-weekly-report", score: 0.994 }]);
+    expect(rankTapes(index, [1, 0, 1], { minScore: 0.1 }).map((m) => m.tapeId)).toEqual([
+      "tape-checkout-bug",
+      "tape-weekly-report",
+    ]);
+  });
+
+  it("refuses mismatched vectors instead of returning a number", () => {
+    expect(() => cosine([1, 2], [1, 2, 3])).toThrow("same");
+  });
+
+  it("keeps a word filter that needs no model", () => {
+    expect(filterByWords(SAMPLE_LIBRARY, "weekly report").map((t) => t.id)).toEqual(["tape-weekly-report"]);
+    expect(filterByWords(SAMPLE_LIBRARY, "numbers for the ops team")).toEqual([]);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/replay/search.ts">
+
+```typescript
+// Ranking is plain code. The model only turns text into vectors.
+
+export type IndexedTape = { tapeId: string; vector: number[] };
+export type TapeMatch = { tapeId: string; score: number };
+
+export function cosine(a: readonly number[], b: readonly number[]) {
+  if (a.length !== b.length || a.length === 0) throw new Error("Vectors must have the same, non-zero length");
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na === 0 || nb === 0 ? 0 : dot / Math.sqrt(na * nb);
+}
+
+export function rankTapes(
+  index: readonly IndexedTape[],
+  query: readonly number[],
+  { limit = 3, minScore = 0.5 }: { limit?: number; minScore?: number } = {},
+): TapeMatch[] {
+  return index
+    .map((entry) => ({ tapeId: entry.tapeId, score: Math.round(cosine(entry.vector, query) * 1000) / 1000 }))
+    .filter((m) => m.score >= minScore)
+    .sort((a, b) => b.score - a.score || a.tapeId.localeCompare(b.tapeId))
+    .slice(0, limit);
+}
+
+// The manual fallback: plain word matching, always available.
+export function filterByWords<T extends { title: string; summary: string }>(tapes: readonly T[], query: string) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [...tapes];
+  return tapes.filter((t) => words.every((w) => `${t.title} ${t.summary}`.toLowerCase().includes(w)));
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/service-client.ts">
+
+```typescript
+import {
+  parseFindTapeResponse,
+  parseProposeConditionsResponse,
+  parseProposeStepsResponse,
+  parseReadScreenshotResponse,
+  parseServiceError,
+  parseTranscribeResponse,
+  SERVICE_URL,
+  type FindTapeRequest,
+  type FindTapeResponse,
+  type Parsed,
+  type ProposeConditionsResponse,
+  type ProposeStepsRequest,
+  type ProposeStepsResponse,
+  type ReadScreenshotResponse,
+  type TranscribeResponse,
+} from "./service-contract.ts";
+
+export type ClientResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
+
+// Every call can fail in three different ways, and the UI says which one happened.
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+  parse: (json: unknown) => Parsed<T>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ClientResult<T>> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${SERVICE_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return {
+      ok: false,
+      code: "service_unreachable",
+      message: "The local QVAC service is not running. Start it with npm run qvac:service. Manual editing still works.",
+    };
+  }
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    return { ok: false, code: "invalid_response", message: "The service answered with something that is not JSON" };
+  }
+  if (!response.ok) {
+    const error = parseServiceError(json);
+    return { ok: false, code: error?.code ?? "service_error", message: error?.message ?? `HTTP ${response.status}` };
+  }
+  const parsed = parse(json);
+  return parsed.ok ? parsed : { ok: false, code: "invalid_response", message: parsed.message };
+}
+
+export async function fileToBase64(file: Blob) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export async function transcribeRecording(
+  file: File,
+  fetchImpl?: typeof fetch,
+): Promise<ClientResult<TranscribeResponse>> {
+  const audioBase64 = await fileToBase64(file);
+  return postJson("/v1/transcribe", { fileName: file.name, audioBase64 }, parseTranscribeResponse, fetchImpl);
+}
+
+export async function readScreenshot(
+  file: File,
+  fetchImpl?: typeof fetch,
+): Promise<ClientResult<ReadScreenshotResponse>> {
+  const imageBase64 = await fileToBase64(file);
+  return postJson("/v1/read-screenshot", { fileName: file.name, imageBase64 }, parseReadScreenshotResponse, fetchImpl);
+}
+
+export function proposeSteps(body: ProposeStepsRequest, fetchImpl?: typeof fetch): Promise<ClientResult<ProposeStepsResponse>> {
+  return postJson("/v1/propose-steps", body, parseProposeStepsResponse, fetchImpl);
+}
+
+export function proposeConditions(transcript: string, fetchImpl?: typeof fetch): Promise<ClientResult<ProposeConditionsResponse>> {
+  return postJson("/v1/propose-conditions", { transcript }, parseProposeConditionsResponse, fetchImpl);
+}
+
+export function findTape(body: FindTapeRequest, fetchImpl?: typeof fetch): Promise<ClientResult<FindTapeResponse>> {
+  return postJson("/v1/find-tape", body, parseFindTapeResponse, fetchImpl);
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/service-contract.ts">
+
+```typescript
+// Shapes that cross the loopback boundary between the browser and the QVAC service.
+// JSON from another process can be anything, so both sides validate at runtime.
+import type { ConditionsResult } from "./conditions.ts";
+import type { Narration } from "./narration.ts";
+import type { ProposalResult } from "./proposals.ts";
+import type { TapeMatch } from "./search.ts";
+import { imageExtension, type ScreenNote } from "./screen-notes.ts";
+
+export const SERVICE_PORT = 4319;
+export const SERVICE_URL = `http://127.0.0.1:${SERVICE_PORT}`;
+
+export type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
+
+export type ModelState = { kind: string; id: string; state: "not_loaded" | "loading" | "ready" | "error" };
+
+export type ServiceError = { error: { code: string; message: string } };
+
+export type TranscribeRequest = { fileName: string; audioBase64: string };
+export type TranscribeResponse = {
+  sourceDigest: string;
+  model: string;
+  transcribeMs: number;
+  narration: Narration;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= max;
+}
+
+export function parseTranscribeRequest(json: unknown): Parsed<TranscribeRequest> {
+  if (!isRecord(json)) return { ok: false, message: "Body must be an object" };
+  if (!nonEmptyString(json.fileName, 200)) return { ok: false, message: "fileName is required" };
+  if (!/\.wav$/i.test(json.fileName)) return { ok: false, message: "Only .wav recordings are supported" };
+  if (!nonEmptyString(json.audioBase64, 40_000_000)) return { ok: false, message: "audioBase64 is required" };
+  return { ok: true, value: { fileName: json.fileName, audioBase64: json.audioBase64 } };
+}
+
+export function parseTranscribeResponse(json: unknown): Parsed<TranscribeResponse> {
+  if (!isRecord(json) || !isRecord(json.narration)) return { ok: false, message: "Missing narration" };
+  const n = json.narration;
+  if (typeof n.transcript !== "string" || !Array.isArray(n.segments)) {
+    return { ok: false, message: "Narration is malformed" };
+  }
+  const segmentsOk = n.segments.every(
+    (s) => isRecord(s) && typeof s.text === "string" && typeof s.startMs === "number" && typeof s.endMs === "number",
+  );
+  if (!segmentsOk || typeof json.model !== "string" || typeof json.sourceDigest !== "string") {
+    return { ok: false, message: "Narration is malformed" };
+  }
+  return { ok: true, value: json as TranscribeResponse };
+}
+
+export function parseServiceError(json: unknown): ServiceError["error"] | null {
+  if (isRecord(json) && isRecord(json.error) && typeof json.error.code === "string" && typeof json.error.message === "string") {
+    return { code: json.error.code, message: json.error.message };
+  }
+  return null;
+}
+
+export type ReadScreenshotRequest = { fileName: string; imageBase64: string };
+export type ReadScreenshotResponse = { sourceDigest: string; model: string; note: ScreenNote };
+
+export function parseReadScreenshotRequest(json: unknown): Parsed<ReadScreenshotRequest> {
+  if (!isRecord(json)) return { ok: false, message: "Body must be an object" };
+  if (!nonEmptyString(json.fileName, 200)) return { ok: false, message: "fileName is required" };
+  if (!imageExtension(json.fileName)) return { ok: false, message: "Only .png and .jpg screenshots are supported" };
+  if (!nonEmptyString(json.imageBase64, 20_000_000)) return { ok: false, message: "imageBase64 is required" };
+  return { ok: true, value: { fileName: json.fileName, imageBase64: json.imageBase64 } };
+}
+
+export function parseReadScreenshotResponse(json: unknown): Parsed<ReadScreenshotResponse> {
+  if (!isRecord(json) || !isRecord(json.note) || typeof json.note.text !== "string" || typeof json.model !== "string") {
+    return { ok: false, message: "Screen note is malformed" };
+  }
+  return { ok: true, value: json as ReadScreenshotResponse };
+}
+
+export type ProposeStepsRequest = { transcript: string; screenNotes: string[] };
+export type ProposeStepsResponse = { model: string; raw: string; result: ProposalResult };
+
+export function parseProposeStepsRequest(json: unknown): Parsed<ProposeStepsRequest> {
+  if (!isRecord(json)) return { ok: false, message: "Body must be an object" };
+  if (!nonEmptyString(json.transcript, 20_000)) return { ok: false, message: "transcript is required" };
+  const notes = json.screenNotes ?? [];
+  if (!Array.isArray(notes) || notes.length > 20 || !notes.every((n) => nonEmptyString(n, 1000))) {
+    return { ok: false, message: "screenNotes must be up to 20 strings" };
+  }
+  return { ok: true, value: { transcript: json.transcript, screenNotes: notes as string[] } };
+}
+
+export function parseProposeStepsResponse(json: unknown): Parsed<ProposeStepsResponse> {
+  if (!isRecord(json) || !isRecord(json.result) || !Array.isArray(json.result.proposals) || !Array.isArray(json.result.rejected)) {
+    return { ok: false, message: "Proposal response is malformed" };
+  }
+  return { ok: true, value: json as ProposeStepsResponse };
+}
+
+export type ProposeConditionsResponse = { model: string; raw: string; result: ConditionsResult };
+
+export function parseProposeConditionsRequest(json: unknown): Parsed<{ transcript: string }> {
+  if (!isRecord(json) || !nonEmptyString(json.transcript, 20_000)) return { ok: false, message: "transcript is required" };
+  return { ok: true, value: { transcript: json.transcript } };
+}
+
+export function parseProposeConditionsResponse(json: unknown): Parsed<ProposeConditionsResponse> {
+  const r = isRecord(json) ? json.result : null;
+  if (!isRecord(r) || !Array.isArray(r.parameters) || !Array.isArray(r.preconditions) || !Array.isArray(r.stopConditions)) {
+    return { ok: false, message: "Conditions response is malformed" };
+  }
+  return { ok: true, value: json as ProposeConditionsResponse };
+}
+
+export type FindTapeRequest = { query: string; tapes: { id: string; text: string }[] };
+export type FindTapeResponse = { model: string; matches: TapeMatch[] };
+
+export function parseFindTapeRequest(json: unknown): Parsed<FindTapeRequest> {
+  if (!isRecord(json) || !nonEmptyString(json.query, 500)) return { ok: false, message: "query is required" };
+  const tapes = json.tapes;
+  if (
+    !Array.isArray(tapes) ||
+    tapes.length > 500 ||
+    !tapes.every((t) => isRecord(t) && nonEmptyString(t.id, 100) && nonEmptyString(t.text, 10_000))
+  ) {
+    return { ok: false, message: "tapes must be up to 500 { id, text } objects" };
+  }
+  return { ok: true, value: { query: json.query, tapes: tapes as FindTapeRequest["tapes"] } };
+}
+
+export function parseFindTapeResponse(json: unknown): Parsed<FindTapeResponse> {
+  if (!isRecord(json) || !Array.isArray(json.matches)) return { ok: false, message: "Search response is malformed" };
+  const ok = json.matches.every((m) => isRecord(m) && typeof m.tapeId === "string" && typeof m.score === "number");
+  return ok ? { ok: true, value: json as FindTapeResponse } : { ok: false, message: "Search response is malformed" };
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 12 passed (12)`, `Tests 38 passed (38)`. Ranking tests use hand-made 3D vectors, labelled as fixtures. The server test proves the second search only embeds the new query.
+
+## Before continuing
+
+- [ ] Ranking is plain code with a visible threshold.
+- [ ] A failed service falls back to word search and says so.
+- [ ] Edited tapes are re-embedded because the cache key is the text.
+
+Continue to [Export a tape as an agent skill](/replay/08-export-skill).

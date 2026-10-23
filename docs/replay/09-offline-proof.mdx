@@ -1,0 +1,336 @@
+---
+title: "09. Prove it offline"
+description: "We will run the whole Replay pipeline in a process the operating system denies network access, and refuse to call it a proof unless the denial and the cache are both checked."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Replay · 09. Prove it offline" />
+
+A full model cache is not an offline proof. Blocking `fetch` is not either; native code can open its own sockets. The proof is a process the operating system will not let reach the network, doing the real work.
+
+**Source checkpoint:** `7a35290` · **Starting checkpoint:** `18f5755`
+
+## What changes
+
+- `qvac-service/offline-proof.ts`: `assertWarmedCache` requires all five pinned files (Whisper, SmolVLM2, its projection, Llama, GTE) to be present and non-empty. `classifyProbe` only accepts a refused or unreachable TCP connection to a public IP as denial; DNS failure and timeouts do not count.
+- `qvac-service/offline-check.mjs`: checks the cache, probes the network, then transcribes your narration, reads the sample screenshot, proposes steps and conditions through the same gates, ranks the sample tapes, and hashes the skill export.
+- `qvac-service/offline.sb`: the macOS sandbox profile. Only loopback and local sockets are allowed.
+- `qvac-service/qvac-models.ts`: `closeSdk` now tolerates an SDK that never loaded.
+- Scripts: `qvac:offline` (macOS `sandbox-exec`), `qvac:offline:linux` (`unshare -rn`, a fresh network namespace with only loopback), and `qvac:service:offline`.
+
+To compare with the previous checkpoint: `git diff 18f5755 7a35290`.
+
+## Build and observe
+
+### 1. Warm the cache online
+
+```bash
+git checkout 7a35290
+npm run qvac:service
+```
+
+Use every feature once in the app: transcribe, read a screenshot, propose frames, propose conditions, and find a tape. Then stop the service.
+
+### 2. Run the proof
+
+macOS:
+
+```bash
+npm run qvac:offline -- ~/Desktop/weekly-report.wav
+```
+
+Linux:
+
+```bash
+npm run qvac:offline:linux -- ~/Desktop/weekly-report.wav
+```
+
+The receipt is JSON: `"network": "network-denied"`, transcript word count, the screen note, how many steps were proposed and held back, parameter names that passed the gate, the closest sample tape, the skill hash `76cfecf827fc5d5fc620072ef0f51779ba3e370fda04c875c816a376d5574b0f`, and elapsed time. These numbers come from your machine. The course does not print them for you.
+
+### 3. See it refuse
+
+Run `node --no-warnings qvac-service/offline-check.mjs your.wav` without the sandbox. It refuses with `Expected this process to be denied network access, got network-allowed`. Move `.qvac/models` aside and it refuses with `QVAC cache is incomplete (...)`, naming every missing model.
+
+### 4. Know what was proven
+
+This denies the network to one process. It does not disconnect your computer. It proves that Replay's models, gates, and export run without any remote call.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="package.json">
+
+```json
+{
+  "name": "replay",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "qvac:transcribe-smoke": "node --no-warnings qvac-service/transcribe-smoke.mjs",
+    "qvac:service": "node --no-warnings qvac-service/main.ts",
+    "qvac:screen-smoke": "node --no-warnings qvac-service/screen-smoke.mjs",
+    "qvac:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:offline:linux": "unshare -rn node --no-warnings qvac-service/offline-check.mjs",
+    "qvac:service:offline": "sandbox-exec -f qvac-service/offline.sb node --no-warnings qvac-service/main.ts"
+  },
+  "dependencies": {
+    "@qvac/sdk": "0.22.0",
+    "b4a": "1.9.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "^22.22.0 || ^24.15.0 || >=26.0.0"
+  }
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-check.mjs">
+
+```javascript
+// The offline proof. Run it inside a process that has no network:
+//   macOS: npm run qvac:offline -- <narration.wav>       (sandbox-exec)
+//   Linux: npm run qvac:offline:linux -- <narration.wav> (unshare -rn, a fresh network namespace)
+// It refuses to run unless the network is really denied and every pinned model is cached.
+import { createHash } from "node:crypto";
+import { readdir, stat } from "node:fs/promises";
+import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+const narrationPath = process.argv[2] ? path.resolve(process.argv[2]) : null;
+const screenshotPath = path.join(appDirectory, "public/test-files/replay/harbor-export.png");
+
+const { assertWarmedCache, classifyProbe } = await import("./offline-proof.ts");
+const models = await import("./qvac-models.ts");
+const { toNarration } = await import("../src/features/replay/narration.ts");
+const { parseScreenNote, SCREEN_NOTE_PROMPT } = await import("../src/features/replay/screen-notes.ts");
+const { buildStepsHistory, parseStepProposals, STEPS_JSON_SCHEMA } = await import("../src/features/replay/proposals.ts");
+const { buildConditionsHistory, CONDITIONS_JSON_SCHEMA, parseConditions } = await import("../src/features/replay/conditions.ts");
+const { rankTapes } = await import("../src/features/replay/search.ts");
+const { SAMPLE_LIBRARY } = await import("../src/features/replay/sample-library.ts");
+const { tapeText } = await import("../src/features/replay/tape.ts");
+const { tapeToSkill } = await import("../src/features/replay/skill-export.ts");
+
+function probe() {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: "1.1.1.1", port: 443, timeout: 5000 });
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve({ ok: true });
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve({ ok: false, code: "ETIMEDOUT" });
+    });
+    socket.on("error", (error) => resolve({ ok: false, code: error.code }));
+  });
+}
+
+const open = [];
+try {
+  if (!narrationPath) throw new Error("Pass your narration recording: npm run qvac:offline -- <narration.wav>");
+  const { cacheDirectory } = models.prepareQvacConfig(appDirectory);
+  const names = await readdir(cacheDirectory, { recursive: true });
+  const files = await Promise.all(
+    names.map(async (name) => ({ name, bytes: (await stat(path.join(cacheDirectory, name))).size })),
+  );
+  assertWarmedCache(files);
+
+  const network = classifyProbe(await probe());
+  if (network !== "network-denied") throw new Error(`Expected this process to be denied network access, got ${network}`);
+
+  const started = Date.now();
+  const transcriber = models.createQvacTranscriber();
+  const viewer = models.createQvacViewer();
+  const drafter = models.createQvacDrafter();
+  const embedder = models.createQvacEmbedder();
+  open.push(transcriber, viewer, drafter, embedder);
+
+  const narration = toNarration(await transcriber.transcribe(narrationPath));
+  const note = parseScreenNote(await viewer.describe(screenshotPath, SCREEN_NOTE_PROMPT));
+  const steps = parseStepProposals(
+    await drafter.complete(buildStepsHistory({ transcript: narration.transcript, screenNotes: [note.text] }), {
+      name: "steps",
+      schema: STEPS_JSON_SCHEMA,
+    }),
+    narration.transcript,
+  );
+  const conditions = parseConditions(
+    await drafter.complete(buildConditionsHistory(narration.transcript), { name: "conditions", schema: CONDITIONS_JSON_SCHEMA }),
+    narration.transcript,
+  );
+  const [query, ...vectors] = await embedder.embed([narration.transcript, ...SAMPLE_LIBRARY.map(tapeText)]);
+  const matches = rankTapes(SAMPLE_LIBRARY.map((t, i) => ({ tapeId: t.id, vector: vectors[i] })), query);
+  const skill = tapeToSkill(SAMPLE_LIBRARY[0]);
+
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        network,
+        transcriptWords: narration.transcript.split(/\s+/).length,
+        screenNote: note.text,
+        proposedSteps: steps.proposals.length,
+        heldBackSteps: steps.rejected.length,
+        proposedParameters: conditions.parameters.map((p) => p.name),
+        proposedStopConditions: conditions.stopConditions.length,
+        closestTape: matches[0] ?? null,
+        skillSha256: createHash("sha256").update(skill.content).digest("hex"),
+        elapsedMs: Date.now() - started,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+} catch (error) {
+  process.stderr.write(`Offline proof failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  for (const model of open) await model.close();
+  await models.closeSdk();
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { assertWarmedCache, classifyProbe } from "./offline-proof";
+
+const warmed = [
+  { name: "a1_ggml-tiny.bin", bytes: 77_000_000 },
+  { name: "b2_SmolVLM2-500M-Video-Instruct-Q8_0.gguf", bytes: 400_000_000 },
+  { name: "c3_mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf", bytes: 100_000_000 },
+  { name: "d4_Llama-3.2-1B-Instruct-Q4_0.gguf", bytes: 700_000_000 },
+  { name: "e5_gte-large_fp16.gguf", bytes: 600_000_000 },
+];
+
+describe("offline proof checks (file listings are fixtures)", () => {
+  it("accepts a cache that holds every pinned model", () => {
+    expect(() => assertWarmedCache(warmed)).not.toThrow();
+  });
+
+  it("does not let the projection file stand in for the vision model", () => {
+    const noVision = warmed.filter((f) => !f.name.startsWith("b2_"));
+    expect(() => assertWarmedCache(noVision)).toThrow("(vision)");
+  });
+
+  it("names every missing or empty model", () => {
+    const partial = [{ ...warmed[0], bytes: 0 }, warmed[3]];
+    expect(() => assertWarmedCache(partial)).toThrow("transcription, vision, projection, embeddings");
+  });
+
+  it("only counts a refused or unreachable connection as denial", () => {
+    expect(classifyProbe({ ok: true })).toBe("network-allowed");
+    expect(classifyProbe({ ok: false, code: "EAI_AGAIN" })).toBe("dns-failed");
+    expect(classifyProbe({ ok: false, code: "ETIMEDOUT" })).toBe("inconclusive");
+    expect(classifyProbe({ ok: false, code: "ENETUNREACH" })).toBe("network-denied");
+    expect(classifyProbe({ ok: false, code: "EPERM" })).toBe("network-denied");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline-proof.ts">
+
+```typescript
+// Pure checks for the offline proof. The runner is offline-check.mjs.
+
+// Each pattern must match at least one non-empty file in the model cache.
+export const REQUIRED_MODELS: Record<string, RegExp> = {
+  transcription: /ggml-tiny\.bin$/i,
+  vision: /(^|[^-])smolvlm2-500m-video-instruct-q8_0\.gguf$/i,
+  projection: /mmproj-smolvlm2-500m-video-instruct-q8_0\.gguf$/i,
+  llm: /llama-3\.2-1b-instruct-q4_0\.gguf$/i,
+  embeddings: /gte-large_fp16\.gguf$/i,
+};
+
+export function assertWarmedCache(
+  files: readonly { name: string; bytes: number }[],
+  required: Record<string, RegExp> = REQUIRED_MODELS,
+) {
+  const missing = Object.entries(required)
+    .filter(([, pattern]) => !files.some((f) => pattern.test(f.name) && f.bytes > 0))
+    .map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(
+      `QVAC cache is incomplete (${missing.join(", ")}). Warm it online first: run the service and use every feature once.`,
+    );
+  }
+}
+
+export type ProbeResult = { ok: true } | { ok: false; code: string | undefined };
+
+// A TCP connect to a public IP literal, so DNS cannot be mistaken for network denial.
+// Only a refused or unreachable connection counts as proof.
+export function classifyProbe(result: ProbeResult) {
+  if (result.ok) return "network-allowed" as const;
+  if (result.code === "ENOTFOUND" || result.code === "EAI_AGAIN") return "dns-failed" as const;
+  if (result.code === "ETIMEDOUT" || result.code === undefined) return "inconclusive" as const;
+  return "network-denied" as const;
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/offline.sb">
+
+```scheme
+(version 1)
+(allow default)
+; macOS: deny every outbound connection except loopback and local sockets.
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: `Test Files 14 passed (14)`, `Tests 46 passed (46)`. Cache listings in the tests are fixtures; they prove that a projection file cannot stand in for the vision model and that DNS failure is not counted as denial. Your offline receipt is the JSON from step 2.
+
+## Before continuing
+
+- [ ] The proof refuses to run with the network allowed.
+- [ ] The proof refuses to run with an incomplete cache.
+- [ ] Your receipt shows network-denied and the same skill hash.
+
+That completes Replay. You built a manual tape library, let local models listen, look, and propose while a person decided every change, and proved it runs with the network denied.

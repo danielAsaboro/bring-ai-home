@@ -1,0 +1,51 @@
+---
+title: "Build Pattern"
+description: "A reversible transformation workbench where examples, rules, and outputs stay inspectable."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<Info>
+**Written course: 8 lessons.** Every lesson is written and tested against fixtures. Videos are being filmed in order.
+</Info>
+
+<LessonVideo title="Pattern: Teach a model your cleanup rules with ten examples" />
+
+People clean the same exports by hand every week because formulas, regex, and scripts feel like too much for the job.
+
+**QVAC capabilities:** Text generation · LoRA fine-tuning · Embeddings
+
+## Before and after
+
+| | |
+|---|---|
+| **Without AI** | Compose trim, split, case, and format rules by hand. |
+| **With QVAC** | Give three before-and-after examples, get an editable rule set, expose one failure, correct it, and rerun every sample. |
+
+## What you will build
+
+| Lesson | You build | Status |
+|---|---|---|
+| 01 | [Build the Pattern starter](/pattern/01-starter) | Written · video in production |
+| 02 | [Propose rules from examples](/pattern/02-propose-rules) | Written · video in production |
+| 03 | [Add the local service boundary](/pattern/03-local-service) | Written · video in production |
+| 04 | [Constrain proposals to readable, reversible rules](/pattern/04-readable-rules) | Written · video in production |
+| 05 | [Test rules against counterexamples](/pattern/05-counterexamples) | Written · video in production |
+| 06 | [Find similar saved patterns](/pattern/06-similar-patterns) | Written · video in production |
+| 07 | [Fine-tune proposals to your domain with LoRA](/pattern/07-lora-finetune) | Written · video in production |
+| 08 | [Prove it offline](/pattern/08-offline-proof) | Written · video in production |
+
+## Beyond the lessons
+
+<CardGroup cols={2}>
+  <Card title="Shareable adapters" icon="sparkles">
+    Share a trained LoRA adapter with a teammate peer to peer.
+  </Card>
+  <Card title="An agent skill" icon="robot">
+    A `SKILL.md` for each lesson, so a coding agent can follow it step by step.
+  </Card>
+</CardGroup>
+
+<Card title="Start lesson 01" icon="play" href="/pattern/01-starter">
+  Build the app first, then add QVAC one lesson at a time.
+</Card>

@@ -1,0 +1,837 @@
+---
+title: "07. Propose outfits under explicit constraints"
+description: "We will let a local model propose a packing carousel for an occasion, from clean, unpacked garments only and within the remaining limit, then re-check every pick before a person packs it."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Closet · 07. Propose outfits under explicit constraints" />
+
+Packing is where a wardrobe app earns its place: an occasion, a bag limit, and only clean clothes. We ask the local model for a carousel, but Closet writes the constraints and checks the answer.
+
+The model sees only garments that are clean and not yet packed, and only as many slots as are left. Its answer is validated again, then a person ticks what to pack.
+
+**Source checkpoint:** `e8906f1` · **Starting checkpoint:** `b43b940`
+
+## What changes
+
+| File | Change |
+| --- | --- |
+| `src/features/closet/outfit-proposal.ts` | Build constraints, a schema with candidate ids as an enum, and the validator |
+| `src/features/closet/OutfitProposer.tsx` | Ask for an outfit, review it, pack the ticked garments |
+| `qvac-service/server.ts` | Add `/outfit` and validate constraints before the model sees them |
+| `qvac-service/qvac-engine.ts` | Run the outfit completion with a per-request JSON schema |
+| `src/features/closet/service-client.ts` | Add `proposeOutfit` |
+
+To compare with the previous checkpoint: `git diff b43b940 e8906f1`.
+
+## Build and observe
+
+### 1. The app writes the constraints
+
+`buildOutfitConstraints` offers only clean, unpacked garments and sets `maxItems` to the slots left. With the sample trip (limit 6, two packed) that is four. A worn tee is never offered.
+
+### 2. The schema narrows, the validator decides
+
+`outfitSchema` puts the candidate ids in an `enum` and sets `maxItems`. That makes a bad answer less likely. `validateOutfitProposal` still checks every id and explains each rejection: not a clean, unpacked garment you own; proposed twice; over the packing limit.
+
+### 3. The person packs
+
+Run the service and the app, open **Packing**, enter `dinner in Lisbon`, and press **Propose outfit**. Untick anything you disagree with and press **Pack selected**. `packGarment` checks cleanliness and the limit again; it is the same rule a manual click uses.
+
+### 4. Stop the service
+
+Press **Propose outfit** again. The status line says the service is not running and to pack by hand. The **Clean and ready** buttons still work.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+
+<AccordionGroup>
+<Accordion title="src/features/closet/outfit-proposal.ts">
+
+```typescript
+import type { Closet } from "./model";
+
+export type OutfitCandidate = { id: string; name: string; category: string; colour: string };
+export type OutfitConstraints = { occasion: string; maxItems: number; candidates: OutfitCandidate[] };
+
+// The app writes the constraints. Only clean, unpacked garments are offered,
+// and the count is what is left of the packing limit.
+export function buildOutfitConstraints(closet: Closet, occasion: string): OutfitConstraints {
+  return {
+    occasion: occasion.trim(),
+    maxItems: Math.max(0, closet.trip.limit - closet.trip.garmentIds.length),
+    candidates: closet.garments
+      .filter((g) => g.state === "clean" && !closet.trip.garmentIds.includes(g.id))
+      .map((g) => ({ id: g.id, name: g.name, category: g.category, colour: g.colour })),
+  };
+}
+
+export function outfitSchema(constraints: OutfitConstraints) {
+  return {
+    type: "object",
+    properties: {
+      garmentIds: {
+        type: "array",
+        items: { type: "string", enum: constraints.candidates.map((c) => c.id) },
+        maxItems: constraints.maxItems,
+      },
+      reason: { type: "string" },
+    },
+    required: ["garmentIds", "reason"],
+    additionalProperties: false,
+  };
+}
+
+export function buildOutfitHistory(constraints: OutfitConstraints) {
+  const list = constraints.candidates.map((c) => `- ${c.id}: ${c.colour} ${c.name} (${c.category})`).join("\n");
+  return [
+    {
+      role: "system" as const,
+      content:
+        `Choose garments for one occasion from the list only. Choose at most ${constraints.maxItems}. ` +
+        "Prefer one top or dress, one bottom unless a dress is chosen, and one pair of shoes. Give a one-sentence reason.",
+    },
+    { role: "user" as const, content: `Occasion: ${constraints.occasion}\nGarments:\n${list}` },
+  ];
+}
+
+export type OutfitProposal = {
+  garmentIds: string[];
+  reason: string;
+  rejected: { id: string; why: string }[];
+  issues: string[];
+};
+
+// The app decides: every id is re-checked against the constraints it wrote.
+export function validateOutfitProposal(raw: string, constraints: OutfitConstraints): OutfitProposal {
+  let data: { garmentIds?: unknown; reason?: unknown };
+  try {
+    data = JSON.parse(raw) as typeof data;
+  } catch {
+    return { garmentIds: [], reason: "", rejected: [], issues: ["The model did not return JSON."] };
+  }
+  const allowed = new Set(constraints.candidates.map((c) => c.id));
+  const garmentIds: string[] = [];
+  const rejected: OutfitProposal["rejected"] = [];
+  const issues: string[] = [];
+  const ids = Array.isArray(data?.garmentIds) ? data.garmentIds : [];
+  if (!Array.isArray(data?.garmentIds)) issues.push("The model proposed no garment list.");
+  for (const id of ids) {
+    if (typeof id !== "string") continue;
+    if (!allowed.has(id)) rejected.push({ id, why: "not a clean, unpacked garment you own" });
+    else if (garmentIds.includes(id)) rejected.push({ id, why: "proposed twice" });
+    else if (garmentIds.length >= constraints.maxItems) rejected.push({ id, why: "over the packing limit" });
+    else garmentIds.push(id);
+  }
+  if (garmentIds.length === 0 && issues.length === 0) issues.push("Nothing usable was proposed.");
+  const reason = typeof data?.reason === "string" ? data.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";
+  return { garmentIds, reason, rejected, issues };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/OutfitProposer.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { packGarment, type Closet } from "./model";
+import { buildOutfitConstraints, validateOutfitProposal, type OutfitProposal } from "./outfit-proposal";
+import { proposeOutfit } from "./service-client";
+
+type Pending = OutfitProposal & { model: string; picked: string[] };
+
+// The model proposes a carousel; the person ticks what to pack; the domain
+// rules in packGarment still have the final say.
+export function OutfitProposer({ closet, act }: { closet: Closet; act: (c: (c: Closet) => Closet) => void }) {
+  const [occasion, setOccasion] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const name = (id: string) => closet.garments.find((g) => g.id === id)?.name ?? id;
+
+  async function propose() {
+    setPending(null);
+    const constraints = buildOutfitConstraints(closet, occasion);
+    if (!constraints.occasion) return setStatus("Describe the occasion first.");
+    if (constraints.maxItems === 0) return setStatus("The carousel is already full.");
+    if (constraints.candidates.length === 0) return setStatus("No clean garments are left to pack.");
+    setStatus("Asking the local model…");
+    const result = await proposeOutfit(constraints);
+    if (!result.ok) return setStatus(`${result.message} Pack by hand below.`);
+    const proposal = validateOutfitProposal(result.value.raw, constraints);
+    setPending({ ...proposal, model: result.value.model, picked: proposal.garmentIds });
+    setStatus(null);
+  }
+
+  return (
+    <div className="mb-4 rounded-lg border border-dashed border-stone-300 p-3">
+      <form
+        aria-label="Propose a carousel"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void propose();
+        }}
+        className="flex flex-wrap items-end gap-2"
+      >
+        <label className="flex flex-1 flex-col">
+          Occasion to pack for
+          <input value={occasion} onChange={(e) => setOccasion(e.target.value)} className="rounded border px-2 py-1" />
+        </label>
+        <button type="submit" className="rounded bg-stone-900 px-3 py-1 text-white">
+          Propose outfit
+        </button>
+      </form>
+      {status && <p role="status" className="mt-2 text-stone-600">{status}</p>}
+      {pending && (
+        <div role="group" aria-label="Proposed outfit" className="mt-3 space-y-2 rounded bg-amber-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-amber-900">Proposal · {pending.model} · local</p>
+          {pending.reason && <p>{pending.reason}</p>}
+          <ul>
+            {pending.garmentIds.map((id) => (
+              <li key={id}>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={pending.picked.includes(id)}
+                    onChange={(e) =>
+                      setPending({
+                        ...pending,
+                        picked: e.target.checked ? [...pending.picked, id] : pending.picked.filter((p) => p !== id),
+                      })
+                    }
+                  />
+                  {name(id)}
+                </label>
+              </li>
+            ))}
+          </ul>
+          {[...pending.issues, ...pending.rejected.map((r) => `Left out ${name(r.id)}: ${r.why}.`)].map((line) => (
+            <p key={line} className="text-amber-900">
+              {line}
+            </p>
+          ))}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={pending.picked.length === 0}
+              className="rounded bg-stone-900 px-3 py-1 text-white disabled:opacity-50"
+              onClick={() => {
+                act((c) => pending.picked.reduce((next, id) => packGarment(next, id), c));
+                setPending(null);
+              }}
+            >
+              Pack selected
+            </button>
+            <button type="button" className="rounded border px-3 py-1" onClick={() => setPending(null)}>
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/outfit-proposal.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { setTripLimit } from "./model";
+import { buildOutfitConstraints, outfitSchema, validateOutfitProposal } from "./outfit-proposal";
+import { sampleCloset } from "./sample-closet";
+
+describe("outfit constraints", () => {
+  const closet = setTripLimit(sampleCloset(), 4); // two already packed → two slots left
+  const constraints = buildOutfitConstraints(closet, "dinner by the river");
+
+  it("offers only clean, unpacked garments and the remaining slots", () => {
+    expect(constraints.maxItems).toBe(2);
+    const ids = constraints.candidates.map((c) => c.id);
+    expect(ids).not.toContain("grey-tee"); // worn
+    expect(ids).not.toContain("black-dress"); // in repair
+    expect(ids).not.toContain("dark-jeans"); // already packed
+    expect(outfitSchema(constraints).properties.garmentIds.maxItems).toBe(2);
+  });
+
+  // Hand-written fixture outputs. None of these strings came from a model.
+  it("keeps valid picks and explains every rejection", () => {
+    const raw = JSON.stringify({
+      garmentIds: ["navy-blazer", "grey-tee", "navy-blazer", "olive-chinos", "brown-boots"],
+      reason: "Smart but relaxed.",
+    });
+    expect(validateOutfitProposal(raw, constraints)).toEqual({
+      garmentIds: ["navy-blazer", "olive-chinos"],
+      reason: "Smart but relaxed.",
+      rejected: [
+        { id: "grey-tee", why: "not a clean, unpacked garment you own" },
+        { id: "navy-blazer", why: "proposed twice" },
+        { id: "brown-boots", why: "over the packing limit" },
+      ],
+      issues: [],
+    });
+  });
+
+  it("turns malformed output into an issue", () => {
+    expect(validateOutfitProposal("[", constraints).issues).toEqual(["The model did not return JSON."]);
+    expect(validateOutfitProposal('{"reason":"x"}', constraints).issues).toEqual(["The model proposed no garment list."]);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/closet/OutfitProposer.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ClosetApp } from "./ClosetApp";
+
+beforeEach(() => window.localStorage.clear());
+afterEach(() => vi.unstubAllGlobals());
+
+describe("outfit proposals", () => {
+  it("packs only what the person keeps from a validated proposal", async () => {
+    let sent: { maxItems: number; candidates: { id: string }[] } | undefined;
+    // Fixture reply, hand-written: includes a worn garment the app must refuse.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent = JSON.parse(String(init.body));
+        const raw = JSON.stringify({ garmentIds: ["navy-blazer", "grey-tee", "brown-boots"], reason: "Evening layers." });
+        return new Response(JSON.stringify({ raw, model: "LLAMA_3_2_1B_INST_Q4_0" }));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Packing" }));
+    await user.type(screen.getByLabelText("Occasion to pack for"), "dinner in Lisbon");
+    await user.click(screen.getByRole("button", { name: "Propose outfit" }));
+
+    expect(sent?.maxItems).toBe(4);
+    expect(sent?.candidates.map((c) => c.id)).not.toContain("grey-tee");
+    const card = await screen.findByRole("group", { name: "Proposed outfit" });
+    expect(card).toHaveTextContent("Left out Grey tee: not a clean, unpacked garment you own.");
+    await user.click(within(card).getByLabelText("Brown boots"));
+    await user.click(within(card).getByRole("button", { name: "Pack selected" }));
+
+    const carousel = screen.getByRole("list", { name: "Packing carousel" });
+    expect(within(carousel).getByRole("button", { name: "Unpack Navy blazer" })).toBeInTheDocument();
+    expect(within(carousel).queryByRole("button", { name: "Unpack Brown boots" })).not.toBeInTheDocument();
+  });
+
+  it("leaves manual packing open when the service is down", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Packing" }));
+    await user.type(screen.getByLabelText("Occasion to pack for"), "beach");
+    await user.click(screen.getByRole("button", { name: "Propose outfit" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Pack by hand below.");
+    expect(screen.getByRole("button", { name: "Pack Red scarf" })).toBeEnabled();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import type { OutfitConstraints } from "../src/features/closet/outfit-proposal.ts";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+
+export const SERVICE_PORT = 4320;
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+export type GarmentImage = { name: string; bytes: Uint8Array; mime: "image/png" | "image/jpeg" };
+
+// Everything the local models can do for Closet. Each capability is optional:
+// a missing one answers 503 and the app keeps its manual path.
+export type ClosetEngine = {
+  describe?: (image: GarmentImage) => Promise<{ description: string; model: string }>;
+  // Returns the model's raw JSON text. The browser validates it.
+  details?: (description: string) => Promise<{ raw: string; model: string }>;
+  // Returns every label and confidence. The browser decides whether one is usable.
+  outfit?: (constraints: OutfitConstraints) => Promise<{ raw: string; model: string }>;
+  embed?: (texts: string[]) => Promise<{ embeddings: number[][]; model: string }>;
+  classify?: (image: GarmentImage) => Promise<{ results: { label: string; confidence: number }[]; model: string }>;
+};
+
+function requireText(body: unknown, key: string, max = 2000): string {
+  const value = (body as Record<string, unknown> | null)?.[key];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Request must contain ${key}`);
+  if (value.length > max) throw new Error(`${key} is too long`);
+  return value;
+}
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // curl and other local tools send no Origin
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+export function parseGarmentImage(value: unknown): GarmentImage {
+  const v = value as { name?: unknown; dataUrl?: unknown } | null;
+  if (!v || typeof v.name !== "string" || typeof v.dataUrl !== "string") {
+    throw new Error("Request must contain name and dataUrl");
+  }
+  const match = /^data:(image\/png|image\/jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(v.dataUrl);
+  if (!match) throw new Error("Only PNG or JPEG data URLs are accepted");
+  const bytes = new Uint8Array(Buffer.from(match[2], "base64"));
+  const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const mime = match[1] as GarmentImage["mime"];
+  if ((mime === "image/png" && !isPng) || (mime === "image/jpeg" && !isJpeg)) {
+    throw new Error("Image bytes do not match the declared type");
+  }
+  return { name: v.name.slice(0, 120), bytes, mime };
+}
+
+export function send(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  res.end(status === 204 ? undefined : JSON.stringify(body));
+}
+
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function parseConstraints(value: unknown): OutfitConstraints {
+  const v = value as Partial<OutfitConstraints> | null;
+  if (
+    !v ||
+    typeof v.occasion !== "string" ||
+    !v.occasion.trim() ||
+    typeof v.maxItems !== "number" ||
+    !Number.isInteger(v.maxItems) ||
+    v.maxItems < 1 ||
+    v.maxItems > 30 ||
+    !Array.isArray(v.candidates) ||
+    v.candidates.length === 0 ||
+    v.candidates.length > 200
+  ) {
+    throw new Error("Request must contain an occasion, a packing limit, and candidate garments");
+  }
+  const candidates = v.candidates.map((c) => {
+    if (!c || ["id", "name", "category", "colour"].some((k) => typeof (c as Record<string, unknown>)[k] !== "string")) {
+      throw new Error("Each candidate needs id, name, category, and colour");
+    }
+    return { id: c.id, name: c.name, category: c.category, colour: c.colour };
+  });
+  return { occasion: v.occasion.slice(0, 200), maxItems: v.maxItems, candidates };
+}
+
+type Route = (body: unknown, engine: ClosetEngine) => Promise<unknown> | null;
+
+// Each route returns null when its capability is not loaded.
+const ROUTES: Record<string, Route> = {
+  "/describe": (body, engine) => {
+    if (!engine.describe) return null;
+    const image = parseGarmentImage(body);
+    return engine.describe(image);
+  },
+  "/details": (body, engine) => {
+    if (!engine.details) return null;
+    return engine.details(requireText(body, "description"));
+  },
+  "/embed": (body, engine) => {
+    if (!engine.embed) return null;
+    const texts = (body as { texts?: unknown } | null)?.texts;
+    if (!Array.isArray(texts) || texts.length === 0 || texts.length > 64) {
+      throw new Error("Request must contain 1 to 64 texts");
+    }
+    if (!texts.every((t) => typeof t === "string" && t.trim() && t.length <= 1000)) {
+      throw new Error("Each text must be a non-empty string under 1000 characters");
+    }
+    return engine.embed(texts as string[]);
+  },
+  "/outfit": (body, engine) => {
+    if (!engine.outfit) return null;
+    return engine.outfit(parseConstraints(body));
+  },
+  "/classify": (body, engine) => {
+    if (!engine.classify) return null;
+    return engine.classify(parseGarmentImage(body));
+  },
+};
+
+export function capabilities(engine: ClosetEngine) {
+  return Object.keys(ROUTES)
+    .map((route) => route.slice(1))
+    .filter((name) => typeof (engine as Record<string, unknown>)[name] === "function");
+}
+
+// The service proposes. It never saves anything. The browser decides.
+export function createClosetServer(engine: ClosetEngine) {
+  return createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    if (!isAllowedOrigin(origin)) return send(res, 403, { error: "Origin not allowed" });
+    if (req.method === "OPTIONS") return send(res, 204, null, origin);
+    if (req.method === "GET" && req.url === "/health") {
+      return send(res, 200, { ok: true, capabilities: capabilities(engine) }, origin);
+    }
+    const route = req.method === "POST" && req.url ? ROUTES[req.url] : undefined;
+    if (!route) return send(res, 404, { error: "Not found" }, origin);
+
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    let pending: Promise<unknown> | null;
+    try {
+      pending = route(body, engine);
+    } catch (error) {
+      return send(res, 400, { error: (error as Error).message }, origin);
+    }
+    if (!pending) return send(res, 503, { error: "This local model is not available" }, origin);
+    try {
+      return send(res, 200, await pending, origin);
+    } catch (error) {
+      return send(res, 502, { error: (error as Error).message }, origin);
+    }
+  });
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-engine.ts">
+
+```typescript
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { buildOutfitHistory, outfitSchema } from "../src/features/closet/outfit-proposal.ts";
+import { buildDetailsHistory, GARMENT_PROPOSAL_SCHEMA } from "../src/features/closet/garment-proposal.ts";
+import { DESCRIBE_GARMENT_PROMPT, resolveLocalQvacPaths, VISION_MODEL } from "./local-config.ts";
+import type { ClosetEngine, GarmentImage } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+// Loads QVAC once, then each model on first use. All inference stays local.
+export async function createQvacEngine(appDirectory: string): Promise<ClosetEngine & { close(): Promise<void> }> {
+  const { cacheDirectory, configPath } = resolveLocalQvacPaths(appDirectory);
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  const sdk: Sdk = await import("@qvac/sdk");
+  const loaded = new Map<string, Promise<string>>();
+
+  function model(key: string, load: () => Promise<string>) {
+    let pending = loaded.get(key);
+    if (!pending) {
+      pending = load().catch((error: unknown) => {
+        loaded.delete(key); // a failed load can be retried
+        throw error;
+      });
+      loaded.set(key, pending);
+    }
+    return pending;
+  }
+
+  const vision = () =>
+    model(VISION_MODEL, () =>
+      sdk.loadModel({
+        modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+        modelConfig: { ctx_size: 1024, projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+      }),
+    );
+
+  const LLM_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
+  const llm = () => model(LLM_MODEL, () => sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }));
+
+  const EMBED_MODEL = "GTE_LARGE_FP16";
+  const embedder = () => model(EMBED_MODEL, () => sdk.loadModel({ modelSrc: sdk.GTE_LARGE_FP16, modelType: "embeddings" }));
+
+  // QVAC ships a small bundled classifier (food/report/other). A wardrobe
+  // classifier is a custom GGUF you point at with CLOSET_CLASSIFIER_GGUF.
+  const customClassifier = process.env.CLOSET_CLASSIFIER_GGUF;
+  const CLASSIFIER_MODEL = customClassifier ? `custom:${path.basename(customClassifier)}` : "bundled-mobilenetv3-small";
+  const classifier = () =>
+    model(CLASSIFIER_MODEL, () =>
+      customClassifier
+        ? sdk.loadModel({ modelSrc: customClassifier, modelType: "ggml-classification" })
+        : sdk.loadModel({ modelType: "ggml-classification" }),
+    );
+
+  // The vision model reads attachments from disk, so stage the upload briefly.
+  async function withTempImage<T>(image: GarmentImage, work: (file: string) => Promise<T>) {
+    const dir = await mkdtemp(path.join(tmpdir(), "closet-"));
+    const file = path.join(dir, image.mime === "image/png" ? "garment.png" : "garment.jpg");
+    try {
+      await writeFile(file, image.bytes);
+      return await work(file);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  return {
+    async describe(image) {
+      const modelId = await vision();
+      return withTempImage(image, async (file) => {
+        const run = sdk.completion({
+          modelId,
+          history: [{ role: "user", content: DESCRIBE_GARMENT_PROMPT, attachments: [{ path: file }] }],
+          stream: true,
+        });
+        let text = "";
+        for await (const token of run.tokenStream) text += token;
+        const description = text.replace(/\s+/g, " ").trim();
+        if (!description) throw new Error("The model returned an empty description");
+        return { description, model: VISION_MODEL };
+      });
+    },
+    async details(description) {
+      const modelId = await llm();
+      const run = sdk.completion({
+        modelId,
+        history: buildDetailsHistory(description),
+        stream: true,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: { name: "garment", schema: GARMENT_PROPOSAL_SCHEMA as unknown as Record<string, unknown> },
+        },
+      });
+      const final = await run.final;
+      return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async outfit(constraints) {
+      const modelId = await llm();
+      const run = sdk.completion({
+        modelId,
+        history: buildOutfitHistory(constraints),
+        stream: true,
+        responseFormat: { type: "json_schema", json_schema: { name: "outfit", schema: outfitSchema(constraints) } },
+      });
+      const final = await run.final;
+      return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async embed(texts) {
+      const modelId = await embedder();
+      const { embedding } = await sdk.embed({ modelId, text: texts });
+      return { embeddings: embedding as number[][], model: EMBED_MODEL };
+    },
+    async classify(image) {
+      const modelId = await classifier();
+      const results = await sdk.classify({ modelId, image: image.bytes });
+      return { results, model: CLASSIFIER_MODEL };
+    },
+    async close() {
+      for (const pending of loaded.values()) {
+        const modelId = await pending.catch(() => null);
+        if (modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+      }
+      await sdk.close().catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/service-client.ts">
+
+```typescript
+import type { OutfitConstraints } from "./outfit-proposal";
+
+// The browser's only door to local AI. Every failure is classified so the UI
+// can say what went wrong and keep the manual path open.
+
+export const SERVICE_URL = "http://127.0.0.1:4320";
+
+export type ServiceFailure =
+  | "service-unreachable" // nothing listening: run `npm run qvac:service`
+  | "model-unavailable" // 503: the service is up, this model is not loaded
+  | "rejected-request" // 400: the app sent something the service refused
+  | "inference-failed" // 502: the model ran and failed
+  | "bad-response"; // the service answered with something we cannot read
+
+export type ServiceResult<T> = { ok: true; value: T } | { ok: false; failure: ServiceFailure; message: string };
+
+type Fetch = typeof fetch;
+
+export async function callService<T>(
+  path: string,
+  body: unknown,
+  read: (json: unknown) => T,
+  fetchFn: Fetch = fetch,
+): Promise<ServiceResult<T>> {
+  let res: Response;
+  try {
+    res = await fetchFn(`${SERVICE_URL}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    return { ok: false, failure: "service-unreachable", message: "The local Closet service is not running." };
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    return { ok: false, failure: "bad-response", message: "The local service answered with unreadable data." };
+  }
+  if (!res.ok) {
+    const message = (json as { error?: string } | null)?.error ?? `HTTP ${res.status}`;
+    const failure: ServiceFailure =
+      res.status === 503 ? "model-unavailable" : res.status === 400 ? "rejected-request" : "inference-failed";
+    return { ok: false, failure, message };
+  }
+  try {
+    return { ok: true, value: read(json) };
+  } catch (error) {
+    return { ok: false, failure: "bad-response", message: (error as Error).message };
+  }
+}
+
+export function checkHealth(fetchFn?: Fetch) {
+  return callService(
+    "/health",
+    undefined,
+    (json) => {
+      const caps = (json as { capabilities?: unknown }).capabilities;
+      if (!Array.isArray(caps) || !caps.every((c) => typeof c === "string")) throw new Error("Malformed health");
+      return caps as string[];
+    },
+    fetchFn,
+  );
+}
+
+export function describeGarment(image: { name: string; dataUrl: string }, fetchFn?: Fetch) {
+  return callService(
+    "/describe",
+    image,
+    (json) => {
+      const v = json as { description?: unknown; model?: unknown };
+      if (typeof v.description !== "string" || typeof v.model !== "string") throw new Error("Malformed description");
+      return { description: v.description, model: v.model };
+    },
+    fetchFn,
+  );
+}
+
+export function proposeDetails(description: string, fetchFn?: Fetch) {
+  return callService(
+    "/details",
+    { description },
+    (json) => {
+      const v = json as { raw?: unknown; model?: unknown };
+      if (typeof v.raw !== "string" || typeof v.model !== "string") throw new Error("Malformed details");
+      return { raw: v.raw, model: v.model };
+    },
+    fetchFn,
+  );
+}
+
+export function classifyGarment(image: { name: string; dataUrl: string }, fetchFn?: Fetch) {
+  return callService(
+    "/classify",
+    image,
+    (json) => {
+      const v = json as { results?: unknown; model?: unknown };
+      if (!Array.isArray(v.results) || typeof v.model !== "string") throw new Error("Malformed classification");
+      const results = v.results.filter(
+        (r): r is { label: string; confidence: number } =>
+          typeof r?.label === "string" && typeof r?.confidence === "number",
+      );
+      return { results, model: v.model };
+    },
+    fetchFn,
+  );
+}
+
+export function embedTexts(texts: string[], fetchFn?: Fetch) {
+  return callService(
+    "/embed",
+    { texts },
+    (json) => {
+      const v = json as { embeddings?: unknown; model?: unknown };
+      const vectors = v.embeddings;
+      if (
+        typeof v.model !== "string" ||
+        !Array.isArray(vectors) ||
+        vectors.length !== texts.length ||
+        !vectors.every((e) => Array.isArray(e) && e.length > 0 && e.length === vectors[0].length && e.every(Number.isFinite))
+      ) {
+        throw new Error("Expected one finite vector of equal length per text");
+      }
+      return { embeddings: vectors as number[][], model: v.model };
+    },
+    fetchFn,
+  );
+}
+
+export function proposeOutfit(constraints: OutfitConstraints, fetchFn?: Fetch) {
+  return callService(
+    "/outfit",
+    constraints,
+    (json) => {
+      const v = json as { raw?: unknown; model?: unknown };
+      if (typeof v.raw !== "string" || typeof v.model !== "string") throw new Error("Malformed outfit");
+      return { raw: v.raw, model: v.model };
+    },
+    fetchFn,
+  );
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/closet/outfit-proposal.test.ts src/features/closet/OutfitProposer.test.tsx
+```
+
+Expected result: 2 test files pass, 5 tests pass. The model replies in these tests are hand-written fixtures, including a worn garment the app must refuse. They do not prove live generation.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 07: Propose outfits under explicit constraints"
+```
+
+## Before continuing
+
+- [ ] A worn garment in a proposal is shown as left out.
+- [ ] Only ticked garments reach the carousel.
+
+Continue to [Prove it offline](/closet/08-offline-proof).

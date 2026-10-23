@@ -1,0 +1,451 @@
+diff --git a/redact/src/app/globals.css b/redact/src/app/globals.css
+index 1438a0f..7f53045 100644
+--- a/redact/src/app/globals.css
++++ b/redact/src/app/globals.css
+@@ -96,6 +96,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
+ .review-heading h1 { font-size: clamp(2rem, 3.5vw, 3.5rem); }
+ .review-heading > div > p:last-child { margin-bottom: 0; color: var(--muted); }
+ .review-actions { display: flex; gap: .65rem; flex-shrink: 0; }
++.review-gate { margin: -.5rem 0 1rem; padding: .7rem .9rem; color: #6f421f; background: #fff5ec; border: 1px solid #efc7a9; border-radius: 7px; font-size: .76rem; font-weight: 700; }
+ .review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 1rem; }
+ .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; min-width: 0; }
+ .comparison-grid article { min-width: 0; padding: .8rem; background: #e6e4dd; border: 1px solid #c9cec9; border-radius: 12px; }
+@@ -137,6 +138,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
+ .candidate-list li > div { display: flex; justify-content: space-between; gap: .5rem; color: var(--orange); font-size: .62rem; text-transform: uppercase; }
+ .candidate-list b { display: block; margin-top: .3rem; font-size: .72rem; }
+ .candidate-list p { margin: .25rem 0 0; color: var(--muted); font-size: .66rem; line-height: 1.35; }
++.candidate-list li[data-status="accepted"] { border-color: #a9c9b2; background: #eff7f1; }
++.candidate-list li[data-status="rejected"] { opacity: .62; background: #f1f0ec; }
++.candidate-actions { display: grid !important; grid-template-columns: 1fr 1fr; gap: .4rem; margin-top: .55rem; }
++.candidate-actions button { min-height: 34px; border: 1px solid #b9c3bc; border-radius: 5px; background: white; font-size: .68rem; font-weight: 800; }
++.candidate-actions button:first-child { color: white; background: var(--green-2); border-color: var(--green-2); }
++.audit-strip { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line); }
++.audit-strip > strong { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
++.audit-strip ol { display: grid; gap: .45rem; margin: .55rem 0 0; padding: 0; list-style: none; }
++.audit-strip li { display: grid; gap: .1rem; font-size: .66rem; }
++.audit-strip small { color: var(--muted); }
+ .empty-marks { padding: 2rem 1rem; text-align: center; border: 1px dashed #b7beb8; border-radius: 8px; }
+ .empty-marks p { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+ .editable-marks { display: grid; gap: .8rem; padding: 0; list-style: none; }
+diff --git a/redact/src/features/redact/RedactApp.test.tsx b/redact/src/features/redact/RedactApp.test.tsx
+index e434f2a..81f5ea5 100644
+--- a/redact/src/features/redact/RedactApp.test.tsx
++++ b/redact/src/features/redact/RedactApp.test.tsx
+@@ -177,9 +177,17 @@ describe("Redact application", () => {
+       height: "2.75%",
+     });
+ 
++    expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
++    await user.click(screen.getByRole("button", { name: "Accept name proposal" }));
++    await user.click(screen.getByRole("button", { name: "Reject email proposal" }));
++    expect(screen.getByRole("button", { name: "Done" })).toBeEnabled();
++    expect(screen.getByText("Accepted local suggestion")).toBeInTheDocument();
++    expect(screen.getByText("Rejected local suggestion")).toBeInTheDocument();
++
+     await user.click(screen.getByRole("button", { name: "Add redaction" }));
+-    expect(screen.getAllByText("1 redaction")).toHaveLength(2);
+-    const width = screen.getByLabelText("Redaction width");
++    expect(screen.getAllByText("2 redactions")).toHaveLength(2);
++    const widths = screen.getAllByLabelText("Redaction width");
++    const width = widths[widths.length - 1];
+     await user.clear(width);
+     await user.type(width, "35");
+     expect(width).toHaveValue(35);
+@@ -267,6 +275,8 @@ describe("Redact application", () => {
+     await screen.findByText("Privacy level");
+     await user.click(screen.getByRole("button", { name: "Prepare for review" }));
+     await screen.findByText("Safe-share preview");
++    await user.click(screen.getByRole("button", { name: "Accept name proposal" }));
++    await user.click(screen.getByRole("button", { name: "Reject email proposal" }));
+     await user.click(screen.getByRole("button", { name: "Done" }));
+     await screen.findByRole("heading", { name: "Your safe copy is ready" });
+     await user.click(screen.getByRole("button", { name: "Copy to clipboard" }));
+diff --git a/redact/src/features/redact/RedactApp.tsx b/redact/src/features/redact/RedactApp.tsx
+index 4f7f7dd..0d72a8d 100644
+--- a/redact/src/features/redact/RedactApp.tsx
++++ b/redact/src/features/redact/RedactApp.tsx
+@@ -26,6 +26,7 @@ import {
+ } from "./safe-copy";
+ import {
+   addManualMark,
++  acceptCandidate,
+   beginPreparation,
+   configureSession,
+   createSession,
+@@ -33,6 +34,7 @@ import {
+   moveMark,
+   openManualReview,
+   recordGeneratedCopy,
++  rejectCandidate,
+   removeMark,
+   resizeMark,
+   type RedactSession,
+@@ -242,7 +244,14 @@ export function RedactApp({
+     if (!session) return;
+     setBusy(true);
+     setError(null);
+-    const exporting = finishReview(session, { allowUnresolved: true });
++    let exporting: RedactSession;
++    try {
++      exporting = finishReview(session);
++    } catch (caught) {
++      setError(messageOf(caught));
++      setBusy(false);
++      return;
++    }
+     setSession(exporting);
+     try {
+       const copy = await adapters.exportCopy({
+@@ -377,6 +386,8 @@ export function RedactApp({
+               )
+             }
+             onRemove={(id) => setSession(removeMark(session, id, adapters.now()))}
++            onAccept={(id) => setSession(acceptCandidate(session, id, adapters.now()))}
++            onReject={(id) => setSession(rejectCandidate(session, id, adapters.now()))}
+             onDone={createCopy}
+           />
+         )}
+diff --git a/redact/src/features/redact/components/ReviewStage.tsx b/redact/src/features/redact/components/ReviewStage.tsx
+index 7140169..a2607c0 100644
+--- a/redact/src/features/redact/components/ReviewStage.tsx
++++ b/redact/src/features/redact/components/ReviewStage.tsx
+@@ -19,6 +19,8 @@ export function ReviewStage({
+   onResize,
+   onGeometry,
+   onRemove,
++  onAccept,
++  onReject,
+   onDone,
+ }: {
+   session: RedactSession;
+@@ -30,12 +32,16 @@ export function ReviewStage({
+   onResize(id: string, width: number, height: number): void;
+   onGeometry(id: string, geometry: RedactionGeometry): void;
+   onRemove(id: string): void;
++  onAccept(id: string): void;
++  onReject(id: string): void;
+   onDone(): void;
+ }) {
+   const page = session.pages[session.activePageNumber - 1];
+   const marks = session.marks.filter((mark) => mark.pageId === page.id);
+   const ocrBlocks = session.ocrBlocks.filter((block) => block.pageId === page.id);
+   const candidates = session.candidates.filter((candidate) => candidate.pageId === page.id);
++  const proposedCandidates = candidates.filter((candidate) => candidate.status === "proposed");
++  const unresolvedCount = session.candidates.filter((candidate) => candidate.status === "proposed").length;
+   return (
+     <section className="review-stage">
+       <div className="review-heading">
+@@ -46,15 +52,16 @@ export function ReviewStage({
+         </div>
+         <div className="review-actions">
+           <button className="secondary-button" onClick={() => onSession({ ...session, stage: "configure" })}>Change settings</button>
+-          <button aria-label="Done" className="primary-button" disabled={busy} onClick={onDone}>{busy ? "Creating…" : "Done"} <span>→</span></button>
++          <button aria-label="Done" className="primary-button" disabled={busy || unresolvedCount > 0} onClick={onDone}>{busy ? "Creating…" : "Done"} <span>→</span></button>
+         </div>
+       </div>
++      {unresolvedCount > 0 && <p className="review-gate" role="status">Review {unresolvedCount} remaining {unresolvedCount === 1 ? "suggestion" : "suggestions"} before creating a safe copy.</p>}
+       {error && <p className="error-banner" role="alert">{error}</p>}
+       <div className="review-layout">
+         <div className="comparison-grid">
+           <article>
+             <header><strong>Original</strong><span>{ocrBlocks.length > 0 ? `${ocrBlocks.length} detected regions · drag to draw` : "Drag to draw · drag marks to move"}</span></header>
+-            <DocumentSurface key={`original-${page.id}`} page={page} marks={marks} evidence={ocrBlocks} candidates={candidates} mode="original" onCreate={onAdd} onChange={onGeometry} />
++            <DocumentSurface key={`original-${page.id}`} page={page} marks={marks} evidence={ocrBlocks} candidates={proposedCandidates} mode="original" onCreate={onAdd} onChange={onGeometry} />
+           </article>
+           <article>
+             <header><strong>Safe-share preview</strong><span>{marks.length} {marks.length === 1 ? "redaction" : "redactions"}</span></header>
+@@ -68,7 +75,7 @@ export function ReviewStage({
+           </div>
+           <p className="mark-count">{marks.length} {marks.length === 1 ? "redaction" : "redactions"}</p>
+           {ocrBlocks.length > 0 && <section className="ocr-evidence" aria-label="Local OCR evidence"><strong>{ocrBlocks.length} text {ocrBlocks.length === 1 ? "region" : "regions"} found locally</strong><ol>{ocrBlocks.map((block) => <li key={block.id}><span>{block.text}</span><small>{block.confidence === null ? "confidence unavailable" : `${Math.round(block.confidence * 100)}% recognition`}</small></li>)}</ol></section>}
+-          {candidates.length > 0 && <section className="candidate-list" aria-label="Suggested redactions"><strong>{candidates.length} suggested {candidates.length === 1 ? "redaction" : "redactions"}</strong><ol>{candidates.map((candidate) => <li key={candidate.id}><div><span>{candidate.label}</span><small>{Math.round((candidate.confidence ?? 0) * 100)}% sensitivity</small></div><b>{candidate.evidenceText}</b><p>{candidate.explanation}</p></li>)}</ol></section>}
++          {candidates.length > 0 && <section className="candidate-list" aria-label="Suggested redactions"><strong>{candidates.length} suggested {candidates.length === 1 ? "redaction" : "redactions"}</strong><ol>{candidates.map((candidate) => <li data-status={candidate.status} key={candidate.id}><div><span>{candidate.label}</span><small>{candidate.status === "proposed" ? `${Math.round((candidate.confidence ?? 0) * 100)}% score` : candidate.status}</small></div><b>{candidate.evidenceText}</b><p>{candidate.explanation}</p>{candidate.status === "proposed" && <div className="candidate-actions"><button aria-label={`Accept ${candidate.label} proposal`} onClick={() => onAccept(candidate.id)}>Accept</button><button aria-label={`Reject ${candidate.label} proposal`} onClick={() => onReject(candidate.id)}>Reject</button></div>}</li>)}</ol></section>}
+           {marks.length === 0 ? (
+             <div className="empty-marks"><strong>Draw on the original</strong><p>Drag over anything private. You can move or resize the region afterward.</p></div>
+           ) : (
+@@ -92,6 +99,7 @@ export function ReviewStage({
+               <button disabled={page.pageNumber === session.pages.length} onClick={() => onSession({ ...session, activePageNumber: page.pageNumber + 1 })}>Next →</button>
+             </div>
+           )}
++          <section className="audit-strip" aria-label="Audit history"><strong>Recent activity</strong><ol>{session.audit.slice(0, 4).map((entry) => <li key={entry.id}><span>{entry.action}</span><small>{entry.detail}</small></li>)}</ol></section>
+         </aside>
+       </div>
+       <p className="review-note">The safe-share preview is flattened only when you select Done. Your uploaded original remains unchanged.</p>
+diff --git a/redact/src/features/redact/domain.test.ts b/redact/src/features/redact/domain.test.ts
+index a602f4c..78ab415 100644
+--- a/redact/src/features/redact/domain.test.ts
++++ b/redact/src/features/redact/domain.test.ts
+@@ -1,6 +1,7 @@
+ import { describe, expect, it } from "vitest";
+ 
+ import {
++  acceptCandidate,
+   addManualMark,
+   configureSession,
+   createSession,
+@@ -8,6 +9,7 @@ import {
+   moveMark,
+   openManualReview,
+   recordGeneratedCopy,
++  rejectCandidate,
+   removeMark,
+   resizeMark,
+   type RasterPage,
+@@ -33,6 +35,21 @@ const page: RasterPage = {
+   height: 1600,
+   pngBytes: new Uint8Array([9, 8, 7]).buffer,
+ };
++const proposal: RedactionCandidate = {
++  id: "candidate-1",
++  documentId: source.id,
++  pageId: page.id,
++  pageNumber: 1,
++  x: 10,
++  y: 20,
++  width: 30,
++  height: 5,
++  label: "name",
++  evidenceText: "Maya Chen",
++  explanation: "The block contains a person name.",
++  confidence: 0.94,
++  status: "proposed",
++};
+ 
+ function reviewSession() {
+   return openManualReview(createSession(source, "2026-08-14T10:00:00.000Z"), [
+@@ -100,22 +117,7 @@ describe("redact workflow domain", () => {
+   });
+ 
+   it("blocks completion while suggestions remain unresolved", () => {
+-    const candidate: RedactionCandidate = {
+-      id: "candidate-1",
+-      documentId: source.id,
+-      pageId: page.id,
+-      pageNumber: 1,
+-      x: 10,
+-      y: 20,
+-      width: 30,
+-      height: 5,
+-      label: "name",
+-      evidenceText: "Amara Okeke",
+-      explanation: "Natural-person name",
+-      confidence: 0.94,
+-      status: "proposed",
+-    };
+-    const session = { ...reviewSession(), candidates: [candidate] };
++    const session = { ...reviewSession(), candidates: [proposal] };
+ 
+     expect(() => finishReview(session)).toThrow(
+       "Resolve every suggestion before creating a safe copy",
+@@ -128,6 +130,73 @@ describe("redact workflow domain", () => {
+     );
+   });
+ 
++  it("accepts a proposal once as an ordinary accepted mark and audit event", () => {
++    const session = { ...reviewSession(), candidates: [proposal] };
++    const accepted = acceptCandidate(session, proposal.id, "2026-08-14T10:04:00.000Z");
++    const repeated = acceptCandidate(accepted, proposal.id, "2026-08-14T10:05:00.000Z");
++
++    expect(accepted.candidates[0].status).toBe("accepted");
++    expect(accepted.marks).toEqual([
++      expect.objectContaining({
++        id: `accepted-${proposal.id}`,
++        pageId: page.id,
++        source: "accepted",
++        label: "name",
++        x: 10,
++        y: 20,
++      }),
++    ]);
++    expect(accepted.audit[0]).toMatchObject({
++      action: "Accepted local suggestion",
++      detail: "name · Maya Chen",
++    });
++    expect(repeated).toBe(accepted);
++  });
++
++  it("rejects a proposal without changing manual or accepted marks", () => {
++    const manual = addManualMark(reviewSession(), {
++      id: "manual-1",
++      documentId: source.id,
++      pageId: page.id,
++      pageNumber: 1,
++      x: 1,
++      y: 2,
++      width: 3,
++      height: 4,
++      label: "other",
++      source: "manual",
++      createdAt: "2026-08-14T10:03:00.000Z",
++    });
++    const rejected = rejectCandidate(
++      { ...manual, candidates: [proposal] },
++      proposal.id,
++      "2026-08-14T10:04:00.000Z",
++    );
++
++    expect(rejected.candidates[0].status).toBe("rejected");
++    expect(rejected.marks).toEqual(manual.marks);
++    expect(rejected.audit[0]).toMatchObject({
++      action: "Rejected local suggestion",
++      detail: "name · Maya Chen",
++    });
++  });
++
++  it("treats removing an accepted mark as a resolved rejection", () => {
++    const accepted = acceptCandidate(
++      { ...reviewSession(), candidates: [proposal] },
++      proposal.id,
++      "2026-08-14T10:04:00.000Z",
++    );
++    const removed = removeMark(
++      accepted,
++      `accepted-${proposal.id}`,
++      "2026-08-14T10:05:00.000Z",
++    );
++
++    expect(removed.marks).toEqual([]);
++    expect(removed.candidates[0].status).toBe("rejected");
++  });
++
+   it("records a generated copy without mutating source identity", () => {
+     const exporting = finishReview(reviewSession());
+     const complete = recordGeneratedCopy(exporting, {
+diff --git a/redact/src/features/redact/workflow-domain.ts b/redact/src/features/redact/workflow-domain.ts
+index c157b4f..b073d8d 100644
+--- a/redact/src/features/redact/workflow-domain.ts
++++ b/redact/src/features/redact/workflow-domain.ts
+@@ -284,9 +284,19 @@ export function removeMark(
+ ): RedactSession {
+   const mark = session.marks.find((candidate) => candidate.id === markId);
+   if (!mark) return session;
++  const acceptedCandidateId = mark.source === "accepted"
++    ? mark.id.replace(/^accepted-/, "")
++    : null;
+   return {
+     ...session,
+     marks: session.marks.filter((candidate) => candidate.id !== markId),
++    candidates: acceptedCandidateId
++      ? session.candidates.map((candidate) =>
++          candidate.id === acceptedCandidateId
++            ? { ...candidate, status: "rejected" }
++            : candidate,
++        )
++      : session.candidates,
+     generatedCopy: null,
+     audit: [
+       {
+@@ -300,6 +310,70 @@ export function removeMark(
+   };
+ }
+ 
++export function acceptCandidate(
++  session: RedactSession,
++  candidateId: string,
++  at: string,
++): RedactSession {
++  const candidate = session.candidates.find((item) => item.id === candidateId);
++  if (!candidate || candidate.status !== "proposed") return session;
++  const mark: RedactionMark = {
++    id: `accepted-${candidate.id}`,
++    documentId: candidate.documentId,
++    pageId: candidate.pageId,
++    pageNumber: candidate.pageNumber,
++    x: candidate.x,
++    y: candidate.y,
++    width: candidate.width,
++    height: candidate.height,
++    label: candidate.label,
++    source: "accepted",
++    createdAt: at,
++  };
++  return {
++    ...session,
++    generatedCopy: null,
++    marks: [...session.marks, mark],
++    candidates: session.candidates.map((item) =>
++      item.id === candidateId ? { ...item, status: "accepted" } : item,
++    ),
++    audit: [
++      {
++        id: `audit-accept-${candidate.id}-${at}`,
++        action: "Accepted local suggestion",
++        detail: `${candidate.label} · ${candidate.evidenceText}`,
++        at,
++      },
++      ...session.audit,
++    ],
++  };
++}
++
++export function rejectCandidate(
++  session: RedactSession,
++  candidateId: string,
++  at: string,
++): RedactSession {
++  const candidate = session.candidates.find((item) => item.id === candidateId);
++  if (!candidate || candidate.status !== "proposed") return session;
++  return {
++    ...session,
++    generatedCopy: null,
++    candidates: session.candidates.map((item) =>
++      item.id === candidateId ? { ...item, status: "rejected" } : item,
++    ),
++    audit: [
++      {
++        id: `audit-reject-${candidate.id}-${at}`,
++        action: "Rejected local suggestion",
++        detail: `${candidate.label} · ${candidate.evidenceText}`,
++        at,
++      },
++      ...session.audit,
++    ],
++  };
++}
++
+ export function finishReview(
+   session: RedactSession,
+   options: { allowUnresolved?: boolean } = {},
+diff --git a/redact/tutorial/07-human-review.md b/redact/tutorial/07-human-review.md
+new file mode 100644
+index 0000000..f205b5c
+--- /dev/null
++++ b/redact/tutorial/07-human-review.md
+@@ -0,0 +1,37 @@
++# Infuse suggestions into human review
++
++This checkpoint turns advisory candidates into explicit human decisions without
++creating a second editor.
++
++- Proposed candidates show Accept and Reject actions and remain outlined only on
++  the Original surface.
++- Accept creates a normal `RedactionMark` with `source: "accepted"`. The mark is
++  editable, appears as an opaque mask in Safe-share preview, and enters export.
++- Reject preserves candidate evidence and status but creates no mark.
++- Repeating a decision is a no-op.
++- Removing an accepted mark resolves the corresponding candidate as rejected.
++- Manual marks are neither replaced nor deduplicated by AI state.
++- Accept, Reject, manual add/remove, and copy generation appear in Recent
++  activity.
++- Done is disabled until every candidate on every page is resolved; the domain
++  guard enforces the same invariant below the UI.
++
++## Sequencing lesson
++
++The domain guard already existed before review controls. As soon as Episode 06
++introduced candidates, that guard made export impossible. Episode 06 therefore
++kept candidates advisory with an explicit unresolved override. This checkpoint
++adds both decision actions first, then removes the override and enables the real
++gate. State invariants must become enforceable only when the user has a path to
++satisfy them.
++
++## Verification
++
++```bash
++npm test -- src/features/redact/domain.test.ts src/features/redact/RedactApp.test.tsx
++npm run lint
++npm run typecheck
++npm test
++npm run build
++git diff --check
++```

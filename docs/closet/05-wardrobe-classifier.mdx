@@ -1,0 +1,558 @@
+---
+title: "05. Label garments with a wardrobe classifier"
+description: "We will call QVAC's image classifier on the same photo and accept its label only when it is one of Closet's categories and confident enough. The bundled classifier is not a wardrobe model, and the app says so."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Closet · 05. Label garments with a wardrobe classifier" />
+
+A classifier gives a label and a confidence in milliseconds, with no prompt to get wrong. QVAC 0.22.0 exposes `classify` for `ggml-classification` models.
+
+There is a catch you should see for yourself. The bundled classifier is MobileNetV3-Small with three labels: `food`, `report`, and `other`. It is not a wardrobe model. Useful wardrobe labels need a custom classifier, which you point the service at with `CLOSET_CLASSIFIER_GGUF`.
+
+**Source checkpoint:** `f3fee74` · **Starting checkpoint:** `550c9c2`
+
+## What changes
+
+| File | Change |
+| --- | --- |
+| `src/features/closet/wardrobe-labels.ts` | The gate: a label must be a Closet category and above the threshold |
+| `qvac-service/qvac-engine.ts` | Load the bundled classifier, or a custom GGUF from `CLOSET_CLASSIFIER_GGUF` |
+| `qvac-service/server.ts` | Add `/classify`, which returns every label and confidence |
+| `src/features/closet/service-client.ts` | Add `classifyGarment` |
+| `src/features/closet/PhotoReview.tsx` | Show the verdict, and offer an accepted label as a button |
+
+To compare with the previous checkpoint: `git diff 550c9c2 f3fee74`.
+
+## Build and observe
+
+### 1. Check the installed SDK, not a blog post
+
+```bash
+sed -n 1,30p node_modules/@qvac/sdk/dist/src/client/api/classify.d.ts
+```
+
+The type definition documents the three bundled labels and says custom models may emit other labels from their GGUF metadata.
+
+### 2. Read the gate
+
+Open `wardrobe-labels.ts`. `judgeClassification` takes the top result and returns one of four verdicts: `accepted`, `below-threshold` (under 0.6), `not-a-wardrobe-label`, or `no-result`. A confident `other` is still `not-a-wardrobe-label`. Confidence is not relevance.
+
+### 3. Try it with the bundled model
+
+Run the service and upload a garment photo. The card shows **Wardrobe classifier: no wardrobe label (the model said "...")** and no button. That is the correct, honest result for this model.
+
+### 4. Point at a wardrobe classifier
+
+If you have a GGUF image classifier trained on garment categories whose labels match Closet's (`top`, `bottom`, `dress`, `outerwear`, `shoes`, `accessory`):
+
+```bash
+CLOSET_CLASSIFIER_GGUF=/path/to/wardrobe-classifier.gguf npm run qvac:service
+```
+
+When its top label is accepted, the card offers **Use outerwear** (or similar). Pressing it fills the proposed category. The person still copies the card into the form and saves.
+
+We did not train or run a wardrobe classifier for this course. The accepted path is tested with a hand-written result.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+
+<AccordionGroup>
+<Accordion title="src/features/closet/wardrobe-labels.ts">
+
+```typescript
+import { isCategory, type Category } from "./model";
+
+export type ClassifierResult = { label: string; confidence: number };
+
+export type ClassifierVerdict =
+  | { kind: "accepted"; label: Category; confidence: number }
+  | { kind: "below-threshold"; label: Category; confidence: number }
+  | { kind: "not-a-wardrobe-label"; label: string; confidence: number }
+  | { kind: "no-result" };
+
+export const CLASSIFIER_THRESHOLD = 0.6;
+
+// A classifier's label is only useful if it is one of Closet's categories and
+// confident enough. The bundled QVAC classifier emits food/report/other, so it
+// lands in "not-a-wardrobe-label" until a wardrobe model is configured.
+export function judgeClassification(
+  results: readonly ClassifierResult[],
+  threshold = CLASSIFIER_THRESHOLD,
+): ClassifierVerdict {
+  const valid = results.filter(
+    (r) => typeof r.label === "string" && Number.isFinite(r.confidence) && r.confidence >= 0 && r.confidence <= 1,
+  );
+  if (valid.length === 0) return { kind: "no-result" };
+  const top = [...valid].sort((a, b) => b.confidence - a.confidence)[0];
+  const label = top.label.trim().toLowerCase();
+  if (!isCategory(label)) return { kind: "not-a-wardrobe-label", label: top.label, confidence: top.confidence };
+  if (top.confidence < threshold) return { kind: "below-threshold", label, confidence: top.confidence };
+  return { kind: "accepted", label, confidence: top.confidence };
+}
+
+export function describeVerdict(verdict: ClassifierVerdict): string {
+  const pct = (c: number) => `${Math.round(c * 100)}%`;
+  switch (verdict.kind) {
+    case "accepted":
+      return `${verdict.label} (${pct(verdict.confidence)})`;
+    case "below-threshold":
+      return `${verdict.label} at ${pct(verdict.confidence)} is below the ${pct(CLASSIFIER_THRESHOLD)} threshold`;
+    case "not-a-wardrobe-label":
+      return `no wardrobe label (the model said "${verdict.label}")`;
+    case "no-result":
+      return "no result";
+  }
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/wardrobe-labels.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { describeVerdict, judgeClassification } from "./wardrobe-labels";
+
+// Hand-written fixture results. None of these were produced by a model.
+describe("wardrobe classifier gate", () => {
+  it("accepts a confident Closet category", () => {
+    expect(judgeClassification([{ label: "Outerwear", confidence: 0.82 }, { label: "top", confidence: 0.1 }])).toEqual({
+      kind: "accepted",
+      label: "outerwear",
+      confidence: 0.82,
+    });
+  });
+
+  it("refuses a confident label that is not a wardrobe category", () => {
+    const verdict = judgeClassification([{ label: "other", confidence: 0.97 }, { label: "food", confidence: 0.02 }]);
+    expect(verdict.kind).toBe("not-a-wardrobe-label");
+    expect(describeVerdict(verdict)).toBe('no wardrobe label (the model said "other")');
+  });
+
+  it("refuses a wardrobe label below the threshold", () => {
+    expect(judgeClassification([{ label: "shoes", confidence: 0.41 }]).kind).toBe("below-threshold");
+  });
+
+  it("ignores impossible confidences", () => {
+    expect(judgeClassification([{ label: "top", confidence: 7 }])).toEqual({ kind: "no-result" });
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/closet/PhotoReview.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+import { CATEGORIES, type Category } from "./model";
+import { parseGarmentProposal, type ProposedFields } from "./garment-proposal";
+import { classifyGarment, describeGarment, proposeDetails } from "./service-client";
+import { describeVerdict, judgeClassification, type ClassifierVerdict } from "./wardrobe-labels";
+
+type Review = {
+  image: string;
+  description: string;
+  models: string[];
+  fields: ProposedFields;
+  issues: string[];
+  classifier: { verdict: ClassifierVerdict; model: string } | { unavailable: string };
+};
+
+function readAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// Local models propose. This panel shows the proposal; a person copies what
+// they agree with into the ordinary garment form and saves it themselves.
+export function PhotoReview({ onApply }: { onApply: (fields: ProposedFields, image: string) => void }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
+
+  async function analyse(file: File) {
+    setReview(null);
+    if (!/^image\/(png|jpeg)$/.test(file.type)) {
+      setStatus("Choose a PNG or JPEG photo.");
+      return;
+    }
+    setStatus("Describing the photo locally…");
+    const image = await readAsDataUrl(file);
+    const [described, classified] = await Promise.all([
+      describeGarment({ name: file.name, dataUrl: image }),
+      classifyGarment({ name: file.name, dataUrl: image }),
+    ]);
+    if (!described.ok) {
+      setStatus(`${described.message} You can still add the garment by hand below.`);
+      return;
+    }
+    setStatus("Turning the description into details…");
+    const details = await proposeDetails(described.value.description);
+    const parsed = details.ok
+      ? parseGarmentProposal(details.value.raw, described.value.description)
+      : { fields: {}, issues: [details.message] };
+    setReview({
+      image,
+      description: described.value.description,
+      models: details.ok ? [described.value.model, details.value.model] : [described.value.model],
+      ...parsed,
+      classifier: classified.ok
+        ? { verdict: judgeClassification(classified.value.results), model: classified.value.model }
+        : { unavailable: classified.message },
+    });
+    setStatus(null);
+  }
+
+  return (
+    <section aria-label="Photo intake" className="mb-4 rounded-lg border border-dashed border-stone-300 p-3 text-sm">
+      <label className="flex flex-col gap-1">
+        Add from photo
+        <input
+          type="file"
+          accept="image/png,image/jpeg"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void analyse(file);
+          }}
+        />
+      </label>
+      {status && <p role="status" className="mt-2 text-stone-600">{status}</p>}
+      {review && (
+        <ProposalCard
+          key={review.image}
+          review={review}
+          onApply={(fields) => {
+            onApply(fields, review.image);
+            setReview(null);
+          }}
+          onDiscard={() => setReview(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function ProposalCard({
+  review,
+  onApply,
+  onDiscard,
+}: {
+  review: Review;
+  onApply: (fields: ProposedFields) => void;
+  onDiscard: () => void;
+}) {
+  const [fields, setFields] = useState<ProposedFields>(review.fields);
+  return (
+    <div aria-label="Proposed details" role="group" className="mt-3 space-y-2 rounded bg-amber-50 p-3">
+      <p className="text-xs uppercase tracking-wide text-amber-900">Proposal · {review.models.join(" + ")} · local</p>
+      <p>
+        <span className="font-semibold">Description:</span> {review.description}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {(["name", "colour", "material"] as const).map((key) => (
+          <label key={key} className="flex flex-col">
+            Proposed {key}
+            <input
+              value={fields[key] ?? ""}
+              onChange={(e) => setFields({ ...fields, [key]: e.target.value })}
+              className="rounded border px-2 py-1"
+            />
+          </label>
+        ))}
+        <label className="flex flex-col">
+          Proposed category
+          <select
+            value={fields.category ?? ""}
+            onChange={(e) => setFields({ ...fields, category: (e.target.value || undefined) as Category | undefined })}
+            className="rounded border px-2 py-1"
+          >
+            <option value="">(choose)</option>
+            {CATEGORIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p aria-label="Classifier verdict">
+        <span className="font-semibold">Wardrobe classifier:</span>{" "}
+        {"verdict" in review.classifier
+          ? `${describeVerdict(review.classifier.verdict)} · ${review.classifier.model}`
+          : `unavailable (${review.classifier.unavailable})`}
+        {"verdict" in review.classifier && review.classifier.verdict.kind === "accepted" && (
+          <button
+            type="button"
+            className="ml-2 rounded border px-2"
+            onClick={() => {
+              const v = review.classifier;
+              if ("verdict" in v && v.verdict.kind === "accepted") setFields({ ...fields, category: v.verdict.label });
+            }}
+          >
+            Use {review.classifier.verdict.label}
+          </button>
+        )}
+      </p>
+      {review.issues.length > 0 && (
+        <ul aria-label="Proposal issues" className="list-disc pl-5 text-amber-900">
+          {review.issues.map((issue) => (
+            <li key={issue}>{issue}</li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <button type="button" className="rounded bg-stone-900 px-3 py-1 text-white" onClick={() => onApply(fields)}>
+          Copy into form
+        </button>
+        <button type="button" className="rounded border px-3 py-1" onClick={onDiscard}>
+          Discard
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/closet/PhotoReview.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ClosetApp } from "./ClosetApp";
+
+// Fixture service replies, written by hand. They stand in for the local
+// service so the review flow is testable; they are not model output.
+const FIXTURE_DESCRIPTION = "A yellow raincoat with a front seam.";
+const FIXTURE_DETAILS = JSON.stringify({ name: "Yellow rain jacket", category: "outerwear", colour: "yellow", material: "rubber" });
+
+function mockService(routes: Record<string, () => Response>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const route = routes[new URL(url).pathname];
+      if (!route) throw new TypeError("fetch failed");
+      return route();
+    }),
+  );
+}
+const json = (status: number, body: unknown) => () => new Response(JSON.stringify(body), { status });
+const photo = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "coat.png", { type: "image/png" });
+
+beforeEach(() => window.localStorage.clear());
+afterEach(() => vi.unstubAllGlobals());
+
+describe("reviewed garment details", () => {
+  it("offers a confident wardrobe label as a choice, not a decision", async () => {
+    mockService({
+      "/describe": json(200, { description: FIXTURE_DESCRIPTION, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" }),
+      "/details": json(200, { raw: JSON.stringify({ name: "Coat", category: "jacket", colour: "yellow", material: "" }), model: "LLAMA_3_2_1B_INST_Q4_0" }),
+      "/classify": json(200, { results: [{ label: "outerwear", confidence: 0.84 }], model: "custom:fixture.gguf" }),
+    });
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.upload(screen.getByLabelText("Add from photo"), photo());
+    const card = await screen.findByRole("group", { name: "Proposed details" });
+    expect(within(card).getByLabelText("Proposed category")).toHaveValue("");
+    await user.click(within(card).getByRole("button", { name: "Use outerwear" }));
+    expect(within(card).getByLabelText("Proposed category")).toHaveValue("outerwear");
+  });
+
+  it("shows a proposal, drops ungrounded fields, and saves only after the person adds it", async () => {
+    mockService({
+      "/describe": json(200, { description: FIXTURE_DESCRIPTION, model: "SMOLVLM2_500M_MULTIMODAL_Q8_0" }),
+      "/details": json(200, { raw: FIXTURE_DETAILS, model: "LLAMA_3_2_1B_INST_Q4_0" }),
+      "/classify": json(200, { results: [{ label: "other", confidence: 0.91 }], model: "bundled-mobilenetv3-small" }),
+    });
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.upload(screen.getByLabelText("Add from photo"), photo());
+
+    const card = await screen.findByRole("group", { name: "Proposed details" });
+    expect(within(card).getByLabelText("Proposed colour")).toHaveValue("yellow");
+    expect(within(card).getByLabelText("Proposed material")).toHaveValue("");
+    expect(within(card).getByText(/Material "rubber" is not in the description/)).toBeInTheDocument();
+    expect(within(card).getByLabelText("Classifier verdict")).toHaveTextContent('no wardrobe label (the model said "other")');
+    expect(within(card).queryByRole("button", { name: /^Use / })).not.toBeInTheDocument();
+
+    const catalogue = screen.getByRole("list", { name: "Catalogue" });
+    await user.clear(within(card).getByLabelText("Proposed name"));
+    await user.type(within(card).getByLabelText("Proposed name"), "Festival raincoat");
+    await user.click(within(card).getByRole("button", { name: "Copy into form" }));
+    expect(within(catalogue).queryByText("Festival raincoat")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add garment with photo" }));
+    expect(within(catalogue).getByText("Festival raincoat")).toBeInTheDocument();
+  });
+
+  it("keeps the manual form usable when the service is not running", async () => {
+    mockService({});
+    const user = userEvent.setup();
+    render(<ClosetApp />);
+    await user.click(screen.getByRole("tab", { name: "Garments" }));
+    await user.upload(screen.getByLabelText("Add from photo"), photo());
+    expect(await screen.findByRole("status")).toHaveTextContent("not running. You can still add the garment by hand");
+    expect(screen.getByRole("button", { name: "Add garment" })).toBeEnabled();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="qvac-service/qvac-engine.ts">
+
+```typescript
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { buildDetailsHistory, GARMENT_PROPOSAL_SCHEMA } from "../src/features/closet/garment-proposal.ts";
+import { DESCRIBE_GARMENT_PROMPT, resolveLocalQvacPaths, VISION_MODEL } from "./local-config.ts";
+import type { ClosetEngine, GarmentImage } from "./server.ts";
+
+type Sdk = typeof import("@qvac/sdk");
+
+// Loads QVAC once, then each model on first use. All inference stays local.
+export async function createQvacEngine(appDirectory: string): Promise<ClosetEngine & { close(): Promise<void> }> {
+  const { cacheDirectory, configPath } = resolveLocalQvacPaths(appDirectory);
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({ cacheDirectory }, null, 2)}\n`, "utf8");
+  process.env.QVAC_CONFIG_PATH = configPath;
+  const sdk: Sdk = await import("@qvac/sdk");
+  const loaded = new Map<string, Promise<string>>();
+
+  function model(key: string, load: () => Promise<string>) {
+    let pending = loaded.get(key);
+    if (!pending) {
+      pending = load().catch((error: unknown) => {
+        loaded.delete(key); // a failed load can be retried
+        throw error;
+      });
+      loaded.set(key, pending);
+    }
+    return pending;
+  }
+
+  const vision = () =>
+    model(VISION_MODEL, () =>
+      sdk.loadModel({
+        modelSrc: sdk.SMOLVLM2_500M_MULTIMODAL_Q8_0,
+        modelConfig: { ctx_size: 1024, projectionModelSrc: sdk.MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0 },
+      }),
+    );
+
+  const LLM_MODEL = "LLAMA_3_2_1B_INST_Q4_0";
+  const llm = () => model(LLM_MODEL, () => sdk.loadModel({ modelSrc: sdk.LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" }));
+
+  // QVAC ships a small bundled classifier (food/report/other). A wardrobe
+  // classifier is a custom GGUF you point at with CLOSET_CLASSIFIER_GGUF.
+  const customClassifier = process.env.CLOSET_CLASSIFIER_GGUF;
+  const CLASSIFIER_MODEL = customClassifier ? `custom:${path.basename(customClassifier)}` : "bundled-mobilenetv3-small";
+  const classifier = () =>
+    model(CLASSIFIER_MODEL, () =>
+      customClassifier
+        ? sdk.loadModel({ modelSrc: customClassifier, modelType: "ggml-classification" })
+        : sdk.loadModel({ modelType: "ggml-classification" }),
+    );
+
+  // The vision model reads attachments from disk, so stage the upload briefly.
+  async function withTempImage<T>(image: GarmentImage, work: (file: string) => Promise<T>) {
+    const dir = await mkdtemp(path.join(tmpdir(), "closet-"));
+    const file = path.join(dir, image.mime === "image/png" ? "garment.png" : "garment.jpg");
+    try {
+      await writeFile(file, image.bytes);
+      return await work(file);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  return {
+    async describe(image) {
+      const modelId = await vision();
+      return withTempImage(image, async (file) => {
+        const run = sdk.completion({
+          modelId,
+          history: [{ role: "user", content: DESCRIBE_GARMENT_PROMPT, attachments: [{ path: file }] }],
+          stream: true,
+        });
+        let text = "";
+        for await (const token of run.tokenStream) text += token;
+        const description = text.replace(/\s+/g, " ").trim();
+        if (!description) throw new Error("The model returned an empty description");
+        return { description, model: VISION_MODEL };
+      });
+    },
+    async details(description) {
+      const modelId = await llm();
+      const run = sdk.completion({
+        modelId,
+        history: buildDetailsHistory(description),
+        stream: true,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: { name: "garment", schema: GARMENT_PROPOSAL_SCHEMA as unknown as Record<string, unknown> },
+        },
+      });
+      const final = await run.final;
+      return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async classify(image) {
+      const modelId = await classifier();
+      const results = await sdk.classify({ modelId, image: image.bytes });
+      return { results, model: CLASSIFIER_MODEL };
+    },
+    async close() {
+      for (const pending of loaded.values()) {
+        const modelId = await pending.catch(() => null);
+        if (modelId) await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+      }
+      await sdk.close().catch(() => undefined);
+    },
+  };
+}
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/closet/wardrobe-labels.test.ts src/features/closet/PhotoReview.test.tsx
+```
+
+Expected result: 2 test files pass, 7 tests pass. Every label and confidence in these tests is a hand-written fixture. They do not prove live classification.
+
+Run the broader checks from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Then record your checkpoint:
+
+```bash
+git diff --check
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 05: Label garments with a wardrobe classifier"
+```
+
+## Before continuing
+
+- [ ] A confident `other` is shown as no wardrobe label.
+- [ ] An accepted label is a button, not an automatic change.
+
+Continue to [Retrieve looks by occasion](/closet/06-retrieve-looks).

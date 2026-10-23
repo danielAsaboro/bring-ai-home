@@ -1,0 +1,278 @@
+diff --git a/redact/src/app/globals.css b/redact/src/app/globals.css
+index fe395c4..f72f2a3 100644
+--- a/redact/src/app/globals.css
++++ b/redact/src/app/globals.css
+@@ -105,6 +105,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
+ .document-surface { position: relative; width: 100%; overflow: hidden; background: white; box-shadow: 0 10px 35px rgba(20,32,25,.15); }
+ .document-surface[data-interactive="true"] { cursor: crosshair; touch-action: none; user-select: none; }
+ .document-surface img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
++.ocr-surface-evidence { position: absolute; z-index: 1; min-width: 2px; min-height: 2px; background: rgba(40,104,78,.08); border: 1.5px dashed var(--green-2); pointer-events: none; }
+ .surface-mark { position: absolute; z-index: 2; min-width: 2px; min-height: 2px; }
+ .surface-mark[data-mode="original"] { background: rgba(233,101,61,.18); border: 2px solid var(--orange); }
+ .surface-mark[data-mode="original"] { cursor: grab; touch-action: none; }
+diff --git a/redact/src/features/redact/RedactApp.test.tsx b/redact/src/features/redact/RedactApp.test.tsx
+index 5549ac1..2ff4685 100644
+--- a/redact/src/features/redact/RedactApp.test.tsx
++++ b/redact/src/features/redact/RedactApp.test.tsx
+@@ -163,6 +163,12 @@ describe("Redact application", () => {
+       undefined,
+     );
+     expect(screen.getByText("2 text regions found locally")).toBeInTheDocument();
++    expect(screen.getByLabelText("OCR evidence Maya Chen")).toHaveStyle({
++      left: "17.583333%",
++      top: "7.125%",
++      width: "15.5%",
++      height: "2.75%",
++    });
+ 
+     await user.click(screen.getByRole("button", { name: "Add redaction" }));
+     expect(screen.getAllByText("1 redaction")).toHaveLength(2);
+diff --git a/redact/src/features/redact/RedactApp.tsx b/redact/src/features/redact/RedactApp.tsx
+index 5942074..62e42c8 100644
+--- a/redact/src/features/redact/RedactApp.tsx
++++ b/redact/src/features/redact/RedactApp.tsx
+@@ -15,6 +15,7 @@ import {
+   rasterizeSource,
+   type SourceInspection,
+ } from "./rasterize";
++import { normalizeOcrBbox } from "./ocr-geometry";
+ import {
+   copySafeImage,
+   generateSafeCopy,
+@@ -186,15 +187,21 @@ export function RedactApp({
+             ocrMs: result.run.ocrMs,
+           });
+           ocrBlocks.push(
+-            ...result.ocrBlocks.map((block, index) => ({
+-              id: `ocr-${page.id}-${index + 1}`,
+-              documentId: session.source.id,
+-              pageId: page.id,
+-              pageNumber: page.pageNumber,
+-              text: block.text,
+-              bbox: block.bbox,
+-              confidence: block.confidence,
+-            })),
++            ...result.ocrBlocks.flatMap((block, index) => {
++              const bbox = normalizeOcrBbox(block.bbox, page.width, page.height);
++              return bbox
++                ? [{
++                    id: `ocr-${page.id}-${index + 1}`,
++                    documentId: session.source.id,
++                    pageId: page.id,
++                    pageNumber: page.pageNumber,
++                    text: block.text,
++                    rawBbox: block.bbox,
++                    bbox,
++                    confidence: block.confidence,
++                  }]
++                : [];
++            }),
+           );
+         }
+         setSession(openManualReview(session, pages, { ocrBlocks, analysisRuns }));
+diff --git a/redact/src/features/redact/components/DocumentSurface.tsx b/redact/src/features/redact/components/DocumentSurface.tsx
+index 6b0667e..5383b13 100644
+--- a/redact/src/features/redact/components/DocumentSurface.tsx
++++ b/redact/src/features/redact/components/DocumentSurface.tsx
+@@ -1,5 +1,5 @@
+ import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+-import type { RasterPage, RedactionMark } from "../workflow-domain";
++import type { OCRBlock, RasterPage, RedactionMark } from "../workflow-domain";
+ 
+ export type RedactionGeometry = Pick<
+   RedactionMark,
+@@ -18,12 +18,14 @@ type Point = { x: number; y: number };
+ export function DocumentSurface({
+   page,
+   marks,
++  evidence = [],
+   mode,
+   onCreate,
+   onChange,
+ }: {
+   page: RasterPage;
+   marks: RedactionMark[];
++  evidence?: OCRBlock[];
+   mode: "original" | "safe";
+   onCreate?(geometry: RedactionGeometry): void;
+   onChange?(id: string, geometry: RedactionGeometry): void;
+@@ -122,6 +124,7 @@ export function DocumentSurface({
+       {/* Blob URLs are private in-memory document surfaces and cannot use Next image optimization. */}
+       {/* eslint-disable-next-line @next/next/no-img-element */}
+       <img src={source} alt={`Document page ${page.pageNumber}`} draggable={false} />
++      {mode === "original" && evidence.map((block) => <span aria-label={`OCR evidence ${block.text}`} className="ocr-surface-evidence" key={block.id} style={{ left: `${block.bbox.x}%`, top: `${block.bbox.y}%`, width: `${block.bbox.width}%`, height: `${block.bbox.height}%` }} />)}
+       {marks.map((mark, index) => (
+         <div
+           aria-label={mode === "original" ? `Move redaction ${index + 1}` : undefined}
+diff --git a/redact/src/features/redact/components/ReviewStage.tsx b/redact/src/features/redact/components/ReviewStage.tsx
+index 5de9ff4..3b03dd0 100644
+--- a/redact/src/features/redact/components/ReviewStage.tsx
++++ b/redact/src/features/redact/components/ReviewStage.tsx
+@@ -52,8 +52,8 @@ export function ReviewStage({
+       <div className="review-layout">
+         <div className="comparison-grid">
+           <article>
+-            <header><strong>Original</strong><span>Drag to draw · drag marks to move</span></header>
+-            <DocumentSurface key={`original-${page.id}`} page={page} marks={marks} mode="original" onCreate={onAdd} onChange={onGeometry} />
++            <header><strong>Original</strong><span>{ocrBlocks.length > 0 ? `${ocrBlocks.length} detected regions · drag to draw` : "Drag to draw · drag marks to move"}</span></header>
++            <DocumentSurface key={`original-${page.id}`} page={page} marks={marks} evidence={ocrBlocks} mode="original" onCreate={onAdd} onChange={onGeometry} />
+           </article>
+           <article>
+             <header><strong>Safe-share preview</strong><span>{marks.length} {marks.length === 1 ? "redaction" : "redactions"}</span></header>
+diff --git a/redact/src/features/redact/ocr-geometry.test.ts b/redact/src/features/redact/ocr-geometry.test.ts
+new file mode 100644
+index 0000000..49a0835
+--- /dev/null
++++ b/redact/src/features/redact/ocr-geometry.test.ts
+@@ -0,0 +1,32 @@
++import { describe, expect, it } from "vitest";
++
++import { normalizeOcrBbox } from "./ocr-geometry";
++
++describe("OCR geometry normalization", () => {
++  it("converts pixel edges to the editor percentage system", () => {
++    expect(normalizeOcrBbox([211, 114, 397, 158], 1200, 1600)).toEqual({
++      x: 17.583333,
++      y: 7.125,
++      width: 15.5,
++      height: 2.75,
++    });
++  });
++
++  it("sorts reversed edges and clips them to the decoded raster", () => {
++    expect(normalizeOcrBbox([1300, 1700, -100, -200], 1200, 1600)).toEqual({
++      x: 0,
++      y: 0,
++      width: 100,
++      height: 100,
++    });
++  });
++
++  it("rejects non-finite, zero-area, fully clipped, and invalid-source geometry", () => {
++    expect(normalizeOcrBbox([0, 0, Number.NaN, 10], 1200, 1600)).toBeNull();
++    expect(normalizeOcrBbox([10, 10, 10, 40], 1200, 1600)).toBeNull();
++    expect(normalizeOcrBbox([-20, -20, -10, -10], 1200, 1600)).toBeNull();
++    expect(() => normalizeOcrBbox([0, 0, 10, 10], 0, 1600)).toThrow(
++      "Source dimensions must be positive",
++    );
++  });
++});
+diff --git a/redact/src/features/redact/ocr-geometry.ts b/redact/src/features/redact/ocr-geometry.ts
+new file mode 100644
+index 0000000..fe2a604
+--- /dev/null
++++ b/redact/src/features/redact/ocr-geometry.ts
+@@ -0,0 +1,33 @@
++import type { BoundingBox } from "./workflow-domain";
++
++function clamp(value: number, maximum: number) {
++  return Math.max(0, Math.min(maximum, value));
++}
++
++function percentage(value: number, maximum: number) {
++  return Math.round((value / maximum) * 100 * 1_000_000) / 1_000_000;
++}
++
++export function normalizeOcrBbox(
++  raw: readonly [number, number, number, number],
++  sourceWidth: number,
++  sourceHeight: number,
++): BoundingBox | null {
++  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
++    throw new Error("Source dimensions must be positive");
++  }
++  if (!raw.every(Number.isFinite)) return null;
++
++  const x1 = clamp(Math.min(raw[0], raw[2]), sourceWidth);
++  const y1 = clamp(Math.min(raw[1], raw[3]), sourceHeight);
++  const x2 = clamp(Math.max(raw[0], raw[2]), sourceWidth);
++  const y2 = clamp(Math.max(raw[1], raw[3]), sourceHeight);
++  if (x2 <= x1 || y2 <= y1) return null;
++
++  return {
++    x: percentage(x1, sourceWidth),
++    y: percentage(y1, sourceHeight),
++    width: percentage(x2 - x1, sourceWidth),
++    height: percentage(y2 - y1, sourceHeight),
++  };
++}
+diff --git a/redact/src/features/redact/workflow-domain.ts b/redact/src/features/redact/workflow-domain.ts
+index 408f671..ed2b616 100644
+--- a/redact/src/features/redact/workflow-domain.ts
++++ b/redact/src/features/redact/workflow-domain.ts
+@@ -58,6 +58,11 @@ export type RedactionMark = {
+   createdAt: string;
+ };
+ 
++export type BoundingBox = Pick<
++  RedactionMark,
++  "x" | "y" | "width" | "height"
++>;
++
+ export type CandidateStatus = "proposed" | "accepted" | "rejected";
+ 
+ export type OCRBlock = {
+@@ -66,7 +71,8 @@ export type OCRBlock = {
+   pageId: string;
+   pageNumber: number;
+   text: string;
+-  bbox: [number, number, number, number];
++  rawBbox: [number, number, number, number];
++  bbox: BoundingBox;
+   confidence: number | null;
+ };
+ 
+diff --git a/redact/tutorial/05-map-ocr-geometry.md b/redact/tutorial/05-map-ocr-geometry.md
+new file mode 100644
+index 0000000..9bc4634
+--- /dev/null
++++ b/redact/tutorial/05-map-ocr-geometry.md
+@@ -0,0 +1,48 @@
++# Map OCR evidence onto the existing light table
++
++QVAC returns pixel edges. Redact's editor and export pipeline use percentages.
++This checkpoint introduces the single conversion boundary between them.
++
++## Conversion order
++
++1. The service runtime-validates QVAC's raw block shape.
++2. The typed client runtime-validates the HTTP response.
++3. `normalizeOcrBbox` verifies finite values and positive source dimensions.
++4. It sorts reversed edges, clips them to the decoded raster, and drops
++   zero-area or fully clipped boxes.
++5. It converts the remaining box to six-decimal percentage geometry.
++6. `DocumentSurface` renders evidence over the same raster bytes that were
++   analyzed.
++
++For the controlled page, QVAC's `[211,114,397,158]` box on a 1200×1600 raster
++becomes:
++
++```json
++{ "x": 17.583333, "y": 7.125, "width": 15.5, "height": 2.75 }
++```
++
++The raw box remains on the `OCRBlock` receipt; normalized geometry drives the
++UI. OCR evidence appears only on the Original surface. It is not blacked out in
++the Safe-share preview because text detection is not yet a sensitivity decision.
++
++## Build lesson
++
++The first exact geometry assertion exposed JavaScript's
++`7.124999999999999` floating-point representation. Normalizing to six decimal
++places at the boundary makes state, styles, tests, and audit output stable.
++
++The first verification attempt also ran `next typegen` and `next build` in
++parallel. Both mutate `.next/types`, so typecheck briefly lost files while build
++rewrote the directory. Run those two checks sequentially; parallel verification
++is safe only when commands do not share generated state.
++
++## Verification
++
++```bash
++npm test -- src/features/redact/ocr-geometry.test.ts src/features/redact/RedactApp.test.tsx
++npm run lint
++npm run typecheck
++npm test
++npm run build
++git diff --check
++```

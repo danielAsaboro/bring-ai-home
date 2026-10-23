@@ -1,0 +1,1114 @@
+---
+title: "01. Build the Replay starter"
+description: "We will build the working Replay tape library before any AI: browse tapes, author and edit frames, play a guided run with a visible playhead, and keep a run history."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Replay · 01. Build the Replay starter" />
+
+Replay is a tape library for repeatable work. A workflow is a tape, each step is a frame, and a guided run moves a playhead across the frames while you do the work yourself.
+
+The starter you clone is only a heading. In this chapter we build the real product, with no AI in it at all, so every later chapter has something honest to improve.
+
+**Source checkpoint:** `4e275a0` · **Starting checkpoint:** `0e5385b` (untouched starter on `main`)
+
+## What changes
+
+- `src/features/replay/tape.ts`: pure tape editing and run logic. Done, skip, mark failed, retry, annotate, pause, resume, and stop safely with a reason.
+- `src/features/replay/sample-library.ts`: three fictional sample tapes, including the five-frame **Publish the weekly report** tape.
+- `src/features/replay/library-store.ts`: the one adapter that touches `localStorage`, with a corrupt-data fallback and **Reset demo data**.
+- `src/features/replay/replay-app.tsx`: the shelf, the editor, the player, and the run history.
+- `src/app/page.tsx` renders the app. Tests cover the logic, the store, and a full guided run in the UI.
+- `tsconfig.json` allows `.ts` import extensions and `vitest.config.mts` gives the long UI test room, so later chapters can run the same files from Node.
+
+To compare with the previous checkpoint: `git diff 0e5385b 4e275a0`.
+
+## Build and observe
+
+### 1. Get the starter and run it
+
+```bash
+git clone https://github.com/danielAsaboro/bring-ai-home
+cd bring-ai-home/apps/replay
+git checkout 4e275a0
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`. You should see the **Replay** shelf with three tapes.
+
+### 2. Author a tape by hand
+
+Choose **Onboard a new contractor**. Type `Book the intro call` into **New frame title** and click **Add frame**. Use the arrows to move it, and edit any frame's text in place. The revision number on the shelf goes up with every change.
+
+At the bottom, parameters, preconditions, and stop conditions are plain text, one per line. They save when you leave the field.
+
+### 3. Play a guided run
+
+Click **play**. The amber cell is the playhead. Click **Done** to move it. Click **Mark failed** on the next frame, write a note, and click **Retry**. Try **Pause**: step buttons are disabled until **Resume**.
+
+Notice what is missing. Replay never clicks anything for you. A run records what you say happened. That stays true for the whole course.
+
+### 4. Check the history
+
+Click **history**. Each run lists its outcome counts, the tape revision it played, and any notes. Reload the page: everything is still there. **Reset demo data** puts the sample tapes back.
+
+### 5. Know the rule before adding AI
+
+> QVAC may listen, look, and propose. Only a person may turn a proposal into a frame, a parameter, or a stop condition. Replay never performs a step. Search ranking, gates, and exports are plain code.
+
+## Read the checkpoint implementation
+
+<AccordionGroup>
+<Accordion title="src/app/layout.tsx">
+
+```tsx
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Replay",
+  description: "A tape library for recording, editing, and following repeatable work.",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/app/page.test.tsx">
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import Home from "./page";
+
+describe("Replay home", () => {
+  it("introduces Replay by name and shows the shelf", () => {
+    render(<Home />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Replay" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Tape shelf" })).toBeInTheDocument();
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/app/page.tsx">
+
+```tsx
+import { ReplayApp } from "@/features/replay/replay-app";
+
+export default function Home() {
+  return <ReplayApp />;
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/library-store.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { createLocalStore } from "./library-store";
+
+function memoryStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (k) => map.get(k) ?? null,
+    key: (i) => [...map.keys()][i] ?? null,
+    removeItem: (k) => void map.delete(k),
+    setItem: (k, v) => void map.set(k, v),
+  };
+}
+
+describe("library store", () => {
+  it("starts from the sample library and round-trips saved state", () => {
+    const storage = memoryStorage();
+    const store = createLocalStore(storage);
+    const first = store.load();
+    expect(first.tapes.map((t) => t.title)).toContain("Publish the weekly report");
+    store.save({ tapes: first.tapes.slice(0, 1), runs: [] });
+    expect(createLocalStore(storage).load().tapes).toHaveLength(1);
+  });
+
+  it("recovers from corrupt storage and resets to samples", () => {
+    const storage = memoryStorage();
+    storage.setItem("replay.library.v1", "{not json");
+    const store = createLocalStore(storage);
+    expect(store.load().tapes).toHaveLength(3);
+    expect(store.reset().runs).toEqual([]);
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/replay/library-store.ts">
+
+```typescript
+import { SAMPLE_LIBRARY } from "./sample-library.ts";
+import type { Run, Tape } from "./tape.ts";
+
+export type LibraryState = { tapes: Tape[]; runs: Run[] };
+
+// The only place Replay touches browser storage.
+export type LibraryStore = {
+  load(): LibraryState;
+  save(state: LibraryState): void;
+  reset(): LibraryState;
+};
+
+const KEY = "replay.library.v1";
+
+export function sampleState(): LibraryState {
+  return { tapes: structuredClone(SAMPLE_LIBRARY), runs: [] };
+}
+
+function isState(value: unknown): value is LibraryState {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return Array.isArray(v.tapes) && Array.isArray(v.runs);
+}
+
+export function createLocalStore(storage: Storage | undefined): LibraryStore {
+  return {
+    load() {
+      try {
+        const raw = storage?.getItem(KEY);
+        if (raw) {
+          const parsed: unknown = JSON.parse(raw);
+          if (isState(parsed)) return parsed;
+        }
+      } catch {
+        // Corrupt or unavailable storage falls back to the sample library.
+      }
+      return sampleState();
+    },
+    save(state) {
+      try {
+        storage?.setItem(KEY, JSON.stringify(state));
+      } catch {
+        // Storage can be full or blocked; the session keeps working in memory.
+      }
+    },
+    reset() {
+      const state = sampleState();
+      this.save(state);
+      return state;
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/replay-app.test.tsx">
+
+```tsx
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { sampleState, type LibraryStore } from "./library-store";
+import { ReplayApp } from "./replay-app";
+
+function memoryStore(): LibraryStore {
+  let state = sampleState();
+  return {
+    load: () => state,
+    save: (s) => {
+      state = s;
+    },
+    reset: () => (state = sampleState()),
+  };
+}
+
+describe("ReplayApp", () => {
+  it("authors a frame, plays a guided run, and records it in history", async () => {
+    const user = userEvent.setup();
+    render(<ReplayApp store={memoryStore()} />);
+
+    await user.click(screen.getByRole("button", { name: /Onboard a new contractor/ }));
+    await user.type(screen.getByLabelText("New frame title"), "Book the intro call");
+    await user.click(screen.getByRole("button", { name: "Add frame" }));
+    expect(screen.getByDisplayValue("Book the intro call")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "play" }));
+    const frames = screen.getByRole("list", { name: "Tape frames" });
+    expect(within(frames).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(frames).getByText("01")).toHaveAttribute("aria-current", "step");
+
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(within(frames).getByText("02")).toHaveAttribute("aria-current", "step");
+    await user.click(screen.getByRole("button", { name: "Mark failed" }));
+    await user.type(screen.getByLabelText("Frame note"), "Channel was archived");
+    await user.click(screen.getByRole("button", { name: "Save note" }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Run finished. 3 done, 1 skipped, 0 failed.");
+
+    await user.click(screen.getByRole("tab", { name: "history" }));
+    const history = screen.getByRole("list", { name: "Run history" });
+    expect(history).toHaveTextContent("Channel was archived");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/replay/replay-app.tsx">
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { createLocalStore, type LibraryState, type LibraryStore } from "./library-store";
+import {
+  addStep,
+  advanceRun,
+  blankTape,
+  moveStep,
+  removeStep,
+  startRun,
+  summarizeRun,
+  updateStep,
+  updateTape,
+  type Run,
+  type RunAction,
+  type Tape,
+} from "./tape";
+
+type Mode = "edit" | "play" | "history";
+
+const now = () => new Date().toISOString();
+
+function lines(text: string) {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+export function ReplayApp({ store }: { store?: LibraryStore }) {
+  const [library] = useState(() => store ?? createLocalStore(globalThis.localStorage));
+  const [state, setState] = useState<LibraryState>(() => library.load());
+  const [selectedId, setSelectedId] = useState<string>(() => state.tapes[0]?.id ?? "");
+  const [mode, setMode] = useState<Mode>("edit");
+  const [runId, setRunId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => library.save(state), [library, state]);
+
+  const tape = state.tapes.find((t) => t.id === selectedId) ?? null;
+  const run = state.runs.find((r) => r.id === runId) ?? null;
+
+  function commitTape(next: Tape) {
+    setState((s) => ({ ...s, tapes: s.tapes.map((t) => (t.id === next.id ? next : t)) }));
+  }
+
+  function attempt(fn: () => void) {
+    try {
+      setError(null);
+      fn();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  function play(t: Tape) {
+    attempt(() => {
+      const r = startRun(t, now());
+      setState((s) => ({ ...s, runs: [r, ...s.runs] }));
+      setRunId(r.id);
+      setMode("play");
+    });
+  }
+
+  function act(action: RunAction) {
+    if (!run) return;
+    attempt(() => {
+      const next = advanceRun(run, action, now());
+      setState((s) => ({ ...s, runs: s.runs.map((r) => (r.id === next.id ? next : r)) }));
+    });
+  }
+
+  function newTape() {
+    const t = blankTape("Untitled tape", now());
+    setState((s) => ({ ...s, tapes: [t, ...s.tapes] }));
+    setSelectedId(t.id);
+    setMode("edit");
+  }
+
+  function resetDemo() {
+    const fresh = library.reset();
+    setState(fresh);
+    setSelectedId(fresh.tapes[0]?.id ?? "");
+    setRunId(null);
+    setMode("edit");
+  }
+
+  return (
+    <div className="min-h-screen bg-stone-950 text-stone-100">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-800 px-4 py-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Replay</h1>
+          <p className="text-sm text-stone-400">A tape library for repeatable work.</p>
+        </div>
+        <button type="button" onClick={resetDemo} className="rounded border border-stone-700 px-3 py-1 text-sm">
+          Reset demo data
+        </button>
+      </header>
+      <div className="grid gap-4 p-4 md:grid-cols-[18rem_1fr]">
+        <nav aria-label="Tape shelf" className="space-y-2">
+          <button type="button" onClick={newTape} className="w-full rounded bg-amber-500 px-3 py-2 font-semibold text-stone-950">
+            New tape
+          </button>
+          <ul className="space-y-2">
+            {state.tapes.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  aria-pressed={t.id === selectedId}
+                  onClick={() => {
+                    setSelectedId(t.id);
+                    setMode("edit");
+                  }}
+                  className={`w-full rounded border px-3 py-2 text-left ${
+                    t.id === selectedId ? "border-amber-500 bg-stone-900" : "border-stone-800"
+                  }`}
+                >
+                  <span className="block font-medium">{t.title}</span>
+                  <span className="text-xs text-stone-400">
+                    {t.steps.length} frames · rev {t.revision}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <main className="min-w-0 space-y-4">
+          {error && (
+            <p role="alert" className="rounded border border-red-700 bg-red-950 px-3 py-2 text-sm">
+              {error}
+            </p>
+          )}
+          {tape ? (
+            <>
+              <div role="tablist" aria-label="Tape views" className="flex gap-2">
+                {(["edit", "play", "history"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === m}
+                    onClick={() => (m === "play" && (!run || run.tapeId !== tape.id) ? play(tape) : setMode(m))}
+                    className={`rounded px-3 py-1 text-sm capitalize ${mode === m ? "bg-stone-100 text-stone-950" : "bg-stone-800"}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {mode === "edit" && <TapeEditor key={tape.id} tape={tape} onChange={(t) => attempt(() => commitTape(t))} attempt={attempt} />}
+              {mode === "play" && run && run.tapeId === tape.id && (
+                <Player tape={tape} run={run} onAction={act} onReplay={() => play(tape)} />
+              )}
+              {mode === "history" && <History tape={tape} runs={state.runs.filter((r) => r.tapeId === tape.id)} />}
+            </>
+          ) : (
+            <p>Choose a tape from the shelf.</p>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function TapeEditor({
+  tape,
+  onChange,
+  attempt,
+}: {
+  tape: Tape;
+  onChange: (t: Tape) => void;
+  attempt: (fn: () => void) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const field = "w-full rounded border border-stone-700 bg-stone-900 px-2 py-1";
+
+  return (
+    <section aria-label="Tape editor" className="space-y-4">
+      <label className="block text-sm">
+        Tape title
+        <input
+          className={field}
+          value={tape.title}
+          onChange={(e) => attempt(() => onChange(updateTape(tape, { title: e.target.value }, now())))}
+        />
+      </label>
+      <label className="block text-sm">
+        Summary
+        <textarea
+          className={field}
+          value={tape.summary}
+          onChange={(e) => onChange(updateTape(tape, { summary: e.target.value }, now()))}
+        />
+      </label>
+      <ol aria-label="Frames" className="space-y-2">
+        {tape.steps.map((s, i) => (
+          <li key={s.id} className="rounded border border-stone-800 p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-amber-400">{String(i + 1).padStart(2, "0")}</span>
+              <input
+                aria-label={`Frame ${i + 1} title`}
+                className={`${field} flex-1`}
+                value={s.title}
+                onChange={(e) => attempt(() => onChange(updateStep(tape, s.id, { title: e.target.value }, now())))}
+              />
+              <button type="button" aria-label={`Move frame ${i + 1} up`} onClick={() => onChange(moveStep(tape, s.id, -1, now()))}>
+                ↑
+              </button>
+              <button type="button" aria-label={`Move frame ${i + 1} down`} onClick={() => onChange(moveStep(tape, s.id, 1, now()))}>
+                ↓
+              </button>
+              <button type="button" aria-label={`Remove frame ${i + 1}`} onClick={() => onChange(removeStep(tape, s.id, now()))}>
+                ✕
+              </button>
+            </div>
+            <textarea
+              aria-label={`Frame ${i + 1} detail`}
+              className={`${field} mt-1 text-sm`}
+              value={s.detail}
+              onChange={(e) => onChange(updateStep(tape, s.id, { detail: e.target.value }, now()))}
+            />
+          </li>
+        ))}
+      </ol>
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          attempt(() => {
+            onChange(addStep(tape, { title, detail }, now()));
+            setTitle("");
+            setDetail("");
+          });
+        }}
+      >
+        <input aria-label="New frame title" placeholder="New frame title" className={`${field} flex-1`} value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input aria-label="New frame detail" placeholder="Detail (optional)" className={`${field} flex-1`} value={detail} onChange={(e) => setDetail(e.target.value)} />
+        <button type="submit" className="rounded bg-stone-100 px-3 py-1 text-stone-950">
+          Add frame
+        </button>
+      </form>
+      <div className="grid gap-3 md:grid-cols-3">
+        <ListField
+          label="Parameters (name = example)"
+          value={tape.parameters.map((p) => `${p.name} = ${p.example}`).join("\n")}
+          onCommit={(text) =>
+            onChange(
+              updateTape(
+                tape,
+                {
+                  parameters: lines(text).map((l) => {
+                    const [name, ...rest] = l.split("=");
+                    return { name: name.trim(), example: rest.join("=").trim() };
+                  }),
+                },
+                now(),
+              ),
+            )
+          }
+        />
+        <ListField
+          label="Preconditions"
+          value={tape.preconditions.join("\n")}
+          onCommit={(text) => onChange(updateTape(tape, { preconditions: lines(text) }, now()))}
+        />
+        <ListField
+          label="Stop conditions"
+          value={tape.stopConditions.join("\n")}
+          onCommit={(text) => onChange(updateTape(tape, { stopConditions: lines(text) }, now()))}
+        />
+      </div>
+    </section>
+  );
+}
+
+function ListField({ label, value, onCommit }: { label: string; value: string; onCommit: (text: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <label className="block text-sm">
+      {label}
+      <textarea
+        className="h-24 w-full rounded border border-stone-700 bg-stone-900 px-2 py-1"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== value) onCommit(draft);
+        }}
+      />
+    </label>
+  );
+}
+
+function Player({ tape, run, onAction, onReplay }: { tape: Tape; run: Run; onAction: (a: RunAction) => void; onReplay: () => void }) {
+  const [note, setNote] = useState("");
+  const [reason, setReason] = useState("");
+  const steps = useMemo(() => new Map(tape.steps.map((s) => [s.id, s])), [tape.steps]);
+  const current = run.frames[run.playhead];
+  const step = steps.get(current.stepId);
+  const ended = run.status === "finished" || run.status === "stopped";
+  const btn = "rounded border border-stone-700 px-3 py-1 text-sm disabled:opacity-40";
+
+  return (
+    <section aria-label="Player" className="space-y-4">
+      <p className="text-sm text-stone-400">
+        Replay guides you. It never performs a step for you. Status: <strong>{run.status}</strong>
+      </p>
+      {tape.stopConditions.length > 0 && (
+        <div className="rounded border border-amber-700 p-2 text-sm">
+          <p className="font-semibold">Stop safely if</p>
+          <ul className="list-disc pl-5">
+            {tape.stopConditions.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <ol aria-label="Tape frames" className="flex gap-1 overflow-x-auto pb-1">
+        {run.frames.map((f, i) => (
+          <li
+            key={f.stepId}
+            aria-current={i === run.playhead && !ended ? "step" : undefined}
+            title={steps.get(f.stepId)?.title}
+            className={`min-w-10 rounded px-2 py-1 text-center font-mono text-xs ${
+              i === run.playhead && !ended
+                ? "bg-amber-500 text-stone-950"
+                : i < run.playhead || run.status === "finished"
+                  ? f.outcome === "done"
+                    ? "bg-emerald-800"
+                    : f.outcome === "failed"
+                      ? "bg-red-800"
+                      : "bg-stone-700"
+                  : "bg-stone-900"
+            }`}
+          >
+            {String(i + 1).padStart(2, "0")}
+          </li>
+        ))}
+      </ol>
+      {!ended && step && (
+        <div className="rounded border border-stone-700 p-3">
+          <p className="text-xs text-stone-400">
+            Frame {run.playhead + 1} of {run.frames.length}
+            {current.outcome === "failed" && " · marked failed"}
+          </p>
+          <h2 className="text-lg font-semibold">{step.title}</h2>
+          <p className="text-sm text-stone-300">{step.detail}</p>
+        </div>
+      )}
+      {!ended ? (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btn} disabled={run.status === "paused" || current.outcome === "failed"} onClick={() => onAction({ type: "done" })}>
+            Done
+          </button>
+          <button type="button" className={btn} disabled={run.status === "paused"} onClick={() => onAction({ type: "skip" })}>
+            Skip
+          </button>
+          <button type="button" className={btn} disabled={run.status === "paused" || current.outcome === "failed"} onClick={() => onAction({ type: "fail" })}>
+            Mark failed
+          </button>
+          <button type="button" className={btn} disabled={current.outcome !== "failed" || run.status === "paused"} onClick={() => onAction({ type: "retry" })}>
+            Retry
+          </button>
+          {run.status === "paused" ? (
+            <button type="button" className={btn} onClick={() => onAction({ type: "resume" })}>
+              Resume
+            </button>
+          ) : (
+            <button type="button" className={btn} onClick={() => onAction({ type: "pause" })}>
+              Pause
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p role="status">
+            {run.status === "finished" ? "Run finished." : `Run stopped: ${run.stopReason}`}{" "}
+            {(() => {
+              const s = summarizeRun(run);
+              return `${s.done} done, ${s.skipped} skipped, ${s.failed} failed.`;
+            })()}
+          </p>
+          <button type="button" className={btn} onClick={onReplay}>
+            Play again
+          </button>
+        </div>
+      )}
+      {!ended && (
+        <div className="grid gap-2 md:grid-cols-2">
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAction({ type: "annotate", note });
+              setNote("");
+            }}
+          >
+            <input aria-label="Frame note" placeholder={current.note || "Note for this frame"} className="flex-1 rounded border border-stone-700 bg-stone-900 px-2" value={note} onChange={(e) => setNote(e.target.value)} />
+            <button type="submit" className={btn}>
+              Save note
+            </button>
+          </form>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAction({ type: "stop", reason });
+            }}
+          >
+            <input aria-label="Stop reason" placeholder="Why stop?" className="flex-1 rounded border border-stone-700 bg-stone-900 px-2" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <button type="submit" className={btn}>
+              Stop safely
+            </button>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function History({ tape, runs }: { tape: Tape; runs: Run[] }) {
+  if (runs.length === 0) return <p className="text-sm text-stone-400">No runs of “{tape.title}” yet.</p>;
+  return (
+    <ul aria-label="Run history" className="space-y-2">
+      {runs.map((r) => {
+        const s = summarizeRun(r);
+        return (
+          <li key={r.id} className="rounded border border-stone-800 p-2 text-sm">
+            <p>
+              <strong>{r.status}</strong> · {new Date(r.startedAt).toLocaleString()} · rev {r.tapeRevision}
+            </p>
+            <p>
+              {s.done} done, {s.skipped} skipped, {s.failed} failed of {s.total}
+              {r.stopReason ? ` · stopped: ${r.stopReason}` : ""}
+            </p>
+            {r.frames.some((f) => f.note) && (
+              <ul className="list-disc pl-5 text-stone-400">
+                {r.frames
+                  .filter((f) => f.note)
+                  .map((f) => (
+                    <li key={f.stepId}>
+                      {tape.steps.find((st) => st.id === f.stepId)?.title ?? "Removed frame"}: {f.note}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+```
+
+</Accordion>
+<Accordion title="src/features/replay/sample-library.ts">
+
+```typescript
+import type { Tape } from "./tape.ts";
+
+// Fictional sample tapes. Every name, system, and address here is made up.
+const at = "2026-10-01T09:00:00.000Z";
+
+export const SAMPLE_LIBRARY: Tape[] = [
+  {
+    id: "tape-weekly-report",
+    title: "Publish the weekly report",
+    summary: "Pull last week's numbers from the Harbor dashboard and post the report to the team page.",
+    steps: [
+      { id: "wr-1", title: "Open the Harbor dashboard", detail: "Sign in and choose the Operations workspace." },
+      { id: "wr-2", title: "Set the date range to last week", detail: "Monday to Sunday, in the team's time zone." },
+      { id: "wr-3", title: "Export the summary as CSV", detail: "Use Export, then Summary only." },
+      { id: "wr-4", title: "Paste the totals into the report template", detail: "Fill the three highlighted cells." },
+      { id: "wr-5", title: "Publish to the team page", detail: "Title it 'Week NN report' and notify #ops." },
+    ],
+    parameters: [{ name: "week_start", example: "2026-09-28" }],
+    preconditions: ["You can sign in to the Harbor dashboard"],
+    stopConditions: ["The export is empty or the totals do not match the dashboard"],
+    revision: 3,
+    updatedAt: at,
+  },
+  {
+    id: "tape-contractor-onboarding",
+    title: "Onboard a new contractor",
+    summary: "Give a new contractor the accounts and documents they need on day one.",
+    steps: [
+      { id: "oc-1", title: "Create the directory account", detail: "Use the contractor template, not the employee one." },
+      { id: "oc-2", title: "Add them to the project channel", detail: "Read-only until the agreement is signed." },
+      { id: "oc-3", title: "Send the welcome packet", detail: "Attach the code of conduct and the handbook." },
+    ],
+    parameters: [{ name: "contractor_name", example: "Rowan Vale" }],
+    preconditions: ["The signed agreement is on file"],
+    stopConditions: ["The contractor's start date is not confirmed"],
+    revision: 1,
+    updatedAt: at,
+  },
+  {
+    id: "tape-checkout-bug",
+    title: "Reproduce the checkout rounding bug",
+    summary: "Steps QA uses to reproduce the cart total that is one cent off.",
+    steps: [
+      { id: "cb-1", title: "Open the staging store", detail: "Use the QA test account." },
+      { id: "cb-2", title: "Add three of the sample mug", detail: "Unit price 3.335." },
+      { id: "cb-3", title: "Apply the code TENOFF", detail: "Watch the subtotal line." },
+      { id: "cb-4", title: "Compare the cart total with the receipt", detail: "Note both values." },
+    ],
+    parameters: [],
+    preconditions: ["Staging is up"],
+    stopConditions: ["Staging shows real customer data"],
+    revision: 2,
+    updatedAt: at,
+  },
+];
+```
+
+</Accordion>
+<Accordion title="src/features/replay/tape.test.ts">
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { SAMPLE_LIBRARY } from "./sample-library";
+import { addStep, advanceRun, moveStep, removeStep, startRun, summarizeRun, updateStep } from "./tape";
+
+const t0 = "2026-10-02T10:00:00.000Z";
+const t1 = "2026-10-02T10:05:00.000Z";
+const report = SAMPLE_LIBRARY[0];
+
+describe("tape editing", () => {
+  it("adds, edits, moves, and removes frames while bumping the revision", () => {
+    let tape = addStep(report, { title: "  Archive the CSV ", detail: "" }, t0, "wr-6");
+    expect(tape.steps.at(-1)).toEqual({ id: "wr-6", title: "Archive the CSV", detail: "" });
+    tape = updateStep(tape, "wr-6", { detail: "Shared drive, Reports folder" }, t0);
+    tape = moveStep(tape, "wr-6", -1, t0);
+    expect(tape.steps.map((s) => s.id).slice(-2)).toEqual(["wr-6", "wr-5"]);
+    tape = removeStep(tape, "wr-6", t1);
+    expect(tape.steps).toHaveLength(5);
+    expect(tape.revision).toBe(report.revision + 4);
+    expect(tape.updatedAt).toBe(t1);
+  });
+
+  it("refuses an empty frame title", () => {
+    expect(() => addStep(report, { title: "  ", detail: "x" }, t0)).toThrow("A step needs a title");
+  });
+});
+
+describe("guided runs", () => {
+  it("moves the playhead through done, failed, retry, and skip", () => {
+    let run = startRun(report, t0, "run-1");
+    run = advanceRun(run, { type: "done" }, t0);
+    expect(run.playhead).toBe(1);
+    run = advanceRun(run, { type: "fail" }, t0);
+    expect(run.playhead).toBe(1);
+    expect(advanceRun(run, { type: "done" }, t0).playhead).toBe(2); // done after a failure still advances
+    run = advanceRun(run, { type: "retry" }, t0);
+    run = advanceRun(run, { type: "annotate", note: "Date picker was slow" }, t0);
+    run = advanceRun(run, { type: "done" }, t0);
+    expect(run.frames[1]).toMatchObject({ outcome: "done", attempts: 2, note: "Date picker was slow" });
+    run = advanceRun(run, { type: "skip" }, t0);
+    run = advanceRun(run, { type: "done" }, t0);
+    run = advanceRun(run, { type: "done" }, t1);
+    expect(run.status).toBe("finished");
+    expect(run.endedAt).toBe(t1);
+    expect(summarizeRun(run)).toEqual({ done: 4, skipped: 1, failed: 0, total: 5 });
+  });
+
+  it("ignores step actions while paused and needs a reason to stop", () => {
+    let run = advanceRun(startRun(report, t0, "run-2"), { type: "pause" }, t0);
+    expect(advanceRun(run, { type: "done" }, t0).playhead).toBe(0);
+    run = advanceRun(run, { type: "resume" }, t0);
+    expect(() => advanceRun(run, { type: "stop", reason: " " }, t0)).toThrow("Say why");
+    run = advanceRun(run, { type: "stop", reason: "Export was empty" }, t1);
+    expect(run).toMatchObject({ status: "stopped", stopReason: "Export was empty", endedAt: t1 });
+    expect(advanceRun(run, { type: "done" }, t1)).toBe(run);
+  });
+
+  it("will not play an empty tape", () => {
+    expect(() => startRun({ ...report, steps: [] }, t0)).toThrow("Add a step");
+  });
+});
+```
+
+</Accordion>
+<Accordion title="src/features/replay/tape.ts">
+
+```typescript
+// Pure tape and run logic. No storage, no React, no model.
+
+export type Step = { id: string; title: string; detail: string };
+
+export type Parameter = { name: string; example: string };
+
+export type Tape = {
+  id: string;
+  title: string;
+  summary: string;
+  steps: Step[];
+  parameters: Parameter[];
+  preconditions: string[];
+  stopConditions: string[];
+  revision: number;
+  updatedAt: string;
+};
+
+export type FrameOutcome = "done" | "skipped" | "failed";
+
+export type Frame = { stepId: string; outcome: FrameOutcome; attempts: number; note: string };
+
+export type RunStatus = "playing" | "paused" | "finished" | "stopped";
+
+export type Run = {
+  id: string;
+  tapeId: string;
+  tapeRevision: number;
+  startedAt: string;
+  endedAt: string | null;
+  status: RunStatus;
+  playhead: number;
+  frames: Frame[];
+  stopReason: string | null;
+};
+
+let counter = 0;
+export function newId(prefix: string) {
+  counter += 1;
+  return `${prefix}-${Date.now().toString(36)}-${counter.toString(36)}`;
+}
+
+// ---- Editing ---------------------------------------------------------------
+
+function touch(tape: Tape, patch: Partial<Tape>, now: string): Tape {
+  return { ...tape, ...patch, revision: tape.revision + 1, updatedAt: now };
+}
+
+export function addStep(tape: Tape, step: Omit<Step, "id">, now: string, id = newId("step")): Tape {
+  const title = step.title.trim();
+  if (!title) throw new Error("A step needs a title");
+  return touch(tape, { steps: [...tape.steps, { id, title, detail: step.detail.trim() }] }, now);
+}
+
+export function updateStep(tape: Tape, id: string, patch: Partial<Omit<Step, "id">>, now: string): Tape {
+  if (patch.title !== undefined && !patch.title.trim()) throw new Error("A step needs a title");
+  return touch(
+    tape,
+    { steps: tape.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)) },
+    now,
+  );
+}
+
+export function removeStep(tape: Tape, id: string, now: string): Tape {
+  return touch(tape, { steps: tape.steps.filter((s) => s.id !== id) }, now);
+}
+
+export function moveStep(tape: Tape, id: string, delta: -1 | 1, now: string): Tape {
+  const index = tape.steps.findIndex((s) => s.id === id);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= tape.steps.length) return tape;
+  const steps = [...tape.steps];
+  [steps[index], steps[target]] = [steps[target], steps[index]];
+  return touch(tape, { steps }, now);
+}
+
+export function updateTape(
+  tape: Tape,
+  patch: Partial<Pick<Tape, "title" | "summary" | "parameters" | "preconditions" | "stopConditions">>,
+  now: string,
+): Tape {
+  if (patch.title !== undefined && !patch.title.trim()) throw new Error("A tape needs a title");
+  return touch(tape, patch, now);
+}
+
+export function blankTape(title: string, now: string, id = newId("tape")): Tape {
+  return {
+    id,
+    title: title.trim() || "Untitled tape",
+    summary: "",
+    steps: [],
+    parameters: [],
+    preconditions: [],
+    stopConditions: [],
+    revision: 1,
+    updatedAt: now,
+  };
+}
+
+// ---- Guided runs -----------------------------------------------------------
+// A run never performs a step. It records what the person says happened.
+
+export function startRun(tape: Tape, now: string, id = newId("run")): Run {
+  if (tape.steps.length === 0) throw new Error("Add a step before playing this tape");
+  return {
+    id,
+    tapeId: tape.id,
+    tapeRevision: tape.revision,
+    startedAt: now,
+    endedAt: null,
+    status: "playing",
+    playhead: 0,
+    frames: tape.steps.map((s) => ({ stepId: s.id, outcome: "skipped", attempts: 0, note: "" })),
+    stopReason: null,
+  };
+}
+
+export type RunAction =
+  | { type: "done" }
+  | { type: "skip" }
+  | { type: "fail" }
+  | { type: "retry" }
+  | { type: "annotate"; note: string }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "stop"; reason: string };
+
+function settle(run: Run, outcome: FrameOutcome, now: string): Run {
+  const frames = run.frames.map((f, i) =>
+    i === run.playhead ? { ...f, outcome, attempts: f.attempts + 1 } : f,
+  );
+  if (outcome === "failed") return { ...run, frames };
+  const playhead = run.playhead + 1;
+  if (playhead >= frames.length) {
+    return { ...run, frames, playhead: frames.length - 1, status: "finished", endedAt: now };
+  }
+  return { ...run, frames, playhead };
+}
+
+export function advanceRun(run: Run, action: RunAction, now: string): Run {
+  if (run.status === "finished" || run.status === "stopped") return run;
+  if (action.type === "pause") return run.status === "playing" ? { ...run, status: "paused" } : run;
+  if (action.type === "resume") return run.status === "paused" ? { ...run, status: "playing" } : run;
+  if (action.type === "annotate") {
+    return {
+      ...run,
+      frames: run.frames.map((f, i) => (i === run.playhead ? { ...f, note: action.note } : f)),
+    };
+  }
+  if (action.type === "stop") {
+    const reason = action.reason.trim();
+    if (!reason) throw new Error("Say why the run stopped");
+    return { ...run, status: "stopped", endedAt: now, stopReason: reason };
+  }
+  if (run.status === "paused") return run;
+  const current = run.frames[run.playhead];
+  if (action.type === "retry") {
+    // Retry only makes sense on a failed frame: it keeps the attempt count and plays it again.
+    if (current.outcome !== "failed") return run;
+    return { ...run, frames: run.frames.map((f, i) => (i === run.playhead ? { ...f, outcome: "skipped" } : f)) };
+  }
+  if (action.type === "done") return settle(run, "done", now);
+  if (action.type === "skip") return settle(run, "skipped", now);
+  return settle(run, "failed", now);
+}
+
+export function summarizeRun(run: Run) {
+  const count = (o: FrameOutcome) => run.frames.filter((f) => f.outcome === o).length;
+  return { done: count("done"), skipped: count("skipped"), failed: count("failed"), total: run.frames.length };
+}
+
+// Plain text used for search and, later, for the export.
+export function tapeText(tape: Tape) {
+  return [tape.title, tape.summary, ...tape.steps.map((s) => `${s.title}. ${s.detail}`)]
+    .filter(Boolean)
+    .join("\n");
+}
+```
+
+</Accordion>
+<Accordion title="tsconfig.json">
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+```
+
+</Accordion>
+<Accordion title="vitest.config.mts">
+
+```typescript
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: { tsconfigPaths: true },
+  test: {
+    environment: "jsdom",
+    testTimeout: 20000,
+    setupFiles: ["./vitest.setup.ts"],
+  },
+});
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Receipt
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+Expected: lint and typecheck exit cleanly, and `Test Files 4 passed (4)`, `Tests 9 passed (9)`. The UI test authors a frame, plays a run with a failure, a note, a retry, and a skip, and finds the note in history.
+
+## Before continuing
+
+- [ ] The shelf, editor, player, and history all work without AI.
+- [ ] You can explain why the player never performs a step.
+- [ ] Lint, typecheck, and tests pass.
+
+Continue to [Transcribe a narrated demonstration](/replay/02-transcribe-narration).

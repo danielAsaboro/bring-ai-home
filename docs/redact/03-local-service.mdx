@@ -1,0 +1,439 @@
+---
+title: "03. Build the local service boundary"
+description: "We will add a small HTTP service between the browser and the native runtime. At the end, health works, requests are validated, and analysis deliberately reports unavailable. That is the correct result before OCR is connected."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 03. Build the local service boundary" />
+
+We will add a small HTTP service between the browser and the native runtime. At the end, health works, requests are validated, and analysis deliberately reports unavailable. That is the correct result before OCR is connected.
+
+**Source checkpoint:** `37b6780` · **Starting checkpoint:** `1b0c930`
+
+## Make this chapter's changes
+
+Download [the complete Chapter 3 patch](/downloads/redact/03-local-service.patch) into `~/Downloads`. It includes the implementation, tests, and lockfile changes for this chapter only. Complete the previous chapter first.
+
+Stop the app and service before changing a checkpoint. From the **parent `redact-course` directory**, inspect and apply the patch:
+
+```bash
+git apply --stat ~/Downloads/03-local-service.patch
+git apply --check ~/Downloads/03-local-service.patch
+git apply ~/Downloads/03-local-service.patch
+cd redact
+npm ci
+```
+
+`--check` should exit successfully without changing files. If it reports that a patch does not apply, stop and check your previous chapter and local edits. Do not force it with `--reject` or overwrite your work.
+
+The walkthrough below explains the changes in implementation order. You can instead write the files yourself using the patch and complete source blocks as your reference. Use one method per chapter: do not apply the patch on top of the same edits you already wrote.
+
+## Build and observe
+
+### 1. Define the request and response first
+
+Read `src/features/redact/analysis-contract.ts`. The request includes document and page identity, measured width and height, base64 PNG bytes, privacy level, and direction. It does not include a filesystem path or the original PDF.
+
+The response preserves raw `[x1, y1, x2, y2]` pixel edges. We will normalize them in Chapter 5. A run receipt carries model identity, timestamps, status, and duration.
+
+### 2. Validate HTTP bytes at both ends
+
+Follow `analysis-client.ts` from request construction to response parsing. Zod enforces the response shape at runtime. TypeScript alone cannot reject malformed JSON from another process.
+
+Then read `server.ts`. It validates the request before invoking its injected analyzer and validates the result before returning a successful response.
+
+### 3. Start the bridge
+
+```bash
+npm run qvac:service
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:4317/health
+```
+
+Notice that process readiness and model readiness differ. The process can be ready while OCR is not loaded and the reasoning model ID is `not-configured`.
+
+### 4. Verify the intentional missing implementation
+
+Run the focused server and client tests below. The valid-request test should reach the analyzer boundary and receive typed unavailability rather than fabricated OCR. Invalid requests should never invoke the analyzer.
+
+At this checkpoint, sending real page bytes still cannot produce live OCR through this endpoint. The standalone command from Chapter 2 remains your inference proof.
+
+### 5. Inspect the local boundary
+
+The entrypoint binds to `127.0.0.1`. The server rejects browser origins outside HTTP localhost and loopback. This prevents arbitrary remote websites from being admitted by wildcard CORS.
+
+This is a teaching boundary, not authentication against malicious local software. Local HTTP callers and local origins are still trusted by this checkpoint. Keep the service scoped to your own development machine.
+
+## Read the checkpoint implementation
+
+These are complete files from this chapter's checkpoint. The patch above contains the remaining UI wiring and tests. Paths are relative to the `redact` app.
+
+<AccordionGroup>
+<Accordion title="src/features/redact/analysis-contract.ts">
+
+```typescript
+import { z } from "zod";
+
+export const modelStateSchema = z.object({
+  kind: z.enum(["ocr", "reasoning"]),
+  id: z.string().min(1),
+  state: z.enum(["not_loaded", "loading", "ready", "error"]),
+});
+
+export const healthResponseSchema = z.object({
+  service: z.enum(["ready", "error"]),
+  busy: z.boolean(),
+  models: z.array(modelStateSchema),
+});
+
+export const analyzePageRequestSchema = z.object({
+  documentId: z.string().min(1),
+  pageId: z.string().min(1),
+  pageNumber: z.number().int().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  pngBase64: z.string().min(1),
+  level: z.enum(["private", "confidential"]),
+  direction: z.string().max(500),
+});
+
+export const rawOcrBlockSchema = z.object({
+  text: z.string(),
+  bbox: z.tuple([
+    z.number().finite(),
+    z.number().finite(),
+    z.number().finite(),
+    z.number().finite(),
+  ]),
+  confidence: z.number().min(0).max(1).nullable(),
+});
+
+export const analysisRunReceiptSchema = z.object({
+  id: z.string().min(1),
+  documentId: z.string().min(1),
+  status: z.enum(["ready", "unavailable", "error"]),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+  ocrModel: z.string().min(1),
+  ocrMs: z.number().nonnegative().nullable(),
+  error: z.string().nullable(),
+});
+
+export const analysisResponseSchema = z.object({
+  run: analysisRunReceiptSchema,
+  page: z.object({
+    id: z.string().min(1),
+    number: z.number().int().positive(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  }),
+  ocrBlocks: z.array(rawOcrBlockSchema),
+  candidates: z.array(z.unknown()),
+});
+
+export const serviceErrorSchema = z.object({
+  error: z.object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+  }),
+});
+
+export type AnalyzePageRequest = z.infer<typeof analyzePageRequestSchema>;
+export type AnalysisResponse = z.infer<typeof analysisResponseSchema>;
+export type HealthResponse = z.infer<typeof healthResponseSchema>;
+```
+
+</Accordion>
+<Accordion title="src/features/redact/analysis-client.ts">
+
+```typescript
+import {
+  analysisResponseSchema,
+  healthResponseSchema,
+  serviceErrorSchema,
+  type AnalysisResponse,
+  type HealthResponse,
+} from "./analysis-contract";
+import type { ConfidentialityLevel } from "./workflow-domain";
+
+export type AnalyzeRasterPageInput = {
+  documentId: string;
+  pageId: string;
+  pageNumber: number;
+  width: number;
+  height: number;
+  pngBytes: ArrayBuffer;
+  level: ConfidentialityLevel;
+  direction: string;
+};
+
+export type AnalysisClient = {
+  health(signal?: AbortSignal): Promise<HealthResponse>;
+  analyzePage(input: AnalyzeRasterPageInput, signal?: AbortSignal): Promise<AnalysisResponse>;
+};
+
+type ClientOptions = {
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
+
+function bytesToBase64(bytes: ArrayBuffer): string {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < view.length; offset += chunkSize) {
+    binary += String.fromCharCode(...view.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+export function createAnalysisClient(options: ClientOptions = {}): AnalysisClient {
+  const baseUrl = (
+    options.baseUrl ??
+    process.env.NEXT_PUBLIC_REDACT_QVAC_URL ??
+    "http://127.0.0.1:4317"
+  ).replace(/\/$/, "");
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  async function parse<T>(
+    response: Response,
+    schema: { safeParse(value: unknown): { success: boolean; data?: T } },
+    invalidMessage: string,
+  ): Promise<T> {
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new Error(invalidMessage);
+    }
+    if (!response.ok) {
+      const parsedError = serviceErrorSchema.safeParse(value);
+      throw new Error(
+        parsedError.success ? parsedError.data.error.message : invalidMessage,
+      );
+    }
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) throw new Error(invalidMessage);
+    return parsed.data as T;
+  }
+
+  return {
+    async health(signal) {
+      const response = await fetchImpl(`${baseUrl}/health`, {
+        headers: { accept: "application/json" },
+        signal,
+      });
+      return parse(response, healthResponseSchema, "Local service returned an invalid health response");
+    },
+    async analyzePage(input, signal) {
+      const response = await fetchImpl(`${baseUrl}/v1/analyze-page`, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({
+          documentId: input.documentId,
+          pageId: input.pageId,
+          pageNumber: input.pageNumber,
+          width: input.width,
+          height: input.height,
+          pngBase64: bytesToBase64(input.pngBytes),
+          level: input.level,
+          direction: input.direction,
+        }),
+        signal,
+      });
+      return parse(response, analysisResponseSchema, "Local service returned an invalid analysis response");
+    },
+  };
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/server.ts">
+
+```typescript
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+
+import { analyzePageRequestSchema } from "../src/features/redact/analysis-contract";
+import type { DocumentAnalyzer } from "./analyzer";
+
+const MAX_REQUEST_BYTES = 20 * 1024 * 1024;
+
+export type ServiceOptions = {
+  analyzer: DocumentAnalyzer;
+};
+
+function localAppOrigin(request: IncomingMessage): string | null {
+  const origin = request.headers.origin;
+  if (!origin) return null;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+      ? origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function sendJson(
+  request: IncomingMessage,
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+): void {
+  const encoded = JSON.stringify(body);
+  const origin = localAppOrigin(request);
+  response.writeHead(status, {
+    "access-control-allow-headers": "content-type, accept",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(encoded),
+  });
+  response.end(encoded);
+}
+
+async function readJson(request: AsyncIterable<unknown>): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    length += bytes.length;
+    if (length > MAX_REQUEST_BYTES) throw new Error("request_too_large");
+    chunks.push(bytes);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function createQvacService(options: ServiceOptions): Server {
+  let busy = false;
+
+  return createServer(async (request, response) => {
+    if (request.headers.origin && !localAppOrigin(request)) {
+      sendJson(request, response, 403, {
+        error: { code: "origin_forbidden", message: "Origin is not allowed" },
+      });
+      return;
+    }
+    if (request.method === "OPTIONS") {
+      sendJson(request, response, 204, null);
+      return;
+    }
+    if (request.method === "GET" && request.url === "/health") {
+      sendJson(request, response, 200, { ...options.analyzer.getState(), busy });
+      return;
+    }
+    if (request.method === "POST" && request.url === "/v1/analyze-page") {
+      let input;
+      try {
+        input = analyzePageRequestSchema.parse(await readJson(request));
+      } catch {
+        sendJson(request, response, 400, {
+          error: { code: "invalid_request", message: "Invalid analyze-page request" },
+        });
+        return;
+      }
+
+      busy = true;
+      try {
+        sendJson(request, response, 200, await options.analyzer.analyzePage(input));
+      } catch {
+        sendJson(request, response, 503, {
+          error: { code: "analyzer_unavailable", message: "Local analysis is unavailable" },
+        });
+      } finally {
+        busy = false;
+      }
+      return;
+    }
+    sendJson(request, response, 404, {
+      error: { code: "not_found", message: "Route not found" },
+    });
+  });
+}
+```
+
+</Accordion>
+<Accordion title="qvac-service/index.ts">
+
+```typescript
+import type { DocumentAnalyzer } from "./analyzer";
+import { createQvacService } from "./server";
+
+const port = Number.parseInt(process.env.REDACT_QVAC_PORT ?? "4317", 10);
+
+const analyzer: DocumentAnalyzer = {
+  getState: () => ({
+    service: "ready",
+    models: [
+      { kind: "ocr", id: "qvac-ocr-latin", state: "not_loaded" },
+      { kind: "reasoning", id: "not-configured", state: "not_loaded" },
+    ],
+  }),
+  analyzePage: async () => {
+    throw new Error("OCR is not connected at this checkpoint");
+  },
+  close: async () => undefined,
+};
+
+const server = createQvacService({ analyzer });
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write(`Redact QVAC service listening on http://127.0.0.1:${port}\n`);
+});
+
+async function close() {
+  server.close();
+  await analyzer.close();
+}
+
+process.once("SIGINT", close);
+process.once("SIGTERM", close);
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Prove the checkpoint
+
+```bash
+npm test -- src/features/redact/analysis-client.test.ts qvac-service/server.test.ts
+```
+
+These focused tests exercise application contracts with controlled inputs. They do not prove live model inference. For Chapters 2 onward, also complete the live or visible exercise described above when the model prerequisite exists.
+
+Run the broader checks separately, from the app directory:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Run type generation and build sequentially because both write Next.js generated state. After all required checks pass, record your checkpoint from the parent directory:
+
+```bash
+cd ..
+git diff --check
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Complete chapter 03: Build the local service boundary"
+```
+
+## Before continuing
+
+- [ ] Health reports process and model readiness separately.
+- [ ] Invalid input is rejected and unimplemented analysis remains explicitly unavailable.
+
+Continue to [Connect uploaded pages to OCR](/redact/04-connect-ocr).
