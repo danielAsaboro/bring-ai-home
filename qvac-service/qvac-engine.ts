@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildOutfitHistory, outfitSchema } from "../src/features/closet/outfit-proposal.ts";
 import { buildDetailsHistory, GARMENT_PROPOSAL_SCHEMA } from "../src/features/closet/garment-proposal.ts";
 import { DESCRIBE_GARMENT_PROMPT, resolveLocalQvacPaths, VISION_MODEL } from "./local-config.ts";
 import type { ClosetEngine, GarmentImage } from "./server.ts";
@@ -92,6 +93,17 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
           type: "json_schema",
           json_schema: { name: "garment", schema: GARMENT_PROPOSAL_SCHEMA as unknown as Record<string, unknown> },
         },
+      });
+      const final = await run.final;
+      return { raw: final.contentText, model: LLM_MODEL };
+    },
+    async outfit(constraints) {
+      const modelId = await llm();
+      const run = sdk.completion({
+        modelId,
+        history: buildOutfitHistory(constraints),
+        stream: true,
+        responseFormat: { type: "json_schema", json_schema: { name: "outfit", schema: outfitSchema(constraints) } },
       });
       const final = await run.final;
       return { raw: final.contentText, model: LLM_MODEL };

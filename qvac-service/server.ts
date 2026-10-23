@@ -1,3 +1,4 @@
+import type { OutfitConstraints } from "../src/features/closet/outfit-proposal.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 export const SERVICE_PORT = 4320;
@@ -12,6 +13,7 @@ export type ClosetEngine = {
   // Returns the model's raw JSON text. The browser validates it.
   details?: (description: string) => Promise<{ raw: string; model: string }>;
   // Returns every label and confidence. The browser decides whether one is usable.
+  outfit?: (constraints: OutfitConstraints) => Promise<{ raw: string; model: string }>;
   embed?: (texts: string[]) => Promise<{ embeddings: number[][]; model: string }>;
   classify?: (image: GarmentImage) => Promise<{ results: { label: string; confidence: number }[]; model: string }>;
 };
@@ -71,6 +73,31 @@ export async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+export function parseConstraints(value: unknown): OutfitConstraints {
+  const v = value as Partial<OutfitConstraints> | null;
+  if (
+    !v ||
+    typeof v.occasion !== "string" ||
+    !v.occasion.trim() ||
+    typeof v.maxItems !== "number" ||
+    !Number.isInteger(v.maxItems) ||
+    v.maxItems < 1 ||
+    v.maxItems > 30 ||
+    !Array.isArray(v.candidates) ||
+    v.candidates.length === 0 ||
+    v.candidates.length > 200
+  ) {
+    throw new Error("Request must contain an occasion, a packing limit, and candidate garments");
+  }
+  const candidates = v.candidates.map((c) => {
+    if (!c || ["id", "name", "category", "colour"].some((k) => typeof (c as Record<string, unknown>)[k] !== "string")) {
+      throw new Error("Each candidate needs id, name, category, and colour");
+    }
+    return { id: c.id, name: c.name, category: c.category, colour: c.colour };
+  });
+  return { occasion: v.occasion.slice(0, 200), maxItems: v.maxItems, candidates };
+}
+
 type Route = (body: unknown, engine: ClosetEngine) => Promise<unknown> | null;
 
 // Each route returns null when its capability is not loaded.
@@ -94,6 +121,10 @@ const ROUTES: Record<string, Route> = {
       throw new Error("Each text must be a non-empty string under 1000 characters");
     }
     return engine.embed(texts as string[]);
+  },
+  "/outfit": (body, engine) => {
+    if (!engine.outfit) return null;
+    return engine.outfit(parseConstraints(body));
   },
   "/classify": (body, engine) => {
     if (!engine.classify) return null;

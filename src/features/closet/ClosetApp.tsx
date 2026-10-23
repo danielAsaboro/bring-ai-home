@@ -18,6 +18,7 @@ import {
   type Garment,
 } from "./model";
 import { LookSearch } from "./LookSearch";
+import { OutfitProposer } from "./OutfitProposer";
 import { PhotoReview } from "./PhotoReview";
 import { sampleCloset } from "./sample-closet";
 
@@ -372,6 +373,7 @@ function Packing({
           </li>
         ))}
       </ul>
+      <OutfitProposer closet={closet} act={act} />
       <h3 className="font-semibold">Clean and ready</h3>
       <ul className="mt-1 flex flex-wrap gap-2">
         {available.map((g) => (

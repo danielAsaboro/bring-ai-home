@@ -1,3 +1,5 @@
+import type { OutfitConstraints } from "./outfit-proposal";
+
 // The browser's only door to local AI. Every failure is classified so the UI
 // can say what went wrong and keep the manual path open.
 
@@ -121,6 +123,19 @@ export function embedTexts(texts: string[], fetchFn?: Fetch) {
         throw new Error("Expected one finite vector of equal length per text");
       }
       return { embeddings: vectors as number[][], model: v.model };
+    },
+    fetchFn,
+  );
+}
+
+export function proposeOutfit(constraints: OutfitConstraints, fetchFn?: Fetch) {
+  return callService(
+    "/outfit",
+    constraints,
+    (json) => {
+      const v = json as { raw?: unknown; model?: unknown };
+      if (typeof v.raw !== "string" || typeof v.model !== "string") throw new Error("Malformed outfit");
+      return { raw: v.raw, model: v.model };
     },
     fetchFn,
   );

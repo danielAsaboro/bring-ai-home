@@ -96,6 +96,18 @@ describe("Closet local service", () => {
     });
   });
 
+  it("validates outfit constraints before the model sees them", async () => {
+    // Fixture engine output, hand-written.
+    const base = await start({ outfit: async () => ({ raw: '{"garmentIds":[]}', model: "fixture" }) });
+    expect((await post(`${base}/outfit`, { occasion: "x", maxItems: 0, candidates: [] })).status).toBe(400);
+    const ok = await post(`${base}/outfit`, {
+      occasion: "dinner",
+      maxItems: 2,
+      candidates: [{ id: "a", name: "A", category: "top", colour: "red" }],
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it("refuses foreign origins", async () => {
     const base = await start({});
     expect((await post(`${base}/describe`, pngRequest, { origin: "https://example.com" })).status).toBe(403);
