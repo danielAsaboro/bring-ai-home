@@ -1,0 +1,49 @@
+---
+title: "How to run Redact with the network blocked"
+description: "Run cached OCR and suggestions while the operating system denies remote network access. macOS only."
+---
+
+This guide runs Redact's local AI with remote TCP and UDP denied at the process level. It uses macOS `sandbox-exec`, so it works on macOS only. On Linux or Windows, disconnect the machine from the network instead; the app needs no other change.
+
+Before you start, [download both models](/docs/redact/how-to/download-models). The offline commands stop with `QVAC cache is incomplete` if any model file is missing.
+
+## Run one cached analysis
+
+```bash
+npm run qvac:offline
+```
+
+It checks that a remote request fails, then analyses the test chat image. Look for:
+
+```json
+"mode": "macos-process-network-denied",
+"osNetworkDenied": true,
+```
+
+and a `run` with `"status": "ready"`. Expect about 30 seconds.
+
+If `osNetworkDenied` is false, the command throws `Process sandbox did not block remote networking` and proves nothing.
+
+## Run the full app offline
+
+1. Build and start the app:
+
+   ```bash
+   npm run build
+   npm run start -- --port 3101
+   ```
+
+2. In a second terminal, start the service inside the sandbox:
+
+   ```bash
+   npm run qvac:service:offline
+   ```
+
+3. Use the app at `http://localhost:3101` as usual. Localhost traffic is allowed; everything else is denied for the service process.
+
+The sandbox applies to the service process only. The browser and the Next.js server are not sandboxed.
+
+## Next
+
+- [About models, caching and offline use](/docs/redact/concepts/models-and-offline)
+- [Lesson 10: Run Redact with the network off](/docs/redact/tutorials/10-offline)

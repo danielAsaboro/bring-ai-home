@@ -1,0 +1,67 @@
+---
+title: "How to run the tests"
+description: "Run Redact's unit, browser and live-inference checks."
+---
+
+This guide runs every check Redact has, from fast unit tests to a browser run against real local inference. Run commands from the `redact` directory.
+
+## Static checks and unit tests
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Run `typecheck` and `build` one after the other, not at the same time: both write Next.js generated files. `npm test` runs 88 Vitest tests and needs no models.
+
+## Browser tests
+
+Playwright needs a browser. Install one once:
+
+```bash
+npx playwright install chromium
+```
+
+If you see `Executable doesn't exist at …/ms-playwright/…`, this step was skipped.
+
+The manual-workflow tests expect **no** local service: they check the screens Redact shows when analysis is unavailable. Stop `qvac:service` first, start the app, then run them:
+
+```bash
+npm run dev -- --port 3101
+```
+
+```bash
+npm run test:e2e
+```
+
+Expect 6 passed and 2 skipped. The skipped test is the live one below, which is opt-in.
+
+## Live browser test with real inference
+
+This test uploads a file, waits for real suggestions, accepts and rejects them, saves the copy, and checks a pixel in the download. It needs the models, the service and the app.
+
+1. Start the service: `npm run qvac:service`.
+2. Start the app on port 3101.
+3. Run:
+
+   ```bash
+   REDACT_LIVE_QVAC=1 npx playwright test e2e/offline-qvac-workflow.spec.ts --project=desktop
+   ```
+
+The first run includes model loading and takes up to about 1.5 minutes. The test allows 240 seconds.
+
+For the same test with the service sandboxed, see [How to run Redact with the network blocked](/docs/redact/how-to/run-offline).
+
+## Labelled evaluation
+
+```bash
+npm run qvac:evaluate
+```
+
+Runs four labelled pages through OCR and reasoning and exits non-zero if any falls below the thresholds. About 2 minutes. See [Evaluation reference](/docs/redact/reference/evaluation).
+
+## Related
+
+- [Commands reference](/docs/redact/reference/commands)

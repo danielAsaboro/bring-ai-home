@@ -1,0 +1,69 @@
+---
+title: "Evaluation"
+description: "The labelled cases, matching rule, thresholds, and report fields of npm run qvac:evaluate."
+---
+
+Defined in `qvac-service/evaluation.ts` and `qvac-service/evaluation-cli.ts`.
+
+## Cases
+
+All four are the same fictional chat with six labelled regions: `name`, `email`, `address`, `phone`, `account`, `reference`.
+
+| Case ID | Image | Condition |
+|---|---|---|
+| `chat-clear` | `public/test-files/redact/evaluation/chat-clear.png` | Clean |
+| `chat-rotated` | `…/chat-rotated.png` | Rotated 90° clockwise |
+| `chat-low-contrast` | `…/chat-low-contrast.png` | Low contrast |
+| `chat-partially-obscured` | `…/chat-partially-obscured.png` | Partly covered |
+
+Run one case with `REDACT_EVALUATION_CASE=<case ID> npm run qvac:evaluate`.
+
+## Matching
+
+Boxes are compared in percent of page width and height.
+
+1. Pair each expected region with every proposal of the **same label**.
+2. Keep pairs with intersection-over-union (IoU) ≥ 0.45.
+3. Take pairs from highest IoU down; each expected region and each proposal is used once.
+
+## Thresholds
+
+A case passes when all three hold:
+
+| Metric | Formula | Minimum |
+|---|---|---|
+| Precision | matches ÷ proposals | 0.70 |
+| Recall | matches ÷ expected regions | 0.70 |
+| F1 | 2PR ÷ (P + R) | 0.70 |
+
+The run passes when every case passes. The command exits non-zero otherwise.
+
+## Report
+
+JSON on stdout:
+
+| Field | Content |
+|---|---|
+| `mode` | Run mode |
+| `identifiers` | SDK version (`@qvac/sdk@0.22.0`) and model IDs |
+| `passed` | `true` when every case passed |
+| `modelLoadMs` | Load time per model |
+| `timings[]` | Per case: OCR and reasoning inference time |
+| `memory` | Peak RSS and heap |
+| `results[]` | Per case: `caseId`, `proposals`, `result` (matches, counts, precision, recall, F1, thresholds), `elapsedMs` |
+
+## Last recorded result
+
+`@qvac/sdk` 0.22.0, Apple Silicon, four consecutive runs with identical output:
+
+| Case | F1 |
+|---|---|
+| `chat-clear` | 0.91 |
+| `chat-rotated` | 0.91 |
+| `chat-low-contrast` | 1.00 |
+| `chat-partially-obscured` | 0.91 |
+
+## Related
+
+- [How to add a labelled evaluation case](/docs/redact/how-to/add-an-evaluation-case)
+- [About measuring suggestions](/docs/redact/concepts/measuring-suggestions)

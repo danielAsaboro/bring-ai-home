@@ -1,0 +1,123 @@
+---
+title: "02. Read a page with local OCR"
+description: "We will read the fictional chat image with a local QVAC OCR model from a small script, outside the app, and look at the text and boxes it returns."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 02. Read a page with local OCR" />
+
+In this lesson we will run our first local model. A small script reads `chat-private.png` with QVAC's OCR and prints what it found. We keep it outside the app on purpose, so any install or download problem shows up here, on its own.
+
+**Checkpoint:** [`731eb40`](https://github.com/danielAsaboro/bring-ai-home/commit/731eb40b3f1e31aa214e83b3714d9171ed3443d8), starting from `0eecfb4`
+
+## 1. Apply the lesson patch
+
+Stop the dev server if it's running. Download [`02-first-ocr.patch`](/docs/downloads/redact/02-first-ocr.patch) into your Downloads folder. From the parent `redact-course` folder:
+
+```bash
+git apply --check ~/Downloads/02-first-ocr.patch
+git apply ~/Downloads/02-first-ocr.patch
+cd redact
+npm ci
+```
+
+`--check` prints nothing when the patch fits. If it reports an error, your previous lesson differs from the checkpoint; don't force it.
+
+The patch adds `@qvac/sdk` 0.22.0, so this `npm ci` takes a few minutes and grows `node_modules` to about 2.8 GB.
+
+## 2. Run OCR on the chat image
+
+```bash
+npm run qvac:ocr-smoke
+```
+
+The first run downloads the OCR model, about 98 MB, into `redact/.qvac/models`, then reads the image. It prints JSON that starts like this:
+
+```json
+{
+  "sourceName": "chat-private.png",
+  "sourceDigest": "…",
+  "cacheDirectory": "…/redact/.qvac/models",
+  "blocks": [
+    {
+      "text": "Maya Chen",
+      "bbox": [ … ],
+      "confidence": …
+    },
+```
+
+Your digest, paths and exact numbers will differ.
+
+## 3. Read the blocks
+
+Scroll through `blocks`. There are 12, one per line or phrase in the image:
+
+```text
+Maya Chen
+maya.chen@example com
+Please send the contract to 18 Willow Road.
+My
+phone is +1 415 555 0184.
+Got it.
+will use account 8841 0932
+and reference APOLLO-4471
+Thanks
+keep the amount confidential.
+Controlled test document
+no real personal information
+```
+
+Notice the second line: OCR lost the dot in `example.com`. Its `confidence` is noticeably lower than the clean lines around it. That number says how sure OCR is about the characters, not whether the text is private.
+
+Notice too that each block has a `bbox` of four numbers. They're pixel positions in the image; we'll use them in lesson 5.
+
+## 4. Run it again
+
+```bash
+npm run qvac:ocr-smoke
+```
+
+This time nothing downloads. The output ends with `stats`, something like:
+
+```json
+"stats": {
+  "detectionTime": 18.1,
+  "recognitionTime": 1.1,
+  "totalTime": 19.2
+}
+```
+
+The times are in seconds. Finding where the text is takes most of it; reading the characters is fast. Expect roughly 20 seconds per page on a recent laptop.
+
+Look in `redact/.qvac/models`: two files, `…craft_mlt_25k.gguf` (the detector) and `…latin_g2.gguf` (the recognizer).
+
+## 5. Check your work
+
+```bash
+npm test -- qvac-service/local-config.test.ts
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The full `npm test` reports `Tests  35 passed (35)`. These tests don't run the model; the smoke run in step 2 is your proof that inference works.
+
+Record the checkpoint from the parent folder:
+
+```bash
+cd ..
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 02: read a page with local OCR"
+```
+
+## What we built
+
+A model ran on our own machine and turned an image into text with positions, and we watched it download once and then work from the local cache. Every AI feature in Redact starts from this evidence.
+
+- Every file in this checkpoint: [`redact/` at `731eb40`](https://github.com/danielAsaboro/bring-ai-home/tree/731eb40b3f1e31aa214e83b3714d9171ed3443d8/redact)
+- [About local OCR](/docs/redact/concepts/local-ocr) and QVAC's [OCR documentation](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/)
+- Where those model files live: [Where QVAC writes files](/docs/qvac/where-qvac-writes-files)
+
+Next: [03. Start the local QVAC service](/docs/redact/tutorials/03-local-service)

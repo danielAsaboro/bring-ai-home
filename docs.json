@@ -45,6 +45,14 @@
             "pages": [
               "docs/leash/overview"
             ]
+          },
+          {
+            "group": "QVAC notes",
+            "pages": [
+              "docs/qvac/structured-output",
+              "docs/qvac/ocr-geometry",
+              "docs/qvac/where-qvac-writes-files"
+            ]
           }
         ]
       },
@@ -55,28 +63,69 @@
           {
             "group": "Start",
             "pages": [
-              "docs/redact/overview"
+              "docs/redact/overview",
+              "docs/redact/tutorials/00-use-redact"
             ]
           },
           {
             "group": "Build it",
             "pages": [
-              "docs/redact/01-starter",
-              "docs/redact/02-first-ocr",
-              "docs/redact/03-local-service",
-              "docs/redact/04-connect-ocr",
-              "docs/redact/05-coordinate-mapping",
-              "docs/redact/06-sensitive-suggestions",
-              "docs/redact/07-human-review",
-              "docs/redact/08-failure-recovery",
-              "docs/redact/09-evaluation",
-              "docs/redact/10-offline-proof"
+              "docs/redact/tutorials/01-starter",
+              "docs/redact/tutorials/02-first-ocr",
+              "docs/redact/tutorials/03-local-service",
+              "docs/redact/tutorials/04-connect-ocr",
+              "docs/redact/tutorials/05-coordinates",
+              "docs/redact/tutorials/06-suggestions",
+              "docs/redact/tutorials/07-review",
+              "docs/redact/tutorials/08-failure-recovery",
+              "docs/redact/tutorials/09-evaluation",
+              "docs/redact/tutorials/10-offline"
             ]
           },
           {
-            "group": "Help",
+            "group": "How-to guides",
             "pages": [
-              "docs/redact/troubleshooting"
+              "docs/redact/how-to/install-and-run",
+              "docs/redact/how-to/download-models",
+              "docs/redact/how-to/run-offline",
+              "docs/redact/how-to/redact-a-multipage-pdf",
+              "docs/redact/how-to/use-a-larger-model",
+              "docs/redact/how-to/add-a-label",
+              "docs/redact/how-to/add-an-evaluation-case",
+              "docs/redact/how-to/change-the-port",
+              "docs/redact/how-to/run-the-tests",
+              "docs/redact/how-to/clear-model-cache",
+              "docs/redact/how-to/upgrade-the-sdk",
+              "docs/redact/how-to/troubleshooting"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "docs/redact/reference/commands",
+              "docs/redact/reference/environment",
+              "docs/redact/reference/service-api",
+              "docs/redact/reference/models",
+              "docs/redact/reference/labels",
+              "docs/redact/reference/file-limits",
+              "docs/redact/reference/evaluation",
+              "docs/redact/reference/checkpoints",
+              "docs/redact/reference/requirements"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "docs/redact/concepts/trust-boundary",
+              "docs/redact/concepts/local-inference",
+              "docs/redact/concepts/local-ocr",
+              "docs/redact/concepts/grounded-suggestions",
+              "docs/redact/concepts/models-and-offline",
+              "docs/redact/concepts/model-size",
+              "docs/redact/concepts/flattened-copies",
+              "docs/redact/concepts/measuring-suggestions",
+              "docs/redact/concepts/threat-model",
+              "docs/redact/concepts/local-service"
             ]
           }
         ]
@@ -332,5 +381,51 @@
       "label": "Start learning",
       "href": "/docs/start-here/how-it-works"
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/docs/redact/01-starter",
+      "destination": "/docs/redact/tutorials/01-starter"
+    },
+    {
+      "source": "/docs/redact/02-first-ocr",
+      "destination": "/docs/redact/tutorials/02-first-ocr"
+    },
+    {
+      "source": "/docs/redact/03-local-service",
+      "destination": "/docs/redact/tutorials/03-local-service"
+    },
+    {
+      "source": "/docs/redact/04-connect-ocr",
+      "destination": "/docs/redact/tutorials/04-connect-ocr"
+    },
+    {
+      "source": "/docs/redact/05-coordinate-mapping",
+      "destination": "/docs/redact/tutorials/05-coordinates"
+    },
+    {
+      "source": "/docs/redact/06-sensitive-suggestions",
+      "destination": "/docs/redact/tutorials/06-suggestions"
+    },
+    {
+      "source": "/docs/redact/07-human-review",
+      "destination": "/docs/redact/tutorials/07-review"
+    },
+    {
+      "source": "/docs/redact/08-failure-recovery",
+      "destination": "/docs/redact/tutorials/08-failure-recovery"
+    },
+    {
+      "source": "/docs/redact/09-evaluation",
+      "destination": "/docs/redact/tutorials/09-evaluation"
+    },
+    {
+      "source": "/docs/redact/10-offline-proof",
+      "destination": "/docs/redact/tutorials/10-offline"
+    },
+    {
+      "source": "/docs/redact/troubleshooting",
+      "destination": "/docs/redact/how-to/troubleshooting"
+    }
+  ]
 }

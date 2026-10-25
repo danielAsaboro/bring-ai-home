@@ -1,0 +1,47 @@
+---
+title: "Environment variables and files"
+description: "Variables Redact reads, variables it sets, and what it writes to disk."
+---
+
+## Variables you can set
+
+| Variable | Read by | Default | Effect |
+|---|---|---|---|
+| `REDACT_QVAC_PORT` | `qvac-service/index.ts` | `4317` | Port the service listens on |
+| `NEXT_PUBLIC_REDACT_QVAC_URL` | `src/features/redact/analysis-client.ts` | `http://127.0.0.1:4317` | Service URL the browser calls. Read at build time. |
+| `REDACT_BASE_URL` | `playwright.config.ts` | `http://localhost:3101` | App URL for browser tests |
+| `REDACT_LIVE_QVAC` | `e2e/offline-qvac-workflow.spec.ts` | unset | `1` enables the live QVAC browser test |
+| `REDACT_EVALUATION_CASE` | `qvac-service/evaluation-cli.ts` | unset | Runs one case: `chat-clear`, `chat-rotated`, `chat-low-contrast`, or `chat-partially-obscured` |
+
+## Variables Redact sets
+
+Each QVAC entry point sets these inside its own process before importing `@qvac/sdk`.
+
+| Variable | Set to | Set by |
+|---|---|---|
+| `QVAC_CONFIG_PATH` | `redact/.qvac/config.json` | `index.ts`, `ocr-smoke.mjs`, `evaluation-cli.ts`, `offline-cli.ts` |
+| `SNAP_USER_COMMON` | `redact/.qvac/runtime-home` | `index.ts`, `evaluation-cli.ts`, `offline-cli.ts` |
+
+See [Where QVAC writes files](/docs/qvac/where-qvac-writes-files).
+
+## Files written
+
+```text
+redact/
+├── .qvac/                        ignored by Git
+│   ├── config.json               { "cacheDirectory": ".../.qvac/models" }
+│   ├── models/                   model weights, about 480 MB when both are cached
+│   └── runtime-home/.qvac/
+│       ├── registry-corestore/
+│       └── tmp/
+├── .next/                        ignored by Git
+├── test-results/                 Playwright output, ignored by Git
+└── node_modules/                 2.8 GB, ignored by Git
+```
+
+Redact never writes to the file you upload. Saved copies go wherever the browser saves downloads.
+
+## Related
+
+- [Commands](/docs/redact/reference/commands)
+- [How to clear the model cache](/docs/redact/how-to/clear-model-cache)

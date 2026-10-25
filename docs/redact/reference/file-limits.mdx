@@ -1,0 +1,35 @@
+---
+title: "File limits"
+description: "What Redact accepts, how it prepares pages, and what it saves."
+---
+
+Defined in `src/features/redact/file-policy.ts`, `rasterize.ts` and `safe-copy.ts`.
+
+## Input
+
+| Rule | Value | Message when broken |
+|---|---|---|
+| Types | PNG, JPEG, PDF | Choose a PNG, JPEG, or PDF file |
+| Size | 1 byte to 25 MB | File cannot be empty / File must be 25 MB or smaller |
+| PDF pages | 1 to 25 | PDFs must contain 25 pages or fewer |
+| Encrypted PDF | Not accepted | Choose an unlocked PDF |
+| Unreadable PDF | Not accepted | This PDF could not be read |
+| Additional direction | Up to 500 characters | Additional direction must be 500 characters or fewer |
+
+## Prepared pages
+
+Every page is rasterized to a PNG whose long edge is at most 2400 px. OCR boxes, marks and the saved copy all use these pixels. Each page is one request to the local service.
+
+## Output
+
+| Source | Saved as | Name |
+|---|---|---|
+| PNG or JPEG | PNG | `<name>.redacted.png` |
+| PDF | PDF with one image per page, no text layer | `<name>.redacted.pdf` |
+
+The uploaded file is never modified. A single-page result can also be copied to the clipboard as PNG.
+
+## Related
+
+- [About flattened copies](/docs/redact/concepts/flattened-copies)
+- [How to redact a multi-page PDF](/docs/redact/how-to/redact-a-multipage-pdf)

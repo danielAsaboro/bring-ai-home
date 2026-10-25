@@ -1,0 +1,39 @@
+---
+title: "About grounded suggestions"
+description: "How Redact asks a small local model which text is sensitive without letting it invent anything."
+---
+
+After OCR, Redact has a list of text blocks with positions. The next question is which of them are sensitive. Redact asks a local language model, Qwen3 0.6B, and then refuses to believe anything the model says that the page itself doesn't support. That second half is what "grounded" means here.
+
+## The model chooses blocks, not text
+
+The model never writes the text to redact or the rectangle to draw. It receives a numbered list of OCR blocks and returns, for each block it considers sensitive, a `blockIndex`, a `label`, a short explanation and a confidence. The rectangle always comes from OCR; the text always comes from OCR. The model can only point.
+
+This removes a whole class of failure. A model that writes text can hallucinate a phone number that isn't on the page. A model that points can only point at something that is there.
+
+## A schema the model can't break
+
+The request uses QVAC structured output: `responseFormat` with a JSON Schema listing the eleven labels as an enum, `blockIndex` as a non-negative integer and confidence between 0 and 1 ([Structured output](/docs/qvac/structured-output)). The grammar makes the reply parse every time.
+
+Shape isn't truth, so three more checks follow. The reply is parsed with Zod. If any `blockIndex` doesn't exist, or the same block appears twice, the whole run fails as "invalid candidates" instead of guessing which part to keep. Then each surviving candidate goes through `validateCandidateForEvidence`.
+
+## Rules get the last word on labels
+
+`validateCandidateForEvidence` re-derives the label from the block's text with plain rules: an `@` makes it an email, "account" plus digits makes it an account, a house number plus "Road" makes it an address, and so on. For most labels the model's choice is simply replaced by what the rule finds. A model `name` is kept only if the text looks like two to four capitalised words. Anything no rule supports is dropped, except the explicit `other` label. The test document's disclaimer lines are always dropped. The model's free-text explanation is replaced by a fixed sentence per label, so a reviewer never reads invented reasoning.
+
+This is a strong position: the model mostly decides *which blocks deserve attention*, and deterministic code decides *what kind of thing they are*. It keeps a 0.6B model useful. The cost is reach: a sensitive value no rule recognises, such as a name in lowercase, is dropped even if the model was right. That is the trade Redact makes, because a wrong label shown with confidence misleads a reviewer more than a missing one.
+
+## The direction box is data
+
+The person can type extra direction, up to 500 characters, such as "also cover reference codes". It goes into the prompt as a field of the user message, and the system prompt says it is untrusted policy data that may not change the schema or invent evidence. Direction can change what the model selects, so two people analysing the same page with different directions can see different proposals. The rules above still apply to everything it selects.
+
+## Repeatable by design
+
+The reasoner runs with `temp: 0` and `seed: 42`. Without that, the same page produced different suggestions on different runs, and the evaluation gate failed one run in three. A reviewer who re-runs analysis should see the same proposals.
+
+## Related
+
+- [Lesson 6: Ask a local model which fields are sensitive](/docs/redact/tutorials/06-suggestions)
+- [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/) (QVAC)
+- [Labels and privacy levels](/docs/redact/reference/labels)
+- [How to add a sensitive-field label](/docs/redact/how-to/add-a-label)

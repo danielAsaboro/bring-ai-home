@@ -1,86 +1,46 @@
 ---
-title: "Build Redact with local AI"
-description: "A hands-on written course from a working manual starter to reviewable, local OCR and sensitive-field suggestions."
+title: "Redact"
+description: "Share a screenshot or PDF without its private details. Local OCR and a local language model suggest what to cover; you decide."
 ---
 
-You have a screenshot or PDF to share. It contains a name, address, phone number, or account identifier. Redact helps you review those details, cover the ones you choose, and create a separate flattened copy.
-
-We will start with a working manual Redact application and add local intelligence in small, verifiable steps. By the end, the app will read its prepared page images with QVAC, propose sensitive fields, ask you to accept or reject each proposal, and keep manual editing available when inference fails.
-
-<CardGroup cols={2}>
-  <Card title="Begin with the starter" icon="play" href="/docs/redact/01-starter">
-    Run the app and save your first manually redacted copy.
-  </Card>
-  <Card title="Download the starter" icon="download" href="/docs/downloads/redact/redact-starter.zip">
-    A pinned source package with its lockfile and fictional test documents.
-  </Card>
-</CardGroup>
-
-## The starting point
-
-The starter is the completed **non-AI Redact product**, matching the starting point of the existing video series. It already has upload, configuration, rasterization, manual drawing and editing, preview, and flattened export. This course teaches how to build the local-AI Redact workflow from that template. It does not teach creating its interface from an empty Next.js project.
-
-A proposal is never automatically an output mask. QVAC provides evidence and candidates; only a human decision creates an accepted mark.
+You have a screenshot or PDF to share, and it contains a name, an address, a phone number, or an account number. Redact reads the page on your own machine with [QVAC](https://docs.qvac.tether.io/), suggests what to cover, and lets you accept or reject every suggestion before it saves a separate, flattened copy. Nothing is uploaded, and the original file is never changed.
 
 ```mermaid
 flowchart LR
-  A[Uploaded source] --> B[Prepared PNG pages]
+  A[Your file] --> B[Page images]
   B --> C[Local OCR]
-  C --> D[Grounded suggestions]
-  D --> E[Human review]
+  C --> D[Local model suggests fields]
+  D --> E[You accept or reject]
   B --> E
-  E --> F[Accepted and manual marks]
-  F --> G[New flattened copy]
+  E --> F[New flattened copy]
 ```
 
-## What you need
+<CardGroup cols={2}>
+  <Card title="Use Redact" icon="play" href="/docs/redact/tutorials/00-use-redact">
+    Run the finished app and redact your first document with local AI.
+  </Card>
+  <Card title="Build Redact" icon="hammer" href="/docs/redact/tutorials/01-starter">
+    Ten lessons, from a manual app to local OCR, suggestions, review and an offline proof.
+  </Card>
+</CardGroup>
 
-- Familiarity with React, TypeScript, npm, and editing source files.
-- Git and Node.js **22.17 or newer**.
-- A development machine able to run the pinned QVAC native dependencies and models. Check the [QVAC documentation](https://docs.qvac.tether.io/) for support on your hardware.
-- Internet access for initial dependency and model downloads. Cached inference and network denial are separate later exercises.
-- macOS with `sandbox-exec` for Chapter 10's supplied process policy. Earlier chapters do not use that policy.
-- Space and memory for the native runtime and local models. This course does not promise a universal resource requirement or inference time.
+## What's here
 
-Use the supplied fictional documents throughout. They let us deliberately accept, reject, and miss fields without putting someone's real records at risk.
+| Section | Use it when |
+|---|---|
+| **Tutorials** | You're new and want to learn by doing, one lesson at a time. |
+| **How-to guides** | You know the app and want to get a specific job done. |
+| **Reference** | You need an exact command, setting, limit or error code. |
+| **Concepts** | You want to understand why Redact works the way it does. |
 
-## The course path
+## Before you start
 
-| Chapter | You build | You observe |
-| --- | --- | --- |
-| [1. Starter](/docs/redact/01-starter) | A baseline you can run and inspect | A separate manually redacted PNG and PDF |
-| [2. First OCR](/docs/redact/02-first-ocr) | One standalone local model operation | Source-bound text and geometry |
-| [3. Local service](/docs/redact/03-local-service) | A typed and runtime-validated bridge | Honest readiness and unavailability |
-| [4. Connect OCR](/docs/redact/04-connect-ocr) | Uploaded page bytes through real inference | Evidence plus manual fallback |
-| [5. Coordinates](/docs/redact/05-coordinate-mapping) | One geometry conversion boundary | Outlines aligned to the analyzed pixels |
-| [6. Suggestions](/docs/redact/06-sensitive-suggestions) | Grounded structured reasoning | Reviewable sensitive-field proposals |
-| [7. Review](/docs/redact/07-human-review) | Accept, Reject, audit, and final guards | Human decisions becoming ordinary marks |
-| [8. Failure recovery](/docs/redact/08-failure-recovery) | Timeout, cancellation, retry, and slot ownership | A usable document even when analysis fails |
-| [9. Evaluation](/docs/redact/09-evaluation) | Four labelled cases and quality gates | Matches, misses, geometry, and performance |
-| [10. Offline proof](/docs/redact/10-offline-proof) | Cached process-constrained inference and browser checks | A reviewed download with explicit proof limits |
+- Node.js 22.17 or newer, Git, and about 4 GB of free disk.
+- An internet connection for the first run, which downloads about 480 MB of models. After that, Redact runs offline.
+- macOS (Apple Silicon), Linux or Windows supported by QVAC. The lessons were tested on macOS; the offline proof in lesson 10 needs macOS.
 
-## How to use the implementation material
+Full details: [Requirements](/docs/redact/reference/requirements).
 
-Every chapter states the source checkpoint, explains the code in implementation order, supplies complete key files, and provides a patch containing all of its changes, including UI wiring, tests, and lockfile updates.
+## Versions
 
-Read and apply the patch, then trace the implementation and run the exercises. If you prefer writing the changes yourself, use the complete files and patch as your reference instead. Do not apply the same patch on top of your own equivalent edits.
-
-The starter ZIP needs no access to a private Git repository. Chapter 1 initializes local history. Follow chapters in order and commit each successful checkpoint. The [download manifest](/docs/downloads/redact/manifest.json) records full source commit identifiers and SHA-256 hashes for the downloadable packages and patches.
-
-The [completed course source](/docs/downloads/redact/redact-completed.zip) is a separate reference download. Extract it into a different directory if you need to compare your work; do not overwrite your exercise directory.
-
-## Versions are part of the lesson
-
-These chapters follow the ten historical commits on `course/redact-qvac`, from `0eecfb4` to `a22cd5f`, using **`@qvac/sdk` 0.17.1**. The later release checkout uses SDK 0.20.0 and has additional changes. Those release changes are outside this pinned course.
-
-Use each checkpoint's lockfile. If you change a runtime version, treat that as a separate migration and rerun its real inference and product checks. A current API example is not automatically compatible with the historical implementation.
-
-## What counts as success
-
-A deterministic test can verify a contract without invoking a model. A live OCR receipt proves that inference ran on that input. A browser exercise proves an interaction path. Inspecting the exported file checks what another person will actually receive.
-
-We use each level where it is needed. A green docs build, a skipped browser test, a warmed cache, or a covered preview cannot substitute for the others.
-
-Historical video measurements describe earlier runs. They are context, not benchmark targets or claims that this written course was rerun with live QVAC today. Record your own model-backed receipts.
-
-Begin with [Chapter 1: Run the Redact starter](/docs/redact/01-starter).
+Everything here uses **`@qvac/sdk` 0.22.0** on branch [`course/redact-qvac-v2`](https://github.com/danielAsaboro/bring-ai-home/tree/course/redact-qvac-v2/redact). Each lesson is one commit on that branch. The matching QVAC documentation is the [current SDK docs](https://docs.qvac.tether.io/sdk/).

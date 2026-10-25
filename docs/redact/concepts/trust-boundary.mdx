@@ -1,0 +1,45 @@
+---
+title: "About Redact's trust boundary"
+description: "Why a local model in Redact can suggest a redaction but can never make one."
+---
+
+Redact has one rule that shapes everything else: a model's output is evidence for a person to judge, never a decision. Nothing QVAC returns becomes a black box on the saved copy until someone clicks **Accept**.
+
+## Why not let the model redact?
+
+The tempting design is to run OCR, ask a model which lines are sensitive, and paint over them. It feels finished. It is also the design most likely to leak something.
+
+A local 0.6-billion-parameter model misses things. On Redact's labelled test pages it scores between 0.91 and 1.0 F1, which sounds high until you remember what the misses are: an account number left readable on a document you thought was clean. A model also over-reaches, covering a greeting like "Got it" as a name. If the model writes the output directly, both kinds of error ship silently.
+
+Putting a person between the suggestion and the output changes what an error costs. A miss is something the reviewer can still see and cover by hand. A false suggestion is one click on **Reject**. The model saves effort; it doesn't carry responsibility.
+
+## How the boundary shows up in the code
+
+Suggestions and marks are different types. A suggestion is a `candidate` with a status of `proposed`, `accepted` or `rejected`. A mark is what the flattener paints, and it has a `source` of either `manual` or `accepted`. The only path from one to the other is `acceptCandidate`, which creates a new mark and writes an audit entry. There is no function that turns all proposals into marks at once.
+
+`finishReview` refuses to finish while any candidate is still `proposed`, so **Done** stays disabled until every suggestion has a human answer. Removing an accepted mark flips its candidate to `rejected` rather than back to `proposed`, so the record of what was decided stays honest.
+
+The audit list shows every upload, accept, reject, manual mark and removal with a time. It isn't a security log; it exists so the person reviewing can see what they did before they share the result.
+
+## The same boundary at every layer
+
+The rule repeats wherever data crosses from something less trusted to something more trusted:
+
+- The browser validates the service's JSON with Zod before showing anything.
+- The service validates the browser's request: a real PNG, the stated dimensions, under 20 MB.
+- The reasoner treats the user's typed direction as *policy data* inside the prompt, not as an instruction that may change the schema.
+- Each model candidate is re-checked against the OCR text it points to, and its label is re-derived by rules ([About grounded suggestions](/docs/redact/concepts/grounded-suggestions)).
+
+Each check is small. Together they mean no single component, including the model, can put a mark on the output by itself.
+
+## The cost
+
+This design is slower than automatic redaction. A ten-field page means ten decisions. For a person sharing one passport scan that is the right trade; for a back office redacting thousands of forms it would not be, and a different product would accept more automation with a sampling-based review instead.
+
+Redact also keeps manual tools fully usable when the model is absent or fails. Analysis is an assistant to the manual workflow, not a gate in front of it ([About the local service](/docs/redact/concepts/local-service)).
+
+## Related
+
+- [Lesson 7: Accept or reject each suggestion](/docs/redact/tutorials/07-review)
+- [About what Redact does not protect](/docs/redact/concepts/threat-model)
+- [Labels and privacy levels](/docs/redact/reference/labels)

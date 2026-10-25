@@ -1,0 +1,40 @@
+---
+title: "About what Redact does not protect"
+description: "The threats Redact is designed for, and the ones it deliberately leaves to other tools."
+---
+
+A redaction tool that claims too much is dangerous, because people stop checking. Redact is designed against a small set of threats and says plainly which ones it doesn't handle.
+
+## What Redact is designed for
+
+The situation is ordinary: someone has a screenshot, scan or PDF to share, and parts of it shouldn't go with it. Redact protects against three things in that situation.
+
+- **Uploading the document to analyse it.** OCR and reasoning run in a local process. The document never goes to a cloud API, and the macOS offline proof shows analysis completing with outbound network denied ([About model downloads, caching and offline use](/docs/redact/concepts/models-and-offline)).
+- **Boxes that only look like redaction.** The saved copy is rebuilt from page images with marks painted in, so covered text can't be selected or uncovered ([About flattened copies](/docs/redact/concepts/flattened-copies)).
+- **A model deciding on its own.** Nothing reaches the output without a person accepting it or drawing it ([About Redact's trust boundary](/docs/redact/concepts/trust-boundary)).
+
+## What it doesn't protect
+
+**Missed fields.** If neither the model nor the reviewer marks something, it ships. The suggestions have measured misses, and the labelled tests cover only six field types in one layout. The reviewer is responsible for the final set of marks.
+
+**Legal-grade redaction.** Redact isn't certified for court filings, regulated health records or freedom-of-information releases. Those come with process requirements, such as logs, second reviewers and exemption codes, that Redact doesn't implement.
+
+**Every metadata channel.** The saved PDF contains only page images and Redact's own producer fields, and PNG output is freshly encoded. Redact doesn't audit every format feature a viewer might add, and makes no claim beyond the bytes it writes.
+
+**The original file.** Redact never modifies the source, which also means the unredacted original is still wherever you got it from. Deleting or protecting it is up to you.
+
+**The screen and the machine.** Malware, a screen recorder, someone looking over your shoulder or a compromised browser extension can see the document during review. Running locally narrows who can see it; it doesn't secure the computer.
+
+**Other local software.** The service listens only on `127.0.0.1` and only accepts browser requests from `http://localhost` or `http://127.0.0.1` origins. Another program on the same machine can still call it directly. On a shared computer that is a real limit.
+
+**Images inside images.** Redact reads printed text. A face, a signature, a QR code or handwriting won't be suggested. Draw those by hand.
+
+## Why say all this
+
+Each limit could be narrowed with more work, and some products do that work. But the most reliable protection a small tool can give is an honest boundary. A reviewer who knows the suggestions can miss looks harder. A reviewer told the tool is complete doesn't.
+
+## Related
+
+- [About Redact's trust boundary](/docs/redact/concepts/trust-boundary)
+- [About the local service](/docs/redact/concepts/local-service)
+- [Labels and privacy levels](/docs/redact/reference/labels)

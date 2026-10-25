@@ -1,0 +1,102 @@
+---
+title: "Local service API"
+description: "Routes, request and response shapes, limits, and errors of Redact's localhost QVAC service."
+---
+
+Defined in `qvac-service/server.ts`; schemas in `src/features/redact/analysis-contract.ts`. Started by `npm run qvac:service`.
+
+## Address
+
+| Item | Value |
+|---|---|
+| Host | `127.0.0.1` only |
+| Port | `4317`, or `REDACT_QVAC_PORT` |
+| Browser base URL | `http://127.0.0.1:4317`, or `NEXT_PUBLIC_REDACT_QVAC_URL` |
+
+## Origins
+
+Requests with an `Origin` header are accepted only from `http://localhost:*` and `http://127.0.0.1:*`. Any other origin gets `403 origin_forbidden`. Requests without an `Origin` header (curl, scripts) are accepted.
+
+`OPTIONS` returns `204` with `access-control-allow-methods: GET, POST, OPTIONS` and `access-control-allow-headers: content-type, accept`.
+
+## `GET /health`
+
+```json
+{
+  "service": "ready",
+  "busy": false,
+  "models": [
+    { "kind": "ocr", "id": "qvac-ocr-latin", "state": "ready" },
+    { "kind": "reasoning", "id": "qwen3-600m-instruct-q4", "state": "not_loaded" }
+  ]
+}
+```
+
+| Field | Values |
+|---|---|
+| `service` | `ready`, `error` |
+| `busy` | `true` while an analysis is running |
+| `models[].kind` | `ocr`, `reasoning` |
+| `models[].state` | `not_loaded`, `loading`, `ready`, `error` |
+
+Models load on the first analysis, not at startup.
+
+## `POST /v1/analyze-page`
+
+`Content-Type: application/json`. One page per request.
+
+### Request
+
+| Field | Type | Rule |
+|---|---|---|
+| `documentId` | string | non-empty |
+| `pageId` | string | non-empty |
+| `pageNumber` | integer | ≥ 1 |
+| `width`, `height` | integer | ≥ 1; must equal the PNG's pixel size |
+| `pngBase64` | string | base64 PNG, canonical encoding |
+| `level` | string | `private` or `confidential` |
+| `direction` | string | ≤ 500 characters |
+
+### Response `200`
+
+| Field | Content |
+|---|---|
+| `run` | `id`, `documentId`, `status` (`ready`, `unavailable`, `error`), `startedAt`, `completedAt`, `ocrModel`, `ocrMs`, `reasoningModel`, `reasoningMs`, `error` |
+| `page` | `id`, `number`, `width`, `height` |
+| `ocrBlocks[]` | `text`, `bbox` `[x1, y1, x2, y2]` in page pixels, `confidence` (0–1 or `null`) |
+| `candidates[]` | `blockIndex` (into `ocrBlocks`), `label`, `explanation` (≤ 280 characters), `confidence` (0–1) |
+
+`label` values are listed in [Labels and privacy levels](/docs/redact/reference/labels).
+
+## Errors
+
+Every error body is `{ "error": { "code": string, "message": string } }`.
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `invalid_request` | Body isn't JSON or fails the request schema |
+| 403 | `origin_forbidden` | `Origin` isn't localhost |
+| 404 | `not_found` | Any other route |
+| 405 | `method_not_allowed` | `/v1/analyze-page` with a method other than `POST` |
+| 409 | `busy` | Another analysis is running |
+| 413 | `request_too_large` | Body over 20 MB |
+| 415 | `unsupported_media_type` | `Content-Type` isn't `application/json` |
+| 502 | `invalid_analysis_response` | Analyzer output fails the response schema |
+| 503 | `analyzer_unavailable` | OCR or reasoning failed, including invalid model output |
+| 504 | `analysis_timeout` | No result within 180 s |
+
+## Limits
+
+| Limit | Value |
+|---|---|
+| Concurrent analyses | 1 |
+| Request body | 20 MB |
+| Service timeout | 180 s |
+| Browser request timeout | 190 s |
+
+After a `504`, `busy` stays `true` until the underlying model call finishes.
+
+## Related
+
+- [About the local service](/docs/redact/concepts/local-service)
+- [How to change the service port or URL](/docs/redact/how-to/change-the-port)

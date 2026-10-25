@@ -1,0 +1,105 @@
+---
+title: "04. Send uploaded pages to local OCR"
+description: "We will connect the service to the real OCR model so that a page uploaded in the app is read locally, and check that manual review still works when the service is off."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 04. Send uploaded pages to local OCR" />
+
+In this lesson we will close the loop: a page you upload in the browser goes to the local service, QVAC reads it, and the text comes back into the review screen. Then we'll turn the service off and make sure Redact still works by hand.
+
+**Checkpoint:** [`30293ed`](https://github.com/danielAsaboro/bring-ai-home/commit/30293edcadfb978a69a9e15db2af7ae431e00cef), starting from `242f480`
+
+## 1. Apply the lesson patch
+
+Stop any running app or service. Download [`04-connect-ocr.patch`](/docs/downloads/redact/04-connect-ocr.patch) into your Downloads folder. From the parent `redact-course` folder:
+
+```bash
+git apply --check ~/Downloads/04-connect-ocr.patch
+git apply ~/Downloads/04-connect-ocr.patch
+cd redact
+npm ci
+```
+
+If `--check` reports an error, your previous lesson differs from the checkpoint; don't force it.
+
+## 2. Start the service and the app
+
+In one terminal:
+
+```bash
+npm run qvac:service
+```
+
+Wait for `Redact QVAC service listening on http://127.0.0.1:4317`. In a second terminal, in the same `redact` folder:
+
+```bash
+npm run dev -- --port 3101
+```
+
+Open [http://localhost:3101](http://localhost:3101).
+
+## 3. Upload a page
+
+Choose `public/test-files/redact/chat-private.png`, select **Private**, and select **Prepare for review**.
+
+The screen shows **Preparing locally** with the message **Reading page 1 of 1 locally…**. The OCR model loads from `.qvac/models` (you downloaded it in lesson 2), so this takes about 20–30 seconds.
+
+## 4. See the evidence
+
+The review screen opens. In the right-hand column a new panel reads **12 text regions found locally**, and lists each line with its recognition score, for example `Maya Chen` and `maya.chen@example com`.
+
+Notice what hasn't changed: **Safe-share preview** is still uncovered, and the panel shows no boxes on the page yet. OCR found text; it hasn't decided anything.
+
+Check the service's health from a third terminal:
+
+```bash
+curl http://127.0.0.1:4317/health
+```
+
+The OCR model's `state` is now `ready`.
+
+## 5. Cover something by hand
+
+Drag across `Maya Chen` on **Original**. The mark appears and the preview turns black there, just as in lesson 1. Select **Done**, then **Save copy**, and open the file to confirm.
+
+## 6. Turn the service off
+
+Stop the service with `Ctrl+C` in its terminal. In the app, select **Redact another document**, upload `chat-private.png` again, choose **Private**, and select **Prepare for review**.
+
+The review screen still opens, with the banner **Local analysis is unavailable. Manual review remains available.** There's no OCR panel this time. Draw a mark, select **Done** and **Save copy**: the copy is saved as before.
+
+A missing model never blocks the person using the app.
+
+## 7. Check your work
+
+Stop the dev server, then run:
+
+```bash
+npm test -- qvac-service/qvac-analyzer.test.ts src/features/redact/RedactApp.test.tsx
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The full `npm test` reports `Tests  46 passed (46)`.
+
+Record the checkpoint from the parent folder:
+
+```bash
+cd ..
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 04: send uploaded pages to local OCR"
+```
+
+## What we built
+
+A real end-to-end path from the browser to a local model and back, with the manual workflow intact when that model isn't there. Every page you upload is now read on your own machine.
+
+- Every file in this checkpoint: [`redact/` at `30293ed`](https://github.com/danielAsaboro/bring-ai-home/tree/30293edcadfb978a69a9e15db2af7ae431e00cef/redact)
+- [About running AI on your own machine](/docs/redact/concepts/local-inference)
+- [About the local service](/docs/redact/concepts/local-service)
+
+Next: [05. Line OCR boxes up with the page](/docs/redact/tutorials/05-coordinates)

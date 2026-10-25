@@ -1,0 +1,37 @@
+---
+title: "About model downloads, caching and offline use"
+description: "Why Redact needs the internet once, what it keeps on disk afterwards, and what 'offline' can and can't prove."
+---
+
+"Runs locally" and "works offline" are different claims. Redact makes the first from the start and earns the second only after the models are on disk. Most confusion about local AI comes from mixing the two.
+
+## The first run downloads
+
+`npm ci` installs the QVAC SDK and its native engines, but not model weights. Weights arrive the first time a model is loaded: `loadModel({ modelSrc: OCR_LATIN })` fetches about 95 MB of OCR models, and the first analysis fetches Qwen3 0.6B, about 382 MB. In practice the first page analysed on a new machine takes a minute or two longer than every page after it.
+
+QVAC downloads are resumable and checked against size and checksum metadata. Once complete, a later `loadModel()` with the same constant finds the files in the cache and loads without contacting the registry. QVAC's [Download lifecycle](https://docs.qvac.tether.io/sdk/models/download-lifecycle/) page covers this, including `downloadAsset()` for fetching a model without loading it.
+
+## Why the cache lives in the project
+
+By default QVAC caches under `~/.qvac`, shared by every app on the machine. Redact writes a config file pointing `cacheDirectory` at `redact/.qvac/models`, and sets the worker home to `redact/.qvac/runtime-home` ([Where QVAC writes files](/docs/qvac/where-qvac-writes-files)).
+
+There are three reasons. The models a lesson needs are visible next to the code that uses them. Deleting the folder resets one app without touching others. And a broken shared home can't break Redact: under SDK 0.17, a `~/.qvac` symlink pointing at an unmounted drive was enough to stop the OCR smoke script.
+
+The trade-off is duplication. Two apps that both use Qwen3 0.6B each keep a copy. For a course where each app should be self-contained, that is acceptable; a product shipping several QVAC features would rather share one cache.
+
+## What "offline" means here
+
+After both models are cached, analysis needs no network. Redact proves that on macOS by running the service, or a one-shot analysis, under `sandbox-exec` with a policy that denies outbound TCP and UDP except to localhost. The proof script first tries to reach `https://example.invalid` and refuses to continue unless the sandbox blocks it. It also refuses to start if the cache is incomplete, rather than letting a missing model turn into a confusing network error.
+
+A passing run shows that *this process* produced OCR blocks and suggestions while unable to reach the network. It does not show that the browser made no requests, which is why Lesson 10's browser test separately fails on any request to a non-local host. It doesn't prove anything about other operating systems either: `sandbox-exec` exists only on macOS, and Linux or Windows readers need their own way to deny network, such as a network namespace or a firewall rule.
+
+## The alternative
+
+An app could bundle model weights in its installer and never download at all. That makes the first run predictable but the install much larger, and every model update a new release. Redact downloads on first use because it is a course: the download is a step the reader should see and understand.
+
+## Related
+
+- [How to download the models before going offline](/docs/redact/how-to/download-models)
+- [How to run Redact with the network blocked](/docs/redact/how-to/run-offline)
+- [Lesson 10: Run Redact with the network off](/docs/redact/tutorials/10-offline)
+- [Configuration](https://docs.qvac.tether.io/sdk/configuration/) (QVAC)

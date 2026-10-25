@@ -1,0 +1,46 @@
+---
+title: "How to download the models before going offline"
+description: "Fill Redact's local model cache while you still have a network connection."
+---
+
+This guide fills `.qvac/models` with both models Redact needs, so later runs work without a network. Do it once per checkout, online.
+
+## Download the OCR model
+
+From the `redact` directory:
+
+```bash
+npm run qvac:ocr-smoke
+```
+
+This reads `public/test-files/redact/chat-private.png` and prints JSON with `blocks` and `stats`. The OCR files (about 95 MB) land in `.qvac/models`.
+
+## Download the reasoning model
+
+The Qwen3 0.6B model (about 382 MB) loads on the first full analysis. Run one:
+
+1. Start the service: `npm run qvac:service`.
+2. Start the app: `npm run dev -- --port 3101`.
+3. Analyse any test file in the browser and wait for **Suggested redactions**.
+
+Alternatively, with no app running:
+
+```bash
+npm run qvac:evaluate
+```
+
+This loads both models and runs the four labelled cases.
+
+## Check the cache
+
+```bash
+ls .qvac/models
+```
+
+You should see three files: one containing `craft`, one containing `latin`, and one containing `Qwen3`. The offline commands refuse to start until all three are present.
+
+## Next
+
+- [How to run Redact with the network blocked](/docs/redact/how-to/run-offline)
+- [Where QVAC writes files](/docs/qvac/where-qvac-writes-files)
+- [Download lifecycle](https://docs.qvac.tether.io/sdk/models/download-lifecycle/) (QVAC)

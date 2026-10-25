@@ -1,0 +1,109 @@
+---
+title: "06. Ask a local model which fields are sensitive"
+description: "We will add a second local model that reads the OCR text and nominates which blocks to cover, then watch its suggestions appear beside the document."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 06. Ask a local model which fields are sensitive" />
+
+In this lesson we will add a small language model, Qwen3 0.6B, that runs on your machine, reads the text OCR found, and suggests which blocks are sensitive. By the end, the review screen lists six suggestions for the fictional chat, each tied to text that is really on the page.
+
+**Checkpoint:** [`4e3987d`](https://github.com/danielAsaboro/bring-ai-home/commit/4e3987d07a230b0c88a7ab3574d31e5e6f25db0c), starting from `bcfd046`
+
+## 1. Apply the lesson's changes
+
+Download [`06-sensitive-suggestions.patch`](/docs/downloads/redact/06-sensitive-suggestions.patch) into your Downloads folder. Stop the app and the service, then from the parent `redact-course` folder:
+
+```bash
+git apply --check ~/Downloads/06-sensitive-suggestions.patch
+git apply ~/Downloads/06-sensitive-suggestions.patch
+cd redact
+npm ci
+```
+
+`--check` prints nothing when the patch fits. If it reports an error, your folder doesn't match lesson 05's checkpoint; fix that before going on.
+
+## 2. Look at what the model may answer
+
+Open `qvac-service/reasoning.ts` and find `CANDIDATE_JSON_SCHEMA`. Notice that a suggestion is only a `blockIndex`, a `label` from a fixed list of eleven, an `explanation` and a `confidence`. The model can point at a block OCR already found; it can't invent text or coordinates.
+
+Further down, the `completion()` call passes `responseFormat: { type: "json_schema", ... }` and `generationParams: { temp: 0, seed: 42 }`. The first forces the answer into that shape ([Structured output](/docs/qvac/structured-output)); the second makes the same page give the same answer every time.
+
+## 3. Start the service and the app
+
+In one terminal:
+
+```bash
+npm run qvac:service
+```
+
+You should see `Redact QVAC service listening on http://127.0.0.1:4317`. In a second terminal:
+
+```bash
+npm run dev -- --port 3101
+```
+
+## 4. Run the two-model analysis
+
+Open [http://localhost:3101](http://localhost:3101) and upload `public/test-files/redact/chat-private.png`. Choose **Private** and type this in **Additional direction**:
+
+```text
+Redact direct identifiers, account numbers, and reference codes.
+```
+
+Select **Prepare for review**. This first run also downloads the reasoning model, `Qwen3-0.6B-Q4_0.gguf` (382 MB), into `.qvac/models`, so give it a minute or two.
+
+## 5. Read the suggestions
+
+The review screen now has a **Suggested redactions** panel headed **6 suggested redactions**. You should see:
+
+| Label | Text |
+|---|---|
+| name | Maya Chen |
+| email | maya.chen@example com |
+| address | Please send the contract to 18 Willow Road. |
+| phone | phone is +1 415 555 0184. |
+| account | will use account 8841 0932 |
+| reference | and reference APOLLO-4471 |
+
+Each card shows a sensitivity percentage: about 93% for the name, 97% for the account, 69% for the reference. That number is the model's own score, not a probability. Notice that "My", "Got it." and "Thanks" are on the page but not suggested, and that "keep the amount confidential." isn't suggested either: amounts belong to the **Confidential** level, not **Private**.
+
+The direction text matters. Change it, or leave it empty, and prepare the page again: the list can change. Run it twice with the same settings, and the list stays the same.
+
+At this checkpoint the suggestions are only shown. They don't cover anything yet; that comes in the next lesson.
+
+## 6. Run the checks
+
+Stop both terminals, then run the lesson's tests:
+
+```bash
+npm test -- qvac-service/reasoning.test.ts qvac-service/candidate-validation.test.ts
+```
+
+Then the full checks, one at a time:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+`npm test` should end with `Tests  68 passed (68)`. Record the checkpoint from the parent folder:
+
+```bash
+cd ..
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 06: ask a local model which fields are sensitive"
+```
+
+## What we built
+
+A second local model that reads OCR text and nominates sensitive blocks, constrained to a fixed schema and checked against the page's own text before anything reaches the screen. Every suggestion is still just a proposal.
+
+- Every file in this checkpoint: [`redact/` at `4e3987d`](https://github.com/danielAsaboro/bring-ai-home/tree/4e3987d07a230b0c88a7ab3574d31e5e6f25db0c/redact)
+- Why suggestions are re-checked against OCR text: [About grounded suggestions](/docs/redact/concepts/grounded-suggestions)
+- QVAC: [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/)
+
+Next: [07. Accept or reject each suggestion](/docs/redact/tutorials/07-review)

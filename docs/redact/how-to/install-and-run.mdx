@@ -1,0 +1,57 @@
+---
+title: "How to install and run Redact with local AI"
+description: "Get the finished Redact app and its local QVAC service running on your machine."
+---
+
+This guide gets the finished app running with local OCR and suggestions. If you want to build it lesson by lesson instead, start with [the tutorials](/docs/redact/tutorials/01-starter).
+
+Check [requirements](/docs/redact/reference/requirements) first: Node 22.17 or newer, about 4 GB of free disk, and network access for the first run.
+
+## Get the code
+
+```bash
+git clone --branch course/redact-qvac-v2 https://github.com/danielAsaboro/bring-ai-home redact-app
+cd redact-app/redact
+npm ci
+```
+
+`npm ci` takes about 3 minutes and writes about 2.8 GB to `node_modules`.
+
+## Start the local service
+
+In one terminal:
+
+```bash
+npm run qvac:service
+```
+
+Wait for `Redact QVAC service listening on http://127.0.0.1:4317`. Models are not loaded yet; they load on the first analysis.
+
+If port 4317 is taken, see [How to change the port](/docs/redact/how-to/change-the-port).
+
+## Start the app
+
+In a second terminal, from the same `redact` directory:
+
+```bash
+npm run dev -- --port 3101
+```
+
+Open `http://localhost:3101`.
+
+## Run the first analysis
+
+1. Choose a file, for example `public/test-files/redact/chat-private.png`.
+2. Pick **Private** or **Confidential**.
+3. Optionally fill **Additional direction**, for example `Redact direct identifiers, account numbers, and reference codes.` What you write here changes which fields are suggested.
+4. Select **Prepare for review**.
+
+The first analysis downloads about 480 MB of models into `.qvac/models` and takes 1–1.5 minutes. Later analyses reuse the cache; OCR then takes roughly 20–30 seconds per page.
+
+If analysis fails or the service isn't running, the review screen still opens and you can mark the document by hand.
+
+## Next
+
+- [How to download the models before going offline](/docs/redact/how-to/download-models)
+- [Commands reference](/docs/redact/reference/commands)
+- [Troubleshooting](/docs/redact/how-to/troubleshooting)

@@ -1,0 +1,46 @@
+---
+title: "How to clear the model cache and free disk space"
+description: "Remove Redact's downloaded models, worker state and dependencies."
+---
+
+This guide frees the space Redact uses. Nothing here touches your documents or source code. Stop `qvac:service` and any running analysis first.
+
+## What uses the space
+
+| Path (inside `redact/`) | Size | Recreated by |
+|---|---|---|
+| `node_modules/` | about 2.8 GB | `npm ci` |
+| `.qvac/models/` | about 480 MB | the next analysis, `qvac:ocr-smoke` or `qvac:evaluate` (needs network) |
+| `.qvac/runtime-home/` | small | the next service start |
+| `.next/` | varies | `npm run dev` or `npm run build` |
+
+All four are ignored by Git.
+
+## Remove the models only
+
+```bash
+rm -rf .qvac/models
+```
+
+The next analysis downloads them again. The offline commands refuse to run until you [download them](/docs/redact/how-to/download-models) again.
+
+## Reset QVAC's worker state
+
+If loads fail after an interrupted download, remove the worker home too:
+
+```bash
+rm -rf .qvac/runtime-home
+```
+
+## Remove everything Redact installed
+
+```bash
+rm -rf node_modules .qvac .next
+```
+
+Models always go to `.qvac/models`, so this removes everything Redact downloaded. The service and the offline commands also keep QVAC's worker state inside the project. `npm run qvac:ocr-smoke` does not set a project worker home, so its worker state goes to the default `~/.qvac`; see [Where QVAC writes files](/docs/qvac/where-qvac-writes-files).
+
+## Related
+
+- [Where QVAC writes files](/docs/qvac/where-qvac-writes-files)
+- [Requirements](/docs/redact/reference/requirements)

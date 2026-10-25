@@ -1,0 +1,117 @@
+---
+title: "05. Line OCR boxes up with the page"
+description: "We will convert OCR's pixel boxes into the editor's percentage boxes, work one out by hand, and see the outlines land exactly on the text."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 05. Line OCR boxes up with the page" />
+
+In this lesson we will draw OCR's findings on the page. OCR returns boxes in pixels of the image it read; Redact's editor places marks in percentages of the page. We'll convert one box by hand, run the tests that try to break the conversion, and then watch the outlines line up with the text.
+
+**Checkpoint:** [`bcfd046`](https://github.com/danielAsaboro/bring-ai-home/commit/bcfd046e2ed1d5c33495263901034ef4c5361e01), starting from `30293ed`
+
+## 1. Apply the lesson patch
+
+Stop any running app or service. Download [`05-coordinate-mapping.patch`](/docs/downloads/redact/05-coordinate-mapping.patch) into your Downloads folder. From the parent `redact-course` folder:
+
+```bash
+git apply --check ~/Downloads/05-coordinate-mapping.patch
+git apply ~/Downloads/05-coordinate-mapping.patch
+cd redact
+npm ci
+```
+
+If `--check` reports an error, your previous lesson differs from the checkpoint; don't force it.
+
+## 2. Convert one box by hand
+
+The chat image is 1200 pixels wide and 1600 pixels high. In one run, OCR returned this box for `Maya Chen`:
+
+```text
+[211, 114, 397, 158]     x1, y1, x2, y2 in pixels
+```
+
+The first two numbers are the top-left corner and the last two are the bottom-right corner. The editor wants a top-left corner plus a width and height, each as a percentage of the page:
+
+```text
+x      = 211 / 1200 × 100          = 17.583333
+y      = 114 / 1600 × 100          = 7.125
+width  = (397 − 211) / 1200 × 100  = 15.5
+height = (158 − 114) / 1600 × 100  = 2.75
+```
+
+Notice the subtraction. Dividing all four raw numbers by the page size would give a corner, not a size.
+
+## 3. Check your arithmetic against the code
+
+Open `src/features/redact/ocr-geometry.test.ts`. The first test feeds exactly that box and page size into `normalizeOcrBbox` and expects:
+
+```ts
+{ x: 17.583333, y: 7.125, width: 15.5, height: 2.75 }
+```
+
+Your numbers should match.
+
+## 4. Try to break it
+
+Run only these tests:
+
+```bash
+npm test -- src/features/redact/ocr-geometry.test.ts
+```
+
+```text
+Tests  3 passed (3)
+```
+
+Read what they cover: corners given in the wrong order are put back in order, a box hanging off the page is clipped to it, and a box with `NaN` in it, no area, or lying entirely off the page comes back as `null` and is skipped. A page with a width of 0 throws an error instead, because then no box on it can be trusted.
+
+## 5. See the outlines on the page
+
+Start the service in one terminal and the app in another:
+
+```bash
+npm run qvac:service
+```
+
+```bash
+npm run dev -- --port 3101
+```
+
+Upload `public/test-files/redact/chat-private.png`, choose **Private**, and select **Prepare for review**.
+
+On **Original**, the header now reads **12 detected regions · drag to draw**, and every line of text has a thin outline drawn exactly around it. Look at `Maya Chen`: the outline hugs the name.
+
+Now look at **Safe-share preview**. Nothing is covered. Outlines show where the text is; they aren't redactions. Drag across `Maya Chen` to cover it yourself.
+
+## 6. Check your work
+
+Stop the app and service, then run:
+
+```bash
+npm test -- src/features/redact/ocr-geometry.test.ts src/features/redact/RedactApp.test.tsx
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The full `npm test` reports `Tests  49 passed (49)`.
+
+Record the checkpoint from the parent folder:
+
+```bash
+cd ..
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 05: line OCR boxes up with the page"
+```
+
+## What we built
+
+One small conversion that every later feature relies on: OCR's pixels now land on the right words in the editor, and bad boxes are skipped instead of drawn in the wrong place.
+
+- Every file in this checkpoint: [`redact/` at `bcfd046`](https://github.com/danielAsaboro/bring-ai-home/tree/bcfd046e2ed1d5c33495263901034ef4c5361e01/redact)
+- What OCR's boxes mean, and what rotation does to them: [OCR boxes and rotation](/docs/qvac/ocr-geometry)
+
+Next: [06. Ask a local model which fields are sensitive](/docs/redact/tutorials/06-suggestions)

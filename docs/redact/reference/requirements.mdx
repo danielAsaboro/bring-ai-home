@@ -1,0 +1,55 @@
+---
+title: "Requirements"
+description: "Software, hardware, disk, and network Redact needs, with what was tested."
+---
+
+## Software
+
+| Item | Requirement |
+|---|---|
+| Node.js | 22.17 or newer (`engines` in `package.json`) |
+| npm | Any version bundled with a supported Node.js |
+| Git | Any recent version |
+| `@qvac/sdk` | 0.22.0, pinned by the lockfile |
+| Browser | Any current Chromium, Firefox or Safari |
+| Playwright browser | Only for `npm run test:e2e`: `npx playwright install chromium` |
+
+## Operating system
+
+QVAC's worker supports macOS 14+ (arm64, Metal), Linux (Ubuntu 22+, Vulkan for GPU), and Windows 10+ (x64, Vulkan required). See [QVAC system requirements](https://docs.qvac.tether.io/sdk/system-requirements/) for drivers and libraries.
+
+`npm run qvac:offline` and `npm run qvac:service:offline` use macOS `sandbox-exec` and run on macOS only.
+
+## Disk
+
+| Item | Size |
+|---|---|
+| `node_modules` after `npm ci` | 2.8 GB |
+| Models in `.qvac/models` | about 480 MB |
+| `.next` dev and build output | about 300 MB |
+
+Plan for about 4 GB free per checkout.
+
+## Network
+
+| Step | Network |
+|---|---|
+| `npm ci` | Needed |
+| First OCR or analysis | Needed, to download models |
+| Later runs | Not needed once both models are cached |
+
+## Tested on
+
+| Item | Value |
+|---|---|
+| Machine | Apple Silicon Mac, 36 GB RAM |
+| OS | macOS 27.0.1 |
+| Node.js / npm | 24.15.0 / 11.12.1 |
+| Date | 2026-10-25 |
+
+Linux and Windows were not tested.
+
+## Related
+
+- [How to install and run Redact](/docs/redact/how-to/install-and-run)
+- [Models](/docs/redact/reference/models)

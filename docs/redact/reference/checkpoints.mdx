@@ -1,0 +1,40 @@
+---
+title: "Checkpoints and downloads"
+description: "Each lesson's commit on course/redact-qvac-v2, its patch, and the downloadable packages."
+---
+
+Branch: [`course/redact-qvac-v2`](https://github.com/danielAsaboro/bring-ai-home/tree/course/redact-qvac-v2/redact). All checkpoints from lesson 02 on pin `@qvac/sdk` 0.22.0. Machine-readable list: [`manifest.json`](/docs/downloads/redact/manifest.json).
+
+## Lessons
+
+| Lesson | Commit | Patch | Unit tests |
+|---|---|---|---|
+| [01. Run the manual starter](/docs/redact/tutorials/01-starter) | [`0eecfb4`](https://github.com/danielAsaboro/bring-ai-home/commit/0eecfb46c0790dec4bc3ae9e2d85607b54771d9f) | [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) | — |
+| [02. Read a page with local OCR](/docs/redact/tutorials/02-first-ocr) | [`731eb40`](https://github.com/danielAsaboro/bring-ai-home/commit/731eb40b3f1e31aa214e83b3714d9171ed3443d8) | [`02-first-ocr.patch`](/docs/downloads/redact/02-first-ocr.patch) | 35 |
+| [03. Start the local QVAC service](/docs/redact/tutorials/03-local-service) | [`242f480`](https://github.com/danielAsaboro/bring-ai-home/commit/242f4808c8d7122c920d59962c293d352e5722a3) | [`03-local-service.patch`](/docs/downloads/redact/03-local-service.patch) | 42 |
+| [04. Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr) | [`30293ed`](https://github.com/danielAsaboro/bring-ai-home/commit/30293edcadfb978a69a9e15db2af7ae431e00cef) | [`04-connect-ocr.patch`](/docs/downloads/redact/04-connect-ocr.patch) | 46 |
+| [05. Line OCR boxes up with the page](/docs/redact/tutorials/05-coordinates) | [`bcfd046`](https://github.com/danielAsaboro/bring-ai-home/commit/bcfd046e2ed1d5c33495263901034ef4c5361e01) | [`05-coordinate-mapping.patch`](/docs/downloads/redact/05-coordinate-mapping.patch) | 49 |
+| [06. Ask a local model which fields are sensitive](/docs/redact/tutorials/06-suggestions) | [`4e3987d`](https://github.com/danielAsaboro/bring-ai-home/commit/4e3987d07a230b0c88a7ab3574d31e5e6f25db0c) | [`06-sensitive-suggestions.patch`](/docs/downloads/redact/06-sensitive-suggestions.patch) | 68 |
+| [07. Accept or reject each suggestion](/docs/redact/tutorials/07-review) | [`234e4ce`](https://github.com/danielAsaboro/bring-ai-home/commit/234e4ced798995cf0f27ee193a29d9cc66a4f83e) | [`07-human-review.patch`](/docs/downloads/redact/07-human-review.patch) | 71 |
+| [08. Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery) | [`2d16cd9`](https://github.com/danielAsaboro/bring-ai-home/commit/2d16cd92961c0cd3f30a19ed733d1fde63758b31) | [`08-failure-recovery.patch`](/docs/downloads/redact/08-failure-recovery.patch) | 79 |
+| [09. Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation) | [`ad636f7`](https://github.com/danielAsaboro/bring-ai-home/commit/ad636f7a01f814158a154aa51b9cf8bd70fbd353) | [`09-evaluation.patch`](/docs/downloads/redact/09-evaluation.patch) | 85 |
+| [10. Run Redact with the network off](/docs/redact/tutorials/10-offline) | [`1d432a2`](https://github.com/danielAsaboro/bring-ai-home/commit/1d432a28deef8ce15e32f1f1b45a2d86d833d591) | [`10-offline-proof.patch`](/docs/downloads/redact/10-offline-proof.patch) | 88 |
+
+Each patch applies with `git apply` from the `redact-course` folder on top of the previous lesson. Applied in order to the starter, the nine patches produce exactly the files in `redact-completed.zip`.
+
+## Packages
+
+| File | Contents |
+|---|---|
+| [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) | `redact-course/redact/` at `0eecfb4` |
+| [`redact-completed.zip`](/docs/downloads/redact/redact-completed.zip) | `redact-course/redact/` at `1d432a2` |
+
+SHA-256 hashes and sizes for every file are in `manifest.json`.
+
+## Verification
+
+At every commit above, on 2026-10-25: `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` passed. At `1d432a2`, `npm run build`, `npm run qvac:ocr-smoke`, `npm run qvac:evaluate`, `npm run qvac:offline` and the live browser test also passed with real inference on macOS.
+
+## Earlier branch
+
+`course/redact-qvac` holds the same lessons on `@qvac/sdk` 0.17.1. It is kept for history; these docs don't use it.

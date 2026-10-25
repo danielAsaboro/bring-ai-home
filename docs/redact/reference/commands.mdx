@@ -1,0 +1,55 @@
+---
+title: "Commands"
+description: "Every npm script in the Redact app, what it runs, and what it writes."
+---
+
+Run from `redact/`. Defined in `package.json` on `course/redact-qvac-v2`.
+
+## App
+
+| Command | Runs | Writes |
+|---|---|---|
+| `npm run dev -- --port 3101` | Next.js dev server | `.next/` |
+| `npm run build` | `next build --webpack` | `.next/` |
+| `npm run start -- --port 3101` | Production server for the last build | — |
+
+## Local AI
+
+| Command | Runs | Writes | Network |
+|---|---|---|---|
+| `npm run qvac:service` | `qvac-service/index.ts` on `127.0.0.1:4317` | `.qvac/` | Needed until both models are cached |
+| `npm run qvac:ocr-smoke [image]` | One OCR pass on an image, prints JSON | `.qvac/` | Needed until the OCR model is cached |
+| `npm run qvac:evaluate` | Labelled evaluation over four test images, prints JSON | — | Needed until both models are cached |
+| `npm run qvac:offline` | One full analysis with remote TCP/UDP denied | — | Denied (macOS only) |
+| `npm run qvac:service:offline` | The service with remote TCP/UDP denied | — | Denied (macOS only) |
+
+`qvac:ocr-smoke` defaults to `public/test-files/redact/chat-private.png`.
+
+`qvac:offline` and `qvac:service:offline` use macOS `sandbox-exec`. They fail on Linux and Windows.
+
+## Checks
+
+| Command | Runs |
+|---|---|
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `next typegen`, then `tsc --noEmit` |
+| `npm test` | Vitest unit tests (88 at the final checkpoint) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:e2e` | Playwright, desktop and mobile projects |
+
+`npm run test:e2e` needs a running app (`REDACT_BASE_URL`, default `http://localhost:3101`) and a Playwright browser. The live QVAC test runs only with `REDACT_LIVE_QVAC=1` and the service running.
+
+Run `typecheck` and `build` one after the other, not in parallel: both write `.next/`.
+
+## Test files
+
+| Command | Writes |
+|---|---|
+| `npm run redact:test-files` | Regenerates `public/test-files/redact/` |
+
+The committed test files are already in place. Regenerating can change PDF bytes.
+
+## Related
+
+- [Environment variables and files](/docs/redact/reference/environment)
+- [How to run the tests](/docs/redact/how-to/run-the-tests)

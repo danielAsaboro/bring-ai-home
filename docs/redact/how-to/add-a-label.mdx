@@ -1,0 +1,51 @@
+---
+title: "How to add a sensitive-field label"
+description: "Teach Redact a new kind of sensitive field, end to end."
+---
+
+This guide adds a label, for example `vehicle` for number plates. A label has to exist in five places, or the model's answer is rejected or silently dropped.
+
+## 1. Add it to the shared type
+
+`src/features/redact/workflow-domain.ts`, add to `RedactionLabel`:
+
+```ts
+  | "vehicle"
+```
+
+## 2. Add it to the runtime contract
+
+`src/features/redact/analysis-contract.ts`, add `"vehicle"` to `redactionLabelSchema`. Responses with unknown labels fail this schema.
+
+## 3. Let the model choose it
+
+`qvac-service/reasoning.ts`:
+
+- add `"vehicle"` to the `labels` array, which feeds the JSON Schema enum the model is constrained to;
+- add one sentence to the system prompt's `Labels:` line saying what `vehicle` means.
+
+## 4. Ground it in the text
+
+`qvac-service/candidate-validation.ts`:
+
+- add an entry to `explanations`, for example `vehicle: "The block contains a vehicle registration."`;
+- add a rule to `groundedLabel()` that returns `"vehicle"` when the OCR text supports it, placed before the generic `name` and `other` rules.
+
+Without a rule, every `vehicle` candidate is dropped, because `groundedLabel()` returns `null` for labels it can't confirm.
+
+## 5. Test it
+
+Add a case to `qvac-service/candidate-validation.test.ts` for text that should and shouldn't match. Then:
+
+```bash
+npm run typecheck
+npm test
+```
+
+To measure it on real inference, [add an evaluation case](/docs/redact/how-to/add-an-evaluation-case) with a labelled `vehicle` region.
+
+## Related
+
+- [Labels reference](/docs/redact/reference/labels)
+- [About grounded suggestions](/docs/redact/concepts/grounded-suggestions)
+- [Structured output](/docs/qvac/structured-output)

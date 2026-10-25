@@ -1,0 +1,54 @@
+---
+title: "How to add a labelled evaluation case"
+description: "Measure Redact's suggestions on a new test document."
+---
+
+This guide adds one labelled page to `npm run qvac:evaluate`. Use fictional content only; fixtures are committed to the repository.
+
+## 1. Add the fixture
+
+Put a PNG in `public/test-files/redact/evaluation/`, for example `invoice-clear.png`.
+
+If you generate fixtures in code, add the generation to `qvac-service/prepare-test-files.mjs` instead, next to the existing `chat-*.png` writers. Note that running `npm run redact:test-files` rewrites every fixture, including the PDFs.
+
+## 2. Label the expected regions
+
+Open `qvac-service/evaluation.ts` and add an entry to `EVALUATION_CASES`:
+
+```ts
+{
+  id: "invoice-clear",
+  condition: "clear",
+  fixturePath: "public/test-files/redact/evaluation/invoice-clear.png",
+  expected: [
+    { id: "invoice-name", label: "name", bbox: { x: 12.5, y: 8.0, width: 20.0, height: 2.5 } },
+  ],
+},
+```
+
+`bbox` values are **percentages of the page**, not pixels: `x` and `y` are the top-left corner, `width` and `height` the size. To convert from pixels, divide by the image width or height and multiply by 100.
+
+`condition` must be one of `clear`, `rotated`, `low-contrast` or `partially-obscured`. To add another, extend the `condition` union in `EvaluationCase`.
+
+## 3. Run only your case
+
+```bash
+REDACT_EVALUATION_CASE=invoice-clear npm run qvac:evaluate
+```
+
+Read `result.falseNegatives` (missed fields) and `result.falsePositives`, not only `passed`. `result.matches` lists the pairs that counted. A proposal matches an expected region when the labels agree and the boxes overlap with IoU ≥ 0.45.
+
+## 4. Run the whole gate
+
+```bash
+npm run qvac:evaluate
+```
+
+The command exits non-zero if any case is below 0.7 precision, recall or F1.
+
+`qvac-service/evaluation.test.ts` asserts that every case has exactly six expected regions. If yours has a different number, update that assertion, then run `npm test`.
+
+## Related
+
+- [Evaluation reference](/docs/redact/reference/evaluation)
+- [About measuring suggestions](/docs/redact/concepts/measuring-suggestions)

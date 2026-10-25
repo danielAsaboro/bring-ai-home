@@ -1,0 +1,42 @@
+---
+title: "Labels and privacy levels"
+description: "The eleven suggestion labels, the two privacy levels, and the evidence rule behind each label."
+---
+
+Defined in `src/features/redact/analysis-contract.ts` (`redactionLabelSchema`) and `qvac-service/candidate-validation.ts`.
+
+## Privacy levels
+
+| Level | Value sent | Covers |
+|---|---|---|
+| Private | `private` | Direct personal identifiers |
+| Confidential | `confidential` | Private, plus financial and business-sensitive content |
+
+## Additional direction
+
+Free text, up to 500 characters, whitespace collapsed. Sent to the reasoning model as policy data. It can't change the labels or the output schema.
+
+## Labels
+
+A candidate is kept only if its OCR text passes the label's evidence rule. When the rule matches a different label than the model proposed, the rule's label wins. The explanation shown in the app is fixed per label.
+
+| Label | Evidence rule (on the block's OCR text) | Explanation shown |
+|---|---|---|
+| `email` | Contains `@` | The block contains an email address. |
+| `reference` | Word `reference`, or `ref.` `ref:` `ref#` | The block contains a tracking or case reference. |
+| `account` | `account`, `acct` or `card`, plus a digit | The block contains an account identifier. |
+| `phone` | `phone`, `telephone`, `mobile` or `tel.`/`tel:`, plus at least 7 digits | The block contains a telephone number. |
+| `address` | 1–5 digit number, then text ending in a street word (road, street, close, avenue, lane, drive, boulevard, way, or their abbreviations) | The block contains a physical address. |
+| `identity` | passport, social security, SSN, national ID, employee ID, driver's licence/license | The block contains an identity identifier. |
+| `amount` | Currency symbol (₦ $ £ € ¥) before a number, or `amount` near a number | The block contains an explicit monetary amount. |
+| `date` | `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YY(YY)` or `DD/MM/YY(YY)` | The block contains a potentially sensitive date. |
+| `business` | `ltd`, `limited`, `llc`, `inc`, `company`, `corporation`, `corp` | The block contains a private business detail. |
+| `name` | Model proposed `name`, and the text is 2–4 capitalised words | The block contains a person name. |
+| `other` | Model proposed `other` and no rule above matched | The block contains other potentially sensitive information. |
+
+Rules are checked top to bottom; the first match wins. Text containing "controlled test document" or "no real personal information" is never suggested.
+
+## Related
+
+- [How to add a sensitive-field label](/docs/redact/how-to/add-a-label)
+- [About grounded suggestions](/docs/redact/concepts/grounded-suggestions)

@@ -1,0 +1,94 @@
+---
+title: "07. Accept or reject each suggestion"
+description: "We will add Accept and Reject to every suggestion, block the safe copy until each one is decided, and check that only accepted suggestions are covered in the saved file."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 07. Accept or reject each suggestion" />
+
+In this lesson we will give every suggestion an **Accept** and a **Reject** button, stop the app from saving until each suggestion has a decision, and prove in the saved file that a rejected suggestion stays uncovered.
+
+**Checkpoint:** [`234e4ce`](https://github.com/danielAsaboro/bring-ai-home/commit/234e4ced798995cf0f27ee193a29d9cc66a4f83e), starting from `4e3987d`
+
+## 1. Apply the lesson's changes
+
+Download [`07-human-review.patch`](/docs/downloads/redact/07-human-review.patch) into your Downloads folder. Stop the app and the service, then from the parent `redact-course` folder:
+
+```bash
+git apply --check ~/Downloads/07-human-review.patch
+git apply ~/Downloads/07-human-review.patch
+cd redact
+npm ci
+```
+
+If `--check` reports an error, your folder doesn't match lesson 06's checkpoint; fix that before going on.
+
+## 2. Start the service and the app
+
+In one terminal, `npm run qvac:service`. In a second, `npm run dev -- --port 3101`. Both models are already cached, so this analysis needs no download.
+
+## 3. Prepare the chat again
+
+Open [http://localhost:3101](http://localhost:3101), upload `public/test-files/redact/chat-private.png`, choose **Private**, and type:
+
+```text
+Redact direct identifiers, account numbers, and reference codes.
+```
+
+Select **Prepare for review**. After about half a minute the review screen opens.
+
+## 4. Notice the gate
+
+Above the document, a banner reads:
+
+```text
+Review 6 remaining suggestions before creating a safe copy.
+```
+
+**Done** is disabled. Each of the six cards now has **Accept** and **Reject** buttons, and **Safe-share preview** shows no black boxes yet.
+
+## 5. Decide
+
+On the **name** card, select **Accept**. A black box covers `Maya Chen` in the preview, a new entry appears in the **Redactions** list, and the banner drops to 5. Under **Recent activity** you'll see **Accepted local suggestion** with `name · Maya Chen`.
+
+On the **email** card, select **Reject**. The email stays readable in the preview, no redaction is added, and **Recent activity** shows **Rejected local suggestion**.
+
+Accept the remaining four. The banner disappears and **Done** becomes available. Each decided card shows `accepted` or `rejected` where its score used to be.
+
+An accepted suggestion is now an ordinary redaction: drag it in **Original** to move it or drag a corner to resize it, just like a manual mark.
+
+## 6. Save and check the copy
+
+Select **Done**, then **Save copy**. Open the downloaded `chat-private.redacted.png` outside the browser.
+
+The name, address, phone number, account number and reference are solid black. `maya.chen@example.com` is still readable, because you rejected it. Rejecting a suggestion means choosing to leave that text visible.
+
+## 7. Run the checks
+
+Stop both terminals, then:
+
+```bash
+npm test -- src/features/redact/domain.test.ts src/features/redact/RedactApp.test.tsx
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+`npm test` should end with `Tests  71 passed (71)`. Record the checkpoint from the parent folder:
+
+```bash
+cd ..
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 07: accept or reject each suggestion"
+```
+
+## What we built
+
+Human review on top of local suggestions: nothing is covered until you accept it, nothing is saved until every suggestion has a decision, and every decision is recorded. Accepted suggestions reuse the same marks and exporter as manual redactions.
+
+- Every file in this checkpoint: [`redact/` at `234e4ce`](https://github.com/danielAsaboro/bring-ai-home/tree/234e4ced798995cf0f27ee193a29d9cc66a4f83e/redact)
+- Why a person makes the final call: [About Redact's trust boundary](/docs/redact/concepts/trust-boundary)
+
+Next: [08. Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery)

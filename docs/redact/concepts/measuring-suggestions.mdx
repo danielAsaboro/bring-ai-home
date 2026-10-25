@@ -1,0 +1,46 @@
+---
+title: "About measuring suggestions"
+description: "How Redact turns 'the suggestions look right' into numbers, and what those numbers can't tell you."
+---
+
+A demo shows that suggestions appear. It doesn't show whether they are right, whether they stay right after a change, or how often they miss. Redact's evaluation gate exists so that claims about suggestion quality come from a measurement, not from one good-looking screenshot.
+
+## Labelled pages
+
+The gate uses four fictional chat pages, each with the same six sensitive fields: a name, email, address, phone number, account number and reference code. The pages differ in the ways real documents differ: one clear, one rotated sideways, one low contrast, one partially covered. For every page a person has recorded where each field is, as a labelled rectangle.
+
+The labels are written independently of any model output. If they were produced by running the model and accepting what it said, the gate would only measure agreement with itself.
+
+## Matching a suggestion to a label
+
+A suggestion counts as correct when it has the **same label** as an expected field and its rectangle overlaps that field's rectangle enough. "Enough" is measured as intersection over union (IoU): the shared area divided by the combined area. Redact's threshold is 0.45. A box covering the right line but extending somewhat past it still matches; a box on the line above doesn't.
+
+Each expected field and each suggestion can be matched at most once, best overlap first, so one sprawling box can't claim credit for three fields.
+
+## Three numbers
+
+From the matches, each page gets:
+
+- **Precision**: of the suggestions made, how many were correct. Low precision means the reviewer wastes time rejecting noise.
+- **Recall**: of the fields that should be found, how many were. Low recall means sensitive data the reviewer must catch alone.
+- **F1**: a single balance of the two.
+
+A page passes when all three are at least 0.7. The gate passes when every page does. On SDK 0.22 the current code scores F1 between 0.91 and 1.0 on each page, the same on every run, because reasoning uses temperature 0 and a fixed seed.
+
+For a privacy tool, recall is the number that matters most. A precision error costs a click. A recall error, if the reviewer is tired, costs a leak. The gate's equal thresholds are a simplification; a stricter product might demand recall of 0.95 and accept lower precision.
+
+## The gate also measures cost
+
+Each run records model load time, OCR and reasoning time per page, and peak memory. Accuracy that doubles latency is a different product, and the receipt makes that visible.
+
+## What the numbers can't tell you
+
+Four synthetic pages with one layout are a regression test, not a benchmark. Passing means "this change didn't break the cases we know about". It says little about passports, invoices or handwriting. It also says nothing about labels the pages don't contain, such as dates or identity numbers.
+
+The gate earned its keep during the SDK 0.22 upgrade. Unit tests, lint, the build and a live browser run all passed, while the rotated page quietly fell from F1 1.0 to 0.29 because OCR now returned rotated text differently. Only the labelled evaluation caught it. That is the case for running it after every model or SDK change.
+
+## Related
+
+- [Lesson 9: Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation)
+- [How to add a labelled evaluation case](/docs/redact/how-to/add-an-evaluation-case)
+- [Evaluation reference](/docs/redact/reference/evaluation)

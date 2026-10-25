@@ -1,0 +1,32 @@
+---
+title: "How to redact a multi-page PDF"
+description: "Analyse and export a PDF of up to 25 pages."
+---
+
+This guide takes a multi-page PDF from upload to a flattened copy. It assumes the [service and app are running](/docs/redact/how-to/install-and-run) and the models are already downloaded.
+
+## Check the file first
+
+Redact accepts PDFs of at most **25 MB** and **25 pages**. Larger files are rejected at upload. If yours is bigger, split it and redact each part. See [file limits](/docs/redact/reference/file-limits).
+
+## Plan for the time
+
+Pages are analysed one after another, not in parallel. With models cached, expect roughly 20–30 seconds of OCR per page plus a few seconds of reasoning, so a 25-page PDF takes 10 minutes or more. The screen shows `Reading page N of M locally…` as it goes.
+
+Each page has its own time limit of 180 seconds in the service. A page that exceeds it fails the analysis.
+
+If you don't need suggestions for every page, select **Continue without local analysis** at any point and mark the pages by hand.
+
+## Analyse and review
+
+1. Upload the PDF, for example `public/test-files/redact/statement-multipage.pdf`.
+2. Choose **Private** or **Confidential**, add a direction if you want, and select **Prepare for review**.
+3. When review opens, go through **every page**. **Done** stays disabled until each suggestion on each page is accepted or rejected.
+4. Add manual marks with **Add redaction** where a field was missed.
+5. Select **Done**, then **Save copy**.
+
+The saved file is a new PDF whose pages are images. No text from the source PDF is copied into it. See [About flattened copies](/docs/redact/concepts/flattened-copies).
+
+## If analysis fails part-way
+
+Select **Try again** to rerun, or **Back** to change settings. If the error says the analyzer is busy, a previous analysis is still holding the service; see [Troubleshooting](/docs/redact/how-to/troubleshooting#analysis-says-the-local-analyzer-is-busy).

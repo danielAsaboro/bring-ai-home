@@ -14,7 +14,7 @@ Ten small apps that move everyday AI work onto your own machine with [QVAC](http
 | Ledger | `course/ledger-qvac` |
 | Lookout | `course/lookout-qvac` |
 | Pattern | `course/pattern-qvac` |
-| Redact | `course/redact-qvac` |
+| Redact | `course/redact-qvac-v2` |
 | Replay | `course/replay-qvac` |
 
 ## Follow along

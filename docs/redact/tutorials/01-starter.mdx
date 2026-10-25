@@ -1,0 +1,85 @@
+---
+title: "01. Run the manual starter"
+description: "We will unpack the Redact starter, cover a fictional chat's private details by hand, and save a separate flattened copy. Every later lesson keeps this workflow working."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 01. Run the manual starter" />
+
+In this lesson we will run Redact before it has any AI: upload a document, cover its private details by hand, and save a separate flattened copy. In the next nine lessons we add local AI to this app one commit at a time, and this manual path must keep working the whole way.
+
+**Checkpoint:** [`0eecfb4`](https://github.com/danielAsaboro/bring-ai-home/commit/0eecfb46c0790dec4bc3ae9e2d85607b54771d9f)
+
+## 1. Unpack the starter
+
+Download [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) into your Downloads folder. Then:
+
+```bash
+cd ~/Downloads
+unzip redact-starter.zip
+cd redact-course
+git init
+git add .
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Start Redact course"
+```
+
+The zip holds a `redact-course` folder with the app in `redact-course/redact`. Git lives in `redact-course` because every lesson's patch names its files as `redact/...`.
+
+## 2. Install and start the app
+
+```bash
+cd redact
+npm ci
+npm run dev -- --port 3101
+```
+
+When the terminal prints `Ready`, open [http://localhost:3101](http://localhost:3101). You'll see **What do you need to share safely?**
+
+## 3. Cover a document by hand
+
+Select **Choose a file** and pick `public/test-files/redact/chat-private.png`. It's fictional test material. Choose **Private**, leave **Additional direction** empty, and select **Prepare for review**.
+
+On **Original**, drag across `Maya Chen`. A mark appears, and the same area turns black in **Safe-share preview**. Drag the mark to move it, and drag a corner to resize it.
+
+Do the same for the email, the address, the phone number, the account number and the reference. Then select **Done**, then **Save copy**.
+
+## 4. Check the copy
+
+Open the downloaded `chat-private.redacted.png` outside the browser. The six values you covered are solid black; the text around them is still readable. Open `public/test-files/redact/chat-private.png` too: it hasn't changed.
+
+## 5. Try a PDF
+
+Select **Redact another document** and upload `public/test-files/redact/statement-multipage.pdf`. Add one mark on page 1, select **Next →**, add one on page 2, then **Done** and **Save copy**.
+
+Open `statement-multipage.redacted.pdf`. It has two pages, each with your mark. Try to select text in it: you can't, because every page is now an image.
+
+## 6. Run the checks
+
+Stop the dev server with `Ctrl+C`, then run:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Each should finish without errors. `npm test` ends with a `Tests … passed` line and no failures.
+
+Record the checkpoint from the parent folder:
+
+```bash
+cd ..
+git add redact
+git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 01: run the manual starter"
+```
+
+## What we built
+
+A working, manual privacy tool: the original file is never changed, every mark is placed by a person, and the output is a new flattened file. Those three rules hold for the rest of the course.
+
+- Every file in this checkpoint: [`redact/` at `0eecfb4`](https://github.com/danielAsaboro/bring-ai-home/tree/0eecfb46c0790dec4bc3ae9e2d85607b54771d9f/redact)
+- Why the output is an image: [About flattened copies](/docs/redact/concepts/flattened-copies)
+
+Next: [02. Read a page with local OCR](/docs/redact/tutorials/02-first-ocr)
