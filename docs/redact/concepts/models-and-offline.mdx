@@ -10,7 +10,7 @@ Most confusion about local AI comes from mixing the two.
 ## The first run downloads
 
 `npm ci` installs the QVAC SDK and its native engines, but not model weights.
-Weights arrive the first time a model is loaded: `loadModel({ modelSrc: OCR_LATIN })` fetches about 95 MB of OCR models, and the first analysis fetches the suggestion model: Laya, 450 MB, from lesson 11 on (Qwen3 0.6B, 382 MB, before that).
+Weights arrive the first time a model is loaded: `loadModel({ modelSrc: OCR_LATIN })` fetches about 98 MB of OCR models, and the first analysis fetches Laya, the decision model, 450 MB.
 In practice the first page analysed on a new machine takes a few minutes longer than every page after it.
 
 QVAC downloads are resumable and checked against size and checksum metadata.
@@ -28,7 +28,7 @@ Deleting the folder resets one app without touching others.
 And a broken shared home can't break Redact: under SDK 0.17, a `~/.qvac` symlink pointing at an unmounted drive was enough to stop the OCR smoke script.
 
 The trade-off is duplication.
-Two apps that both use Qwen3 0.6B each keep a copy.
+Two apps that both use Laya each keep a copy.
 For a course where each app should be self-contained, that is acceptable; a product shipping several QVAC features would rather share one cache.
 
 ## What "offline" means here

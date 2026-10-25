@@ -15,7 +15,7 @@ npm run qvac:ocr-smoke
 ```
 
 This reads `public/test-files/redact/chat-private.png` and prints JSON with `blocks` and `stats`.
-The OCR files (about 95 MB) land in `.qvac/models`.
+The OCR files (about 98 MB) land in `.qvac/models`.
 
 ## Download the reasoning model
 
@@ -41,7 +41,6 @@ ls .qvac/models
 ```
 
 You should see three files: one containing `craft`, one containing `latin`, and one containing `laya`.
-If you run with `REDACT_REASONER=qwen`, the third is `Qwen3` instead.
 The offline commands refuse to start until all three are present.
 
 ## Next

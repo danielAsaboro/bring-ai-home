@@ -24,7 +24,7 @@ Defined in `package.json` on `course/redact-qvac`.
 | `npm run qvac:offline` | One full analysis with remote TCP/UDP denied | — | Denied (macOS only) |
 | `npm run qvac:service:offline` | The service with remote TCP/UDP denied | — | Denied (macOS only) |
 
-The service, `qvac:evaluate` and `qvac:offline` use Laya for suggestions, or Qwen3 0.6B with `REDACT_REASONER=qwen`.
+The service, `qvac:evaluate` and `qvac:offline` use Laya for suggestions.
 
 `qvac:ocr-smoke` defaults to `public/test-files/redact/chat-private.png`.
 
@@ -37,7 +37,7 @@ They fail on Linux and Windows.
 |---|---|
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `next typegen`, then `tsc --noEmit` |
-| `npm test` | Vitest unit tests (93 at the final checkpoint) |
+| `npm test` | Vitest unit tests (87 at the final checkpoint) |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:e2e` | Playwright, desktop and mobile projects |
 

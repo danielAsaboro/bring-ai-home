@@ -1,39 +1,142 @@
 ---
 title: "07. Accept or reject each suggestion"
-description: "We will add Accept and Reject to every suggestion, block the safe copy until each one is decided, and check that only accepted suggestions are covered in the saved file."
+description: "We will give every suggestion an Accept and a Reject button, record each decision, and stop the app from saving until every suggestion has an answer."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 07. Accept or reject each suggestion" />
 
-In this lesson we will give every suggestion an **Accept** and a **Reject** button, stop the app from saving until each suggestion has a decision, and prove in the saved file that a rejected suggestion stays uncovered.
+After lesson 06, Laya suggests seven things to cover, and most of them are right.
+The tempting next step is to cover all seven automatically.
+In this lesson we do the opposite: nothing is covered until a person says yes.
 
-**Checkpoint:** [`234e4ce`](https://github.com/danielAsaboro/bring-ai-home/commit/234e4ced798995cf0f27ee193a29d9cc66a4f83e), starting from `4e3987d`
+**Checkpoint:** [`redact-07-review`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-07-review/redact), after `redact-06-laya`
 
-## 1. Apply the lesson's changes
+## Why a person decides
 
-Download [`07-human-review.patch`](/docs/downloads/redact/07-human-review.patch) into your Downloads folder.
-Stop the app and the service, then from the parent `redact-course` folder:
+A model's mistakes come in two kinds, and they cost very different amounts.
+
+| Mistake | Example | What it costs if the model decides | What it costs if you decide |
+|---|---|---|---|
+| A false suggestion | "Thanks" flagged as a name | A harmless word is blacked out | One click on **Reject** |
+| A miss | An account number nobody flagged | Private data goes out in a "safe" copy | You still see it, and can cover it by hand |
+
+If the model writes the output directly, both kinds of mistake ship silently.
+With a person in between, a false suggestion costs a click, and a miss is still on screen to catch.
+The model saves you effort; it doesn't take the responsibility.
+
+That's Redact's trust boundary: a suggestion is evidence, and only a decision makes a black box.
+[About Redact's trust boundary](/docs/redact/concepts/trust-boundary) goes further.
+
+## Suggestions and marks are different things
+
+In the code, a **suggestion** (a `candidate`) has a status: `proposed`, `accepted` or `rejected`.
+A **mark** is the black box the exporter paints.
+The only way from one to the other is accepting it.
+
+There's also a gate: while any suggestion is still `proposed`, **Done** stays disabled.
+You can't save a copy with an open question in it.
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
 
 ```bash
-git apply --check ~/Downloads/07-human-review.patch
-git apply ~/Downloads/07-human-review.patch
+git cherry-pick redact-07-review
 cd redact
-npm ci
 ```
 
-If `--check` reports an error, your folder doesn't match lesson 06's checkpoint; fix that before going on.
+No packages change, so there's nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-06-laya...redact-07-review).
 
-## 2. Start the service and the app
+| File | What changed |
+|---|---|
+| `src/features/redact/workflow-domain.ts` | New `acceptCandidate` and `rejectCandidate`; removing an accepted mark now rejects its suggestion |
+| `src/features/redact/components/ReviewStage.tsx` | **Accept** and **Reject** buttons, the review gate, and the **Recent activity** list |
+| `src/features/redact/RedactApp.tsx` | Wires the buttons up and refuses to finish with open suggestions |
+| `src/features/redact/domain.test.ts`, `RedactApp.test.tsx` | Tests for the new behaviour |
+
+## 2. Read how accepting works
+
+Open `src/features/redact/workflow-domain.ts` and find `acceptCandidate`:
+
+```ts
+export function acceptCandidate(
+  session: RedactSession,
+  candidateId: string,
+  at: string,
+): RedactSession {
+  const candidate = session.candidates.find((item) => item.id === candidateId);
+  if (!candidate || candidate.status === "accepted") return session;
+  const mark: RedactionMark = {
+    id: `accepted-${candidate.id}`,
+    documentId: candidate.documentId,
+    pageId: candidate.pageId,
+    pageNumber: candidate.pageNumber,
+    x: candidate.x,
+    y: candidate.y,
+    width: candidate.width,
+    height: candidate.height,
+    label: candidate.label,
+    source: "accepted",
+    createdAt: at,
+  };
+```
+
+It does nothing for a suggestion that's already `accepted`, so clicking twice is harmless.
+It does work on a `rejected` one, so you can change your mind after a **Reject**.
+It creates an ordinary mark at the suggestion's position, with `source: "accepted"` so you can tell later where it came from.
+From here on, the exporter treats it exactly like a box you drew by hand.
+
+The rest of the function marks the suggestion `accepted` and adds a line to the audit:
+
+```ts
+    audit: [
+      {
+        id: `audit-accept-${candidate.id}-${at}`,
+        action: "Accepted local suggestion",
+        detail: `${candidate.label} · ${candidate.evidenceText}`,
+        at,
+      },
+      ...session.audit,
+    ],
+```
+
+`rejectCandidate` is the same shape, but it creates no mark and logs **Rejected local suggestion**.
+
+## 3. Read the gate
+
+`finishReview` runs when you select **Done**:
+
+```ts
+  const unresolved = session.candidates.filter(
+    (candidate) => candidate.status === "proposed",
+  );
+  if (unresolved.length > 0 && !options.allowUnresolved) {
+    throw new Error("Resolve every suggestion before creating a safe copy");
+  }
+```
+
+In lesson 06, `RedactApp.tsx` called it with `{ allowUnresolved: true }`; this lesson removes that.
+The review screen also counts open suggestions and disables **Done** while there are any:
+
+```tsx
+<button aria-label="Done" className="primary-button" disabled={busy || unresolvedCount > 0} onClick={onDone}>{busy ? "Creating…" : "Done"} <span>→</span></button>
+```
+
+So the rule is enforced twice: once in the interface, and once in the data layer in case the interface is ever wrong.
+
+## 4. Start the service and the app
 
 In one terminal, `npm run qvac:service`.
 In a second, `npm run dev -- --port 3101`.
-Both models are already cached, so this analysis needs no download.
+Both models are already cached, so there's no download.
 
-## 3. Prepare the chat again
+## 5. Prepare the chat again
 
-Open [http://localhost:3101](http://localhost:3101), upload `public/test-files/redact/chat-private.png`, choose **Private**, and type:
+Open [localhost:3101](http://localhost:3101), upload `public/test-files/redact/chat-private.png`, choose **Private**, and type:
 
 ```text
 Redact direct identifiers, account numbers, and reference codes.
@@ -42,42 +145,55 @@ Redact direct identifiers, account numbers, and reference codes.
 Select **Prepare for review**.
 After about half a minute the review screen opens.
 
-## 4. Notice the gate
+## 6. Notice the gate
 
 Above the document, a banner reads:
 
 ```text
-Review 6 remaining suggestions before creating a safe copy.
+Review 7 remaining suggestions before creating a safe copy.
 ```
 
 **Done** is disabled.
-Each of the six cards now has **Accept** and **Reject** buttons, and **Safe-share preview** shows no black boxes yet.
+Each of the seven cards now has **Accept** and **Reject** buttons, and its percentage now reads **score**.
+**Safe-share preview** has no black boxes yet.
 
-## 5. Decide
+## 7. Decide
 
 On the **name** card, select **Accept**.
-A black box covers `Maya Chen` in the preview, a new entry appears in the **Redactions** list, and the banner drops to 5.
+A black box covers `Maya Chen` in the preview, a new entry appears in the **Redactions** list, and the banner drops to 6.
 Under **Recent activity** you'll see **Accepted local suggestion** with `name · Maya Chen`.
 
 On the **email** card, select **Reject**.
-The email stays readable in the preview, no redaction is added, and **Recent activity** shows **Rejected local suggestion**.
+The email stays readable, no redaction is added, and **Recent activity** shows **Rejected local suggestion**.
 
-Accept the remaining four.
+Accept the remaining five.
 The banner disappears and **Done** becomes available.
-Each decided card shows `accepted` or `rejected` where its score used to be.
+Each decided card now shows `accepted` or `rejected` where its score was.
 
-An accepted suggestion is now an ordinary redaction: drag it in **Original** to move it or drag a corner to resize it, just like a manual mark.
+A rejected card keeps an **Accept** button, in case you change your mind.
+In the **Redactions** list, accepted suggestions are named by their label, such as **name** or **other**; only marks you drew yourself say **Manual redaction**.
 
-## 6. Save and check the copy
+An accepted suggestion is now an ordinary redaction: drag it on **Original** to move it, or drag a corner to resize it.
+
+## 8. Save and check the copy
 
 Select **Done**, then **Save copy**.
 Open the downloaded `chat-private.redacted.png` outside the browser.
 
-The name, address, phone number, account number and reference are solid black.
+The name, address, phone number, account number, reference and the "amount" line are solid black.
 `maya.chen@example.com` is still readable, because you rejected it.
 Rejecting a suggestion means choosing to leave that text visible.
 
-## 7. Run the checks
+## If something goes wrong
+
+- **Done stays disabled after deciding everything.**
+  On a multi-page PDF, use **Next →** to check the other pages; the count covers every page.
+- **A box covers too little.**
+  Accepting copies the OCR outline exactly; drag a corner to enlarge it, like any manual mark.
+- **You accepted something by mistake.**
+  Remove that redaction from the **Redactions** list; its suggestion becomes `rejected`, and its **Accept** button lets you bring it back.
+
+## 9. Check your work
 
 Stop both terminals, then:
 
@@ -86,25 +202,26 @@ npm test -- src/features/redact/domain.test.ts src/features/redact/RedactApp.tes
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-`npm test` should end with `Tests  71 passed (71)`.
-Record the checkpoint from the parent folder:
+`npm test` reports `Tests  67 passed (67)`.
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 07: accept or reject each suggestion"
-```
+## So what just happened?
 
-## What we built
+Suggestions became questions a person answers.
+Nothing is covered until it's accepted, nothing is saved until every suggestion has an answer, and every answer is written to the audit.
+An accepted suggestion becomes an ordinary mark, so the exporter didn't need to change at all.
 
-Human review on top of local suggestions: nothing is covered until you accept it, nothing is saved until every suggestion has a decision, and every decision is recorded.
-Accepted suggestions reuse the same marks and exporter as manual redactions.
+## Try it yourself
 
-- Every file in this checkpoint: [`redact/` at `234e4ce`](https://github.com/danielAsaboro/bring-ai-home/tree/234e4ced798995cf0f27ee193a29d9cc66a4f83e/redact)
-- Why a person makes the final call: [About Redact's trust boundary](/docs/redact/concepts/trust-boundary)
+Accept the **name** suggestion, then remove that redaction from the **Redactions** list.
+Watch the card change to `rejected` and **Recent activity** record the removal.
+Then select **Accept** on that card again and watch the redaction come back.
+Why do you think removing an accepted mark rejects the suggestion, rather than putting it back to `proposed`?
 
-Next: [08.
-Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery)
+## Where to next
+
+- Every file in this checkpoint: [`redact/` at `redact-07-review`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-07-review/redact)
+- [About Redact's trust boundary](/docs/redact/concepts/trust-boundary)
+
+Next: [Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery) (lesson 08)

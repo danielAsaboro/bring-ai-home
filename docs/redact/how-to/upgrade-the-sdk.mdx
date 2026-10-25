@@ -50,15 +50,11 @@ npm run qvac:evaluate
 ```
 
 Run it at least three times and compare the per-case F1.
-Two problems only showed up this way on 0.22.0:
 
-- **Rotated pages regressed** (F1 0.29).
-  0.22's OCR reads sideways words in place, so the old "retry upright if it reads more characters" rule kept word fragments.
-  `recoveredScore()` in `qvac-service/qvac-analyzer.ts` now multiplies characters by mean block length, so whole lines win.
-  See [OCR boxes and rotation](/docs/qvac/ocr-geometry).
-- **Scores changed between runs**, and one run failed with `Local reasoning returned invalid candidates`.
-  `qvac-service/reasoning.ts` now passes `generationParams: { temp: 0, seed: 42 }` to `completion()`, and the evaluation gives identical scores run after run.
-  See [Structured output](/docs/qvac/structured-output).
+One problem only showed up this way on 0.22.0: **rotated pages regressed** (F1 0.29).
+0.22's OCR reads sideways words in place, so the old "retry upright if it reads more characters" rule kept word fragments.
+`recoveredScore()` in `qvac-service/qvac-analyzer.ts` now multiplies characters by mean block length, so whole lines win.
+See [OCR boxes and rotation](/docs/qvac/ocr-geometry).
 
 Also update `EVALUATION_IDENTIFIERS.sdk` in `qvac-service/evaluation.ts` and its assertion in `evaluation.test.ts`, so receipts name the version they ran on.
 

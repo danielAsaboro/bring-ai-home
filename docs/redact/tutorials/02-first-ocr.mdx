@@ -1,44 +1,182 @@
 ---
 title: "02. Read a page with local OCR"
-description: "We will read the fictional chat image with a local QVAC OCR model from a small script, outside the app, and look at the text and boxes it returns."
+description: "We will choose the right kind of model for documents, then run QVAC's OCR on a fictional chat image from a small script and read the text and boxes it returns."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 02. Read a page with local OCR" />
 
-In this lesson we will run our first local model.
-A small script reads `chat-private.png` with QVAC's OCR and prints what it found.
-We keep it outside the app on purpose, so any install or download problem shows up here, on its own.
+In lesson 01 you covered every private detail yourself.
+Before a model can help, it has to be able to read the page.
+That sounds simple, but it starts with a choice: which kind of model reads a screenshot?
 
-**Checkpoint:** [`731eb40`](https://github.com/danielAsaboro/bring-ai-home/commit/731eb40b3f1e31aa214e83b3714d9171ed3443d8), starting from `0eecfb4`
+**Checkpoint:** [`redact-02-first-ocr`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-02-first-ocr/redact), after `redact-01-starter`
 
-## 1. Apply the lesson patch
+## First, which kind of model?
 
-Stop the dev server if it's running.
-Download [`02-first-ocr.patch`](/docs/downloads/redact/02-first-ocr.patch) into your Downloads folder.
-From the parent `redact-course` folder:
+"AI model" covers very different tools.
+A language model reads and writes text.
+A speech model turns audio into text, an embedding model turns text into numbers you can compare, and a decision model like the one we'll meet in lesson 06 answers questions you define.
+
+So the first question is always the same: what kind of data do you have?
+Most of the clever models only read text.
+Anything else, an image, a scan, a recording, has to become text first.
+
+| You have | Turn it into text with | QVAC docs |
+|---|---|---|
+| A screenshot, photo or scanned page | OCR, or a vision-language model | [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/), [Multimodal](https://docs.qvac.tether.io/sdk/ai-capabilities/multimodal/) |
+| A voice note or meeting recording | Speech-to-text (transcription) | [Transcription](https://docs.qvac.tether.io/sdk/ai-capabilities/transcription/) |
+| A PDF made by a computer | Read its text layer directly; use OCR only for scans | [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/) |
+| Text already | Nothing: hand it to a text model | [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/) |
+
+## Why OCR, not a vision model?
+
+For images there are two options, and they answer different questions.
+A vision-language model looks at the picture and *describes* it: "a chat between Maya Chen and a colleague about a contract".
+OCR *transcribes* it: every line of text, exactly, with a box around where it sits.
+
+Redact needs the second.
+To cover a phone number we need its characters, to decide it's private, and its position, to draw a black box over exactly those pixels.
+A vision model can tell you there's a phone number; it can't reliably tell you which 300 pixels to paint.
+
+OCR is also small and fast.
+QVAC's English OCR is two files, about 98 MB, and reads a page in roughly 20 seconds on a laptop.
+The same reasoning goes for audio: if you needed to know *when* each word was said, you'd want a transcription model that returns timestamps, not one that only summarises.
+
+More on this choice, for any app: [Choosing the right model for your data](/docs/redact/concepts/choosing-a-model).
+
+## How QVAC's OCR works
+
+It runs in two stages.
+A **detector** finds the regions of the image that look like text.
+A **recognizer** reads the characters inside each region.
+
+You get back a list of **blocks**.
+Each block has the `text`, a `bbox` (the box's pixel corners in the image) and a `confidence` between 0 and 1.
+Confidence means "how sure am I about these characters", not "is this private"; that's a separate question, and a separate model, later.
+
+We'll run it from a small script, outside the app.
+If anything goes wrong with installing or downloading, it goes wrong here, on its own, where it's easy to see.
+
+## 1. Get this lesson's code
+
+Stop the app if it's running.
+From the repository root, `redact-course`, bring in this lesson's commit and install the new package:
 
 ```bash
-git apply --check ~/Downloads/02-first-ocr.patch
-git apply ~/Downloads/02-first-ocr.patch
+git cherry-pick redact-02-first-ocr
 cd redact
 npm ci
 ```
 
-`--check` prints nothing when the patch fits.
-If it reports an error, your previous lesson differs from the checkpoint; don't force it.
+This lesson adds the QVAC SDK, so `npm ci` takes a few minutes.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-01-starter...redact-02-first-ocr).
 
-The patch adds `@qvac/sdk` 0.22.0, so this `npm ci` takes a few minutes and grows `node_modules` to about 2.8 GB.
+The commit touches four files you'll care about:
 
-## 2. Run OCR on the chat image
+| File | What changed |
+|---|---|
+| `package.json` | Adds `@qvac/sdk` 0.22.0, a Node 22.17 minimum, and the `qvac:ocr-smoke` script |
+| `qvac-service/ocr-smoke.mjs` | The script that runs OCR on one image |
+| `qvac-service/local-config.ts` | Works out where the app keeps its models |
+| `qvac-service/local-config.test.ts` | Tests for that |
+
+## 2. Read the script before running it
+
+Open `qvac-service/ocr-smoke.mjs`.
+It does five things, in this order.
+
+**It picks the image and fingerprints it.**
+
+```js
+const sourcePath = path.resolve(process.argv[2] ?? defaultSource);
+const sourceBytes = await readFile(sourcePath);
+const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+```
+
+With no argument it reads `public/test-files/redact/chat-private.png`.
+The SHA-256 digest ties the output to this exact file, so you can tell later which image a result came from.
+
+**It tells QVAC where to keep models, before loading QVAC.**
+
+```js
+await mkdir(cacheDirectory, { recursive: true });
+await writeFile(
+  configPath,
+  `${JSON.stringify({ cacheDirectory }, null, 2)}\n`,
+  "utf8",
+);
+process.env.QVAC_CONFIG_PATH = configPath;
+
+sdk = await import("@qvac/sdk");
+```
+
+QVAC reads its configuration once, when it starts.
+So the script writes `.qvac/config.json` with a `cacheDirectory` inside the app, points `QVAC_CONFIG_PATH` at it, and only then imports the SDK.
+That keeps Redact's models in `redact/.qvac/models` instead of a shared folder in your home directory.
+QVAC's background worker still keeps a little of its own state, a download registry and temporary files, in `~/.qvac` ([Where QVAC writes files](/docs/qvac/where-qvac-writes-files)).
+
+**It loads the OCR model.**
+
+```js
+modelId = await sdk.loadModel({
+  modelSrc: sdk.OCR_LATIN,
+  modelConfig: {
+    langList: ["en"],
+    magRatio: 1.5,
+    defaultRotationAngles: [90, 180, 270],
+    contrastRetry: false,
+    lowConfidenceThreshold: 0.5,
+    recognizerBatchSize: 1,
+  },
+});
+```
+
+`OCR_LATIN` is a catalog name for the detector and recognizer pair; the first call downloads them.
+`langList: ["en"]` reads English, `magRatio: 1.5` enlarges the image a little so small text is easier to detect, and `defaultRotationAngles` lets the recognizer try sideways text.
+`loadModel` returns a `modelId`, which every later call uses.
+
+**It reads the image.**
+
+```js
+const run = sdk.ocr({
+  modelId,
+  image: sourcePath,
+  options: { paragraph: false },
+});
+const [blocks, stats] = await Promise.all([run.blocks, run.stats]);
+```
+
+`paragraph: false` keeps each line as its own block instead of merging nearby lines.
+We want lines: a phone number should be its own box, not part of a paragraph.
+
+**It cleans up, even when something fails.**
+
+```js
+} finally {
+  if (sdk && modelId) {
+    await sdk.unloadModel({ modelId, clearStorage: false }).catch(() => undefined);
+  }
+  if (sdk) await sdk.close().catch(() => undefined);
+}
+```
+
+`unloadModel` frees the memory but keeps the downloaded files (`clearStorage: false`).
+`close` stops QVAC's background worker so the script can exit.
+
+## 3. Run it
 
 ```bash
 npm run qvac:ocr-smoke
 ```
 
-The first run downloads the OCR model, about 98 MB, into `redact/.qvac/models`, then reads the image.
-It prints JSON that starts like this:
+If you did lesson 00, nothing downloads here: the models are already in `redact/.qvac/models`.
+Otherwise the first run downloads the two model files, about 98 MB, which takes a minute or two depending on your connection, then reads the image.
+
+On a first run, QVAC's download logs come first, many lines starting `[QVACRegistryClient] [INFO] Downloading blob…`.
+They go to the same output and can't be redirected, so the JSON comes at the end.
+It starts like this:
 
 ```json
 {
@@ -55,7 +193,11 @@ It prints JSON that starts like this:
 
 Your digest, paths and exact numbers will differ.
 
-## 3. Read the blocks
+If it fails, the last line starts with `QVAC OCR smoke failed:`.
+The usual causes are an interrupted `npm ci` (run it again) or no internet on the first run (the model has to download once).
+If the message mentions `ENOENT` and `stat "…/.qvac"`, your `~/.qvac` is a broken link or isn't writable: replace it with a real folder (`mkdir ~/.qvac` once the old link is gone).
+
+## 4. Read the blocks
 
 Scroll through `blocks`.
 There are 12, one per line or phrase in the image:
@@ -75,14 +217,16 @@ Controlled test document
 no real personal information
 ```
 
-Notice the second line: OCR lost the dot in `example.com`.
-Its `confidence` is noticeably lower than the clean lines around it.
-That number says how sure OCR is about the characters, not whether the text is private.
+Notice the second line: OCR lost the dot in `example.com`, and its `confidence` is lower than the clean lines around it.
+Small mistakes like this are normal, and the rest of the course is built to live with them.
 
-Notice too that each block has a `bbox` of four numbers.
-They're pixel positions in the image; we'll use them in lesson 5.
+Notice too that the private details aren't always whole lines.
+"phone is +1 415 555 0184." mixes ordinary words with a number; we'll come back to that in lesson 06.
 
-## 4. Run it again
+Each `bbox` is four numbers: the top-left and bottom-right corners, in pixels of this image.
+They're what will let us draw boxes in exactly the right place, in lesson 05.
+
+## 5. Run it again
 
 ```bash
 npm run qvac:ocr-smoke
@@ -100,40 +244,42 @@ The output ends with `stats`, something like:
 ```
 
 The times are in seconds.
-Finding where the text is takes most of it; reading the characters is fast.
-Expect roughly 20 seconds per page on a recent laptop.
+Finding where the text is takes almost all of it; reading the characters is fast.
 
-Look in `redact/.qvac/models`: two files, `…craft_mlt_25k.gguf` (the detector) and `…latin_g2.gguf` (the recognizer).
+Look in `redact/.qvac/models`.
+There are two files: `…craft_mlt_25k.gguf` is the detector and `…latin_g2.gguf` the recognizer.
 
-## 5. Check your work
+## 6. Check your work
 
 ```bash
-npm test -- qvac-service/local-config.test.ts
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-The full `npm test` reports `Tests  35 passed (35)`.
-These tests don't run the model; the smoke run in step 2 is your proof that inference works.
+`npm test` reports `Tests  35 passed (35)`.
+These tests check the path logic in `local-config.ts`; they don't run the model.
+Your proof that the model works is the output of step 3.
 
-Record the checkpoint from the parent folder:
+## So what just happened?
+
+A model ran on your own machine and turned a picture into text with positions.
+It downloaded once, then worked from a folder inside the app.
+Nothing about the image left your computer.
+
+## Try it yourself
+
+Run the script on the photo-quality version of the same chat:
 
 ```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 02: read a page with local OCR"
+npm run qvac:ocr-smoke -- public/test-files/redact/chat-private.jpg
 ```
 
-## What we built
+Compare the `confidence` values with the PNG.
 
-A model ran on our own machine and turned an image into text with positions, and we watched it download once and then work from the local cache.
-Every AI feature in Redact starts from this evidence.
+## Where to next
 
-- Every file in this checkpoint: [`redact/` at `731eb40`](https://github.com/danielAsaboro/bring-ai-home/tree/731eb40b3f1e31aa214e83b3714d9171ed3443d8/redact)
-- [About local OCR](/docs/redact/concepts/local-ocr) and QVAC's [OCR documentation](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/)
-- Where those model files live: [Where QVAC writes files](/docs/qvac/where-qvac-writes-files)
+- Every file in this checkpoint: [`redact/` at `redact-02-first-ocr`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-02-first-ocr/redact)
+- [About local OCR](/docs/redact/concepts/local-ocr) and [OCR boxes and rotation](/docs/qvac/ocr-geometry)
 
-Next: [03.
-Start the local QVAC service](/docs/redact/tutorials/03-local-service)
+Next: [Start the local QVAC service](/docs/redact/tutorials/03-local-service) (lesson 03)

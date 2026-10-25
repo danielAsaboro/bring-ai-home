@@ -47,7 +47,7 @@ A wrong outline is worse than none, because a reviewer would trust it.
 
 Phones and scanners produce rotated pages.
 With rotation angles enabled, QVAC 0.22's recognizer reads sideways words in place, but returns one tall block per word.
-A name or account number is then spread across several blocks, which the language model can't reason about well.
+A name or account number is then spread across several blocks, which the decision model can't judge well one fragment at a time.
 
 Redact detects this case (a landscape page whose blocks are mostly taller than wide), runs OCR again on an upright copy, maps the new boxes back, and keeps whichever result reads as fewer, longer lines.
 On 0.17 the sideways read was poor, so "more readable characters wins" was enough; on 0.22 that rule kept the fragments and the rotated test case fell to 0.29 F1.

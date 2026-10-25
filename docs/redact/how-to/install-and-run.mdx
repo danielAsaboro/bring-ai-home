@@ -16,7 +16,7 @@ cd redact-app/redact
 npm ci
 ```
 
-`npm ci` takes about 3 minutes and writes about 2.8 GB to `node_modules`.
+`npm ci` writes about 2.8 GB to `node_modules`; it takes a few minutes on a first install and is much faster when npm's cache is warm.
 
 ## Start the local service
 
@@ -48,7 +48,8 @@ Open `http://localhost:3101`.
 3. Optionally fill **Additional direction**, for example `Redact direct identifiers, account numbers, and reference codes.` What you write here changes which fields are suggested.
 4. Select **Prepare for review**.
 
-The first analysis downloads about 550 MB of models into `.qvac/models` and can take a few minutes; a fresh download measured 3 minutes on a home connection.
+The first analysis downloads about 550 MB of models into `.qvac/models` and takes a few minutes, depending on your connection.
+The service terminal prints `[QVACRegistryClient] [INFO]` download lines meanwhile.
 Later analyses reuse the cache; OCR then takes roughly 20–30 seconds per page.
 
 If analysis fails or the service isn't running, the review screen still opens and you can mark the document by hand.

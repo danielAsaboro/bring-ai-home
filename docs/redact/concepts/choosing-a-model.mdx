@@ -1,0 +1,67 @@
+---
+title: "Choosing the right model for your data"
+description: "Start from the data you have, turn it into text if you need to, and pick the smallest model that answers your actual question."
+---
+
+Every local AI feature starts with the same question, and it isn't "which model is best?".
+It's "what kind of data do I have, and what do I need to know about it?".
+The answer narrows the choice to one or two kinds of model before you compare any of them.
+
+## Most models read text
+
+Language models, embedding models and decision models all take text as input.
+That makes text the common language of an AI pipeline.
+Anything that isn't text, an image, a scan, a recording, usually goes through a conversion step first.
+
+| Data | Conversion | What you get | QVAC docs |
+|---|---|---|---|
+| Screenshot, photo, scanned page | OCR | Exact text, line by line, with a box around each line | [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/) |
+| Screenshot, photo, scanned page | Vision-language model | A description or answer about the image | [Multimodal](https://docs.qvac.tether.io/sdk/ai-capabilities/multimodal/) |
+| Voice note, call, meeting | Speech-to-text | A transcript, optionally with timings and speakers | [Transcription](https://docs.qvac.tether.io/sdk/ai-capabilities/transcription/) |
+| PDF made by software | None: read its text layer | The text as written | |
+| Text | None | | |
+
+Once you have text, the second question is what you want from it.
+
+| You want to | Kind of model | QVAC docs |
+|---|---|---|
+| Answer fixed questions: is this a name, which team, how urgent | Decision model | [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) |
+| Find similar passages, search by meaning | Embedding model | [Text embeddings](https://docs.qvac.tether.io/sdk/ai-capabilities/text-embeddings/) |
+| Write new text: drafts, summaries, replies | Language model | [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/) |
+| Translate | Translation model | [Translation](https://docs.qvac.tether.io/sdk/ai-capabilities/translation/) |
+
+## OCR or a vision model?
+
+Both read images, but they answer different questions.
+A vision-language model is good at "what's in this picture?" and at reasoning about layout or diagrams.
+OCR is good at "what exactly does it say, and where?".
+
+If you need the precise characters, for search, for matching a pattern, or for covering them, OCR is the better fit.
+If you need positions, OCR is often the only fit: its boxes are in the image's own pixels, while a vision model's sense of "where" is approximate.
+OCR models are also much smaller and faster, which matters when everything runs on a laptop.
+
+A vision model is worth its size when the meaning isn't in the words: a photo of a rash, a chart's trend, whether a form is signed.
+
+## Speech: transcription first
+
+The same logic applies to audio.
+If you need to act on what was said, transcribe it and work with the text.
+If you need to know *when* something was said, to cut a clip or jump to a moment, choose a transcription model that returns timestamps.
+
+## Then pick the smallest model that works
+
+Within a kind, size is a trade: bigger models usually handle harder cases, but they take more disk, memory and time on every run.
+Start small, measure on real examples of your data, and only move up when the small one fails in ways that matter.
+QVAC's [assess model fit](https://docs.qvac.tether.io/sdk/models/assess-model-fit/) checks whether a model fits your machine before you download it.
+
+## How Redact chose
+
+Redact's input is screenshots and scanned PDFs, so the first step is turning images into text.
+It needs exact characters and exact positions, because it paints boxes over specific pixels, so it uses OCR rather than a vision model.
+Its question about each line is fixed in advance, "is this a name, an email, an account number?", so it uses a decision model, Laya, rather than a language model.
+
+## Related
+
+- [About local OCR](/docs/redact/concepts/local-ocr)
+- [About decision models](/docs/redact/concepts/decision-models)
+- [About choosing a model size](/docs/redact/concepts/model-size)

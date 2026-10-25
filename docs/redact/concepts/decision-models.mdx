@@ -1,69 +1,55 @@
 ---
-title: "About decision models and generative models"
-description: "Why Redact asks Laya yes/no questions instead of asking a language model to write JSON, and what that trade costs."
+title: "About decision models"
+description: "Why Redact asks Laya typed yes/no questions with probabilities, how the threshold works, and where the approach stops."
 ---
 
-For ten lessons, Redact's suggestions came from a generative model.
-Qwen3 0.6B read every OCR line and wrote a JSON list of the ones it thought were sensitive.
-That works, but look at how much of the surrounding code exists only to make it work: a JSON Schema turned into a grammar so the output parses, Zod to check it anyway, a rule that fails the whole run if an index repeats, fixed sampling settings so the same page gives the same list.
-Most of the effort is spent making text generation behave like classification.
+Redact's real question about each line of a page is small and fixed: does this contain a name, an email, an account number?
+A decision model is built for exactly that kind of question.
 
-A decision model skips the pretence.
 [Laya](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) doesn't write anything.
-You give it some text and a set of questions you wrote in advance, and it returns a number for each: the probability that "this text contains a person's name" holds.
-Redact's question was always a set of yes/no questions; now the model's interface matches it.
+You give it some text and questions you wrote in advance, and it returns a probability for each answer.
 
-## What changes
+## Why typed questions fit
 
-**Shape is no longer a risk.**
-With Qwen, a malformed answer is a failure mode we had to code for ("Local reasoning returned invalid candidates").
-With Laya, the result is a fixed structure: one probability per question per line.
-There is no output to parse.
+The answer has a fixed shape: one probability per question per line.
+There is no free text to parse, no output that can be malformed, and nothing for the app to repair.
+The model can't invent a line that isn't on the page either, because it only ever answers about the lines it was given.
 
-**Probabilities mean something.**
-Qwen's `confidence` field is a number the model writes, like any other token.
-Laya's probability comes from the model's own scoring of each option.
-That's what makes a threshold, and later a sensitivity slider, honest.
+The probability comes from the model's own scoring of each option, not from a number it writes.
+That makes a threshold meaningful, and it would make a sensitivity slider honest.
+Laya also gives the same answers on every run, with no sampling settings to pin.
 
-**Answers repeat without tuning.**
-On SDK 0.22, one run in three of the Qwen evaluation gave different results until we set `temp: 0` and a seed.
-Laya gave identical answers on every run with no settings at all.
+It is quick, too.
+On Redact's labelled pages, Laya decides a 12-line page in under a second, while OCR on the same page takes 20 to 30.
+A step that cheap can run twice, which is what makes the copy check in [lesson 11](/docs/redact/tutorials/11-copy-check) affordable.
 
-**It's faster where it matters.**
-On Redact's labelled pages Laya decides a 12-line page in about 0.8 seconds; Qwen took 5 to 7.
-OCR still takes 20 to 30 seconds per page, so the whole analysis is only modestly faster.
-But a decision that cheap can run again.
-That's what made the copy check in [lesson 11](/docs/redact/tutorials/11-laya-decisions) affordable: it repeats the analysis on the flattened copy.
+## How the threshold works
 
-## What it costs
+Redact asks one `noul` question per field, such as "This text contains a person's name.", plus one built from the typed direction.
+For each line it takes the most likely question and keeps it only if the probability is at least 0.5.
+Lower thresholds catch more fields and ask the reviewer to reject more; higher ones show fewer, surer suggestions.
+[Decision questions](/docs/redact/reference/decision-questions) lists every question and the exact rule.
 
-The two models fail differently.
-On the four evaluation pages, Laya found every labelled field on three of them and added one suggestion the labels didn't expect: `keep the amount confidential.`, which it flagged because the user's direction asked to hide sensitive content.
-Qwen never added an extra suggestion but missed one field on three pages.
+## How you ask matters
 
-For a privacy tool, that difference matters more than the F1 scores, which are close (0.83 to 0.92 against 0.91 to 1.0).
-An extra suggestion costs one click on **Reject**.
-A missed field is something the person has to notice on their own.
-Redact keeps a human in charge of every mark ([About Redact's trust boundary](/docs/redact/concepts/trust-boundary)), so leaning towards recall is the safer error.
+A single multiple-choice question failed badly in testing.
+Asked "which kind of information is this?", with `none` among the options, Laya answered `none` at 98% for a name, an email and a street address.
+Asked one yes/no statement per field, the same model caught all six fields on the test chat.
+Decision models reward statements a person could check against the text, one fact at a time.
 
-How you ask matters a lot.
-A single multiple-choice question ("which kind of information is this?", with "none" among the options) failed badly in our tests: Laya answered "none" at 98% for the name, the email and the address.
-Asking one yes/no question per field caught all six.
-Decision models reward questions written as statements a person could check.
+## Where it stops
 
-Laya is also slightly bigger on disk than Qwen3 0.6B (450 MB against 382 MB), and it can only answer questions.
-If Redact needed to explain a suggestion in its own words, or rewrite text, it would need a generator again.
+On the four evaluation pages Laya finds every labelled field on three and adds one suggestion the labels didn't expect: "keep the amount confidential.", flagged by the direction question.
+Its F1 scores are 0.83 to 0.92.
+For a privacy tool that's the safer kind of error: an extra suggestion costs one click on **Reject**, while a missed field is something the reviewer has to notice alone.
 
-## When to use which
-
-Use a decision model when the answer is a choice you can list in advance: is this sensitive, which team handles this, how urgent is it.
-Use a generative model when the answer is new text.
-Many apps need both.
-The useful habit is noticing when you're forcing a generator to fill in a form; often the form is the real question.
+Laya can only answer the questions it's given.
+It can't explain a suggestion in its own words, summarise a document, or spot a kind of sensitive field nobody thought to ask about.
+Those would need a generative model, and the human review in [About Redact's trust boundary](/docs/redact/concepts/trust-boundary) still matters either way.
 
 ## Related
 
 - [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) (official)
-- [Structured output](/docs/qvac/structured-output), the generative route
 - [Decision questions](/docs/redact/reference/decision-questions)
+- [How to ask Laya your own questions](/docs/redact/how-to/ask-laya-questions)
 - [About measuring suggestions](/docs/redact/concepts/measuring-suggestions)

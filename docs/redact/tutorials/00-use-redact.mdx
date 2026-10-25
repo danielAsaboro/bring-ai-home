@@ -8,8 +8,10 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 <LessonVideo title="Redact · 00. Use Redact" />
 
 Yes, to all four questions.
+
 In this course we build **Redact**, a small web app that finds the private details in a screenshot or PDF, lets you decide what to cover, and saves a clean copy you can share.
 Every AI model runs on your own computer, through [QVAC](https://docs.qvac.tether.io/), Tether's SDK for local AI.
+
 The document never leaves the machine; the only download is the models, once.
 
 ## Here's how it works
@@ -41,6 +43,11 @@ QVAC runs both kinds of model Redact needs, a text reader and a decision model, 
 There is no server to host, no API key, and no request that leaves the computer.
 It runs on macOS, Linux and Windows, using the GPU where there is one.
 
+<Note>
+This course first used a small local language model (Qwen3 0.6B) writing JSON suggestions.
+We replaced it with Laya: on our evaluation it decided a page in under a second instead of 5–7 seconds, gave the same answers on every run, and scored about the same (F1 0.83–0.92 against 0.91–1.00).
+</Note>
+
 ## What runs on your machine
 
 Redact is two processes on your machine:
@@ -60,7 +67,9 @@ The models download once, into `redact/.qvac/models`:
 ## What it'll cost you
 
 - **Disk:** about 4 GB: 2.8 GB of dependencies and about 550 MB of models.
+  Add about 550 MB if you run the browser tests in lesson 10, which install Playwright's Chromium.
 - **Network:** only for installing and the first run, which downloads the models.
+  The models take a few minutes, depending on your connection.
 - **Time:** on an Apple Silicon Mac, OCR takes 20–30 seconds per page, Laya's decisions under a second, and the final check of the copy about 25 seconds.
 - **Limits:** it doesn't claim legal-grade redaction or catch everything.
   [About what Redact does not protect](/docs/redact/concepts/threat-model) lists what it can't do.
@@ -80,11 +89,13 @@ The **Build it** lessons start from that template and add the AI one step at a t
 |---|---|
 | [01](/docs/redact/tutorials/01-starter) | Run the template and redact a document by hand |
 | [02–05](/docs/redact/tutorials/02-first-ocr) | Local OCR: read a page, run a local service, line the boxes up with the page |
-| [06–07](/docs/redact/tutorials/06-suggestions) | Suggestions from a local model, and a review step where you accept or reject each one |
+| [06](/docs/redact/tutorials/06-suggestions) | Laya, a local decision model, suggests which lines are sensitive |
+| [07](/docs/redact/tutorials/07-review) | A review step where you accept or reject each suggestion |
 | [08–10](/docs/redact/tutorials/08-failure-recovery) | Recovery when analysis fails, a measured evaluation, and proof it works offline |
-| [11](/docs/redact/tutorials/11-laya-decisions) | Swap the generator for Laya, and check the copy before it's shared |
+| [11](/docs/redact/tutorials/11-copy-check) | A local check of the copy before it's shared |
 
-You can [download the template](/docs/downloads/redact/redact-starter.zip) now, or get it in lesson 01.
+The template is the tag `redact-01-starter` on GitHub.
+[Lesson 01](/docs/redact/tutorials/01-starter) gets it with `git switch -c my-redact redact-01-starter`, and every later lesson adds one tagged commit.
 
 ## But first, try the finished app
 
@@ -95,12 +106,14 @@ You need Node.js 22.17 or newer, Git, about 4 GB of free disk, and an internet c
 ## 1. Get the app
 
 ```bash
-git clone --branch course/redact-qvac https://github.com/danielAsaboro/bring-ai-home redact-app
-cd redact-app/redact
+git clone --branch course/redact-qvac https://github.com/danielAsaboro/bring-ai-home redact-course
+cd redact-course/redact
 npm ci
 ```
 
-`npm ci` takes a few minutes and ends with an `added … packages` line.
+The clone is called `redact-course` because lesson 01 reuses it.
+`npm ci` takes a few minutes on a first install, and is much faster when npm's cache is warm.
+It ends with an `added … packages` line.
 The QVAC SDK and its native engines are most of the 2.8 GB it installs.
 
 ## 2. Start the local AI service
@@ -129,7 +142,8 @@ Open a second terminal in the same `redact` folder and run:
 npm run dev -- --port 3101
 ```
 
-When it prints `Ready`, open [http://localhost:3101](http://localhost:3101). You'll see **What do you need to share safely?** and a drop zone.
+When it prints `Ready`, open [localhost:3101](http://localhost:3101).
+You'll see **What do you need to share safely?** and a drop zone.
 
 ## 4. Choose the document and a privacy level
 
@@ -150,8 +164,9 @@ Select **Prepare for review**.
 ## 5. Wait for the first analysis
 
 The screen shows **Preparing locally** while the page is read.
-The first time, QVAC downloads the OCR model and Laya, the decision model that suggests what to cover, about 550 MB in all, into `redact/.qvac/models`, so expect a few minutes.
-Watch the service terminal: it stays quiet unless something fails.
+The first time, QVAC downloads the OCR model and Laya, the decision model that suggests what to cover, about 550 MB in all, into `redact/.qvac/models`, so expect a few minutes, depending on your connection.
+Meanwhile the service terminal prints many `[QVACRegistryClient] [INFO] Downloading blob…` lines.
+After the download it stays quiet unless something fails.
 
 Later runs skip the download.
 Reading one page then takes about 20–30 seconds.
@@ -215,6 +230,5 @@ The models stay in `redact/.qvac/models` for next time.
 
 ## Where to next
 
-- Build this app yourself, starting from a version with no AI: [01.
-  Run the manual starter](/docs/redact/tutorials/01-starter).
+- Build this app yourself, starting from a version with no AI: [Run the manual starter](/docs/redact/tutorials/01-starter) (lesson 01).
 - Why a suggestion never covers anything on its own: [About Redact's trust boundary](/docs/redact/concepts/trust-boundary).

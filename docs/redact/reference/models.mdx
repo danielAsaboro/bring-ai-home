@@ -23,42 +23,25 @@ Models download on first use into `redact/.qvac/models/` and load from there aft
 
 Official page: [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/).
 
-## Suggestions: `LAYA_421M_Q8_0` (default)
+## Suggestions: `LAYA_421M_Q8_0`
 
 | Item | Value |
 |---|---|
 | SDK constant | `LAYA_421M_Q8_0` |
 | Health ID | `laya-421m-q8` |
 | File | `laya-Q8_0.gguf` (450 MB) |
-| Loaded in | `qvac-service/decision-reasoner.ts` |
+| Loaded in | `qvac-service/reasoning.ts` |
 | `modelType` | `llamacpp-decision` |
 | `modelConfig` | `{ device: "gpu" }` |
 | Questions | [Decision questions](/docs/redact/reference/decision-questions) |
 
 Official page: [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/).
 
-## Suggestions with `REDACT_REASONER=qwen`: `QWEN3_600M_INST_Q4`
-
-| Item | Value |
-|---|---|
-| SDK constant | `QWEN3_600M_INST_Q4` |
-| Health ID | `qwen3-600m-instruct-q4` |
-| File | `Qwen3-0.6B-Q4_0.gguf` (382 MB) |
-| Loaded in | `qvac-service/reasoning.ts` |
-| `ctx_size` | `4096` |
-| `responseFormat` | `json_schema`, name `redaction_candidates` |
-| `generationParams` | `{ temp: 0, seed: 42 }` |
-| System prompt ends with | `/no_think` |
-
-Official page: [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/).
-Stand-in: [Structured output](/docs/qvac/structured-output).
-
 ## Totals
 
 | Item | Value |
 |---|---|
-| Download, OCR and Laya (default) | about 550 MB |
-| Download, Qwen3 0.6B (only with `REDACT_REASONER=qwen`) | 382 MB more |
+| Download, OCR and Laya | about 550 MB |
 | `@qvac/sdk` | 0.22.0 |
 
 ## Measured times
@@ -69,8 +52,7 @@ Apple Silicon Mac, 36 GB RAM, macOS 27, `@qvac/sdk` 0.22.0, the 1600 × 1200 tes
 |---|---|
 | OCR, one page, model warm | 18–30 s |
 | OCR, rotated page (two OCR passes) | about 35 s |
-| Laya decisions, one page | 0.8–1 s |
-| Qwen suggestions, one page | 2–9 s |
+| Laya decisions, one page | 0.6–1 s |
 | Copy check after **Done**, one page | about 25 s |
 | First browser analysis, models downloading | about 3 min (one measurement) |
 | Labelled evaluation, four images | about 2 min |
@@ -79,5 +61,5 @@ Pages are analysed one after another.
 
 ## Related
 
-- [How to use a larger reasoning model](/docs/redact/how-to/use-a-larger-model)
+- [How to ask Laya your own questions](/docs/redact/how-to/ask-laya-questions)
 - [About choosing a model size](/docs/redact/concepts/model-size)

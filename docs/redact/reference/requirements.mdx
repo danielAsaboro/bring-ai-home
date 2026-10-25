@@ -28,15 +28,17 @@ See [QVAC system requirements](https://docs.qvac.tether.io/sdk/system-requiremen
 | `node_modules` after `npm ci` | 2.8 GB |
 | Models in `.qvac/models` | about 550 MB |
 | `.next` dev and build output | about 300 MB |
+| Playwright's Chromium, only for browser tests | about 550 MB |
 
-Plan for about 4 GB free per checkout.
+Plan for about 4 GB free per checkout, plus about 550 MB if you run the browser tests.
 
 ## Network
 
 | Step | Network |
 |---|---|
 | `npm ci` | Needed |
-| First OCR or analysis | Needed, to download models |
+| First OCR or analysis | Needed, to download models: a few minutes, depending on your connection |
+| `npx playwright install chromium` | Needed once; took about five and a half minutes in testing |
 | Later runs | Not needed once both models are cached |
 
 ## Tested on

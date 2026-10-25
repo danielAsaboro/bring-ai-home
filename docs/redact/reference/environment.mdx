@@ -11,7 +11,6 @@ description: "Variables Redact reads, variables it sets, and what it writes to d
 | `NEXT_PUBLIC_REDACT_QVAC_URL` | `src/features/redact/analysis-client.ts` | `http://127.0.0.1:4317` | Service URL the browser calls. Read at build time. |
 | `REDACT_BASE_URL` | `playwright.config.ts` | `http://localhost:3101` | App URL for browser tests |
 | `REDACT_LIVE_QVAC` | `e2e/offline-qvac-workflow.spec.ts` | unset | `1` enables the live QVAC browser test |
-| `REDACT_REASONER` | `qvac-service/reasoner-choice.ts` | `laya` | Suggestion model: `laya` or `qwen` |
 | `REDACT_EVALUATION_CASE` | `qvac-service/evaluation-cli.ts` | unset | Runs one case: `chat-clear`, `chat-rotated`, `chat-low-contrast`, or `chat-partially-obscured` |
 
 ## Variables Redact sets
@@ -22,6 +21,9 @@ Each QVAC entry point sets these inside its own process before importing `@qvac/
 |---|---|---|
 | `QVAC_CONFIG_PATH` | `redact/.qvac/config.json` | `index.ts`, `ocr-smoke.mjs`, `evaluation-cli.ts`, `offline-cli.ts` |
 | `SNAP_USER_COMMON` | `redact/.qvac/runtime-home` | `index.ts`, `evaluation-cli.ts`, `offline-cli.ts` |
+
+`ocr-smoke.mjs` doesn't set `SNAP_USER_COMMON`, so its QVAC worker keeps its registry and temporary files in `~/.qvac`.
+Its models still go to `redact/.qvac/models`.
 
 See [Where QVAC writes files](/docs/qvac/where-qvac-writes-files).
 

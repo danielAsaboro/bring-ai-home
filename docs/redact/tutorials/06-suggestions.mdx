@@ -1,42 +1,168 @@
 ---
-title: "06. Ask a local model which fields are sensitive"
-description: "We will add a second local model that reads the OCR text and nominates which blocks to cover, then watch its suggestions appear beside the document."
+title: "06. Ask Laya which lines are sensitive"
+description: "We will add Laya, QVAC's local decision model, ask it one yes/no question per field about every OCR line, and watch grounded suggestions appear beside the document."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
-<LessonVideo title="Redact · 06. Ask a local model which fields are sensitive" />
+<LessonVideo title="Redact · 06. Ask Laya which lines are sensitive" />
 
-In this lesson we will add a small language model, Qwen3 0.6B, that runs on your machine, reads the text OCR found, and suggests which blocks are sensitive.
-By the end, the review screen lists six suggestions for the fictional chat, each tied to text that is really on the page.
+After lesson 05, Redact can read every line on the page and outline exactly where it sits.
+But it still has no idea which of those lines matter.
+"Maya Chen" and "Thanks" get the same grey outline.
+In this lesson we ask a second local model to tell them apart.
 
-**Checkpoint:** [`4e3987d`](https://github.com/danielAsaboro/bring-ai-home/commit/4e3987d07a230b0c88a7ab3574d31e5e6f25db0c), starting from `bcfd046`
+**Checkpoint:** [`redact-06-laya`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-06-laya/redact), after `redact-05-coordinates`
 
-## 1. Apply the lesson's changes
+## A model that answers instead of writing
 
-Download [`06-sensitive-suggestions.patch`](/docs/downloads/redact/06-sensitive-suggestions.patch) into your Downloads folder.
-Stop the app and the service, then from the parent `redact-course` folder:
+The first idea most people have is a chat model: paste in the OCR lines and ask "which of these are private?".
+That works, but a language model *writes* its answer.
+You then have to parse its text, check it didn't invent a line, and hope it answers the same way next time.
+
+Our question is narrower than that.
+For each line we want to know: is this a name, an email, a phone number, an address, an account number?
+That's a fixed list of yes/no questions, known in advance.
+
+A **decision model** is built for exactly this.
+[Laya](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) takes a piece of text and questions you define, and returns a probability for each answer.
+It never writes anything, so there's nothing to parse and nothing it can make up.
+For more on when to reach for which kind of model, see [Choosing the right model for your data](/docs/redact/concepts/choosing-a-model).
+
+## How you ask matters
+
+There are two ways to put our question to Laya.
+
+| Way of asking | What Laya said on our chat, in a direct test without a typed direction |
+|---|---|
+| One multiple-choice question: "What kind of information is this?", with options name, email, address… and **none** | "none" at 98% for `Maya Chen`, for the email and for the address |
+| One yes/no statement per field: "This text contains a person's name." | name 0.85, email 0.97, address 0.88, phone 1.00, account 0.93, reference 0.83 |
+
+The second way caught all six private fields.
+The highest score any ordinary line got was 0.37, for "My".
+Decision models do best with plain statements a person could check, one fact at a time.
+In the app the numbers on each card will differ a little, for example 100% for the account and 82% for the reference, because a typed direction adds one more question and each card shows the strongest answer for its line.
+
+So Redact asks every line a short set of statements and keeps the one Laya is most sure about.
+If even that one is below **0.5**, the line isn't suggested.
+
+## Two safety nets
+
+A probability is still a guess, so Redact checks it against the page.
+
+First, Laya only ever answers about lines OCR already found.
+It can point at a line; it can't create one, so a suggestion can't cover text that isn't there.
+
+Second, a set of plain rules re-checks each answer against the line's own text.
+An `@` makes it an email, "account" plus digits makes it an account number, and so on.
+If the rules disagree with Laya, the rules win; if they find nothing, the suggestion is dropped.
+[About grounded suggestions](/docs/redact/concepts/grounded-suggestions) explains why.
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
 
 ```bash
-git apply --check ~/Downloads/06-sensitive-suggestions.patch
-git apply ~/Downloads/06-sensitive-suggestions.patch
+git cherry-pick redact-06-laya
 cd redact
-npm ci
 ```
 
-`--check` prints nothing when the patch fits.
-If it reports an error, your folder doesn't match lesson 05's checkpoint; fix that before going on.
+No packages change, so there's nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-05-coordinates...redact-06-laya).
 
-## 2. Look at what the model may answer
+The files that matter:
 
-Open `qvac-service/reasoning.ts` and find `CANDIDATE_JSON_SCHEMA`.
-Notice that a suggestion is only a `blockIndex`, a `label` from a fixed list of eleven, an `explanation` and a `confidence`.
-The model can point at a block OCR already found; it can't invent text or coordinates.
+| File | What changed |
+|---|---|
+| `qvac-service/reasoning.ts` | New: the questions, the threshold, and the Laya reasoner |
+| `qvac-service/candidate-validation.ts` | New: the rules that re-check each suggestion against its text |
+| `qvac-service/index.ts` | Loads Laya and hands it to the analyzer |
+| `qvac-service/qvac-analyzer.ts` | After OCR, passes the lines to Laya and returns its suggestions |
+| `src/features/redact/analysis-contract.ts` | Adds the suggestion shape and the eleven labels |
+| `src/features/redact/RedactApp.tsx` | Ties each suggestion to its OCR line on the page |
+| `src/features/redact/components/ReviewStage.tsx` | Shows the **Suggested redactions** list |
+| `qvac-service/reasoning.test.ts`, `candidate-validation.test.ts` | Tests for both |
 
-Further down, the `completion()` call passes `responseFormat: { type: "json_schema", ... }` and `generationParams: { temp: 0, seed: 42 }`.
-The first forces the answer into that shape ([Structured output](/docs/qvac/structured-output)); the second makes the same page give the same answer every time.
+## 2. Read the questions
 
-## 3. Start the service and the app
+Open `qvac-service/reasoning.ts`.
+The questions are plain sentences:
+
+```ts
+export const DECISION_THRESHOLD = 0.5;
+
+const privateQuestions = {
+  name: "This text contains a person's name.",
+  email: "This text contains an email address.",
+  phone: "This text contains a telephone number.",
+  address: "This text contains a street address.",
+  account: "This text contains a bank, card or account number.",
+  identity: "This text contains a passport, national ID or employee ID number.",
+} as const;
+```
+
+The **Confidential** level adds four more: amount, date, reference and business.
+Each key becomes the label of the suggestion if Laya says yes.
+
+Your typed direction becomes one more question:
+
+```ts
+  if (direction.trim()) {
+    questions.direction = {
+      type: "noul",
+      instructions: `This text is something the user asked to hide: ${direction.trim()}`,
+    };
+  }
+```
+
+`noul` is QVAC's question type for a yes/no statement: Laya answers with the probability that the statement holds.
+A "yes" to this one becomes a suggestion labelled **other**.
+
+## 3. Read how Laya is called
+
+Still in `reasoning.ts`, the model is loaded once, the first time a page needs it:
+
+```ts
+    loading ??= options.runtime.loadModel({
+      modelSrc: options.modelSource,
+      modelType: "llamacpp-decision",
+      modelConfig: { device: "gpu" },
+    });
+```
+
+`modelType: "llamacpp-decision"` tells QVAC this is a decision model, not a chat model.
+`device: "gpu"` runs it on the graphics chip when there is one.
+
+Then every OCR line goes in at once, with the same questions:
+
+```ts
+      const results = await options.runtime.decide({
+        modelId: loadedModelId,
+        states: input.blocks.map((block) => block.text),
+        questions,
+      });
+      if (results.length !== input.blocks.length) {
+        throw new Error("Local decisions did not match the OCR blocks");
+      }
+```
+
+`states` is the list of lines; `decide` returns one result per line, in the same order.
+If the counts don't match, something is wrong, so the whole analysis fails rather than guess which answer belongs to which line.
+
+Finally each line keeps its strongest answer, if it clears the threshold:
+
+```ts
+        const [question, probability] = Object.keys(questions)
+          .map((id) => [id, result.answers[id]?.noul ?? 0] as const)
+          .reduce((best, entry) => (entry[1] > best[1] ? entry : best));
+        if (probability < DECISION_THRESHOLD) return [];
+```
+
+Then the rules in `candidate-validation.ts` get the last word.
+In `index.ts` you'll see where it's wired up: `modelSource: qvac.LAYA_421M_Q8_0`, the 421-million-parameter Laya.
+
+## 4. Start the service and the app
 
 In one terminal:
 
@@ -51,9 +177,9 @@ In a second terminal:
 npm run dev -- --port 3101
 ```
 
-## 4. Run the two-model analysis
+## 5. Run the analysis
 
-Open [http://localhost:3101](http://localhost:3101) and upload `public/test-files/redact/chat-private.png`.
+Open [localhost:3101](http://localhost:3101) and upload `public/test-files/redact/chat-private.png`.
 Choose **Private** and type this in **Additional direction**:
 
 ```text
@@ -61,12 +187,13 @@ Redact direct identifiers, account numbers, and reference codes.
 ```
 
 Select **Prepare for review**.
-This first run also downloads the reasoning model, `Qwen3-0.6B-Q4_0.gguf` (382 MB), into `.qvac/models`, so give it a few minutes.
+If you did lesson 00, nothing downloads here: Laya is already in `.qvac/models`.
+Otherwise the first run downloads Laya, `laya-Q8_0.gguf` (450 MB), into `.qvac/models`, so give it a few minutes.
+After that, Laya's part takes under a second per page; OCR is still most of the wait.
 
-## 5. Read the suggestions
+## 6. Read the suggestions
 
-The review screen now has a **Suggested redactions** panel headed **6 suggested redactions**.
-You should see:
+The review screen now has a **Suggested redactions** panel with seven suggestions:
 
 | Label | Text |
 |---|---|
@@ -76,52 +203,65 @@ You should see:
 | phone | phone is +1 415 555 0184. |
 | account | will use account 8841 0932 |
 | reference | and reference APOLLO-4471 |
+| other | keep the amount confidential. |
 
-Each card shows a sensitivity percentage: about 93% for the name, 97% for the account, 69% for the reference.
-That number is the model's own score, not a probability.
-Notice that "My", "Got it." and "Thanks" are on the page but not suggested, and that "keep the amount confidential." isn't suggested either: amounts belong to the **Confidential** level, not **Private**.
+Each card shows a percentage followed by **sensitivity**: Laya's probability for the field it picked.
+Below it is a short sentence such as "The block contains a person name.": that comes from the rules, not from the model.
+On **Original**, each suggested line gets its own outline.
 
-The direction text matters.
-Change it, or leave it empty, and prepare the page again: the list can change.
-Run it twice with the same settings, and the list stays the same.
+Notice what's missing: "My", "Got it." and "Thanks" are on the page but not suggested.
+Notice too that "reference" appears even though it isn't a **Private** field: your direction asked for reference codes.
+And "keep the amount confidential." is labelled **other**, because only the direction question said yes to it.
 
 At this checkpoint the suggestions are only shown.
-They don't cover anything yet; that comes in the next lesson.
+They don't cover anything yet; that's the next lesson.
 
-## 6. Run the checks
+## If something goes wrong
 
-Stop both terminals, then run the lesson's tests:
+- **The review screen says "Local analysis is unavailable. You can still redact by hand."** The service isn't running or isn't ready.
+  Check the first terminal.
+- **The first run seems stuck.**
+  It's downloading 450 MB.
+  Watch `.qvac/models` grow, then try again.
+- **No suggestions at all.**
+  Check the privacy level and direction; with **Private** and no direction, fewer fields are asked about.
+
+## 7. Check your work
+
+Stop both terminals, then run this lesson's tests:
 
 ```bash
 npm test -- qvac-service/reasoning.test.ts qvac-service/candidate-validation.test.ts
 ```
 
-Then the full checks, one at a time:
+Then the full checks:
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-`npm test` should end with `Tests  68 passed (68)`.
-Record the checkpoint from the parent folder:
+`npm test` reports `Tests  63 passed (63)`.
+The reasoning tests use a fake Laya, so they check the logic without the model.
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 06: ask a local model which fields are sensitive"
-```
+## So what just happened?
 
-## What we built
+A second local model now reads every line OCR found and answers a fixed set of questions about it.
+Its answers are probabilities, filtered by a threshold and re-checked by plain rules against the text itself.
+What reaches the screen is a list of suggestions, each tied to a real line on the page.
 
-A second local model that reads OCR text and nominates sensitive blocks, constrained to a fixed schema and checked against the page's own text before anything reaches the screen.
-Every suggestion is still just a proposal.
+## Try it yourself
 
-- Every file in this checkpoint: [`redact/` at `4e3987d`](https://github.com/danielAsaboro/bring-ai-home/tree/4e3987d07a230b0c88a7ab3574d31e5e6f25db0c/redact)
-- Why suggestions are re-checked against OCR text: [About grounded suggestions](/docs/redact/concepts/grounded-suggestions)
-- QVAC: [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/)
+Prepare the same chat again, this time with **Confidential** and an empty direction.
+Compare the list: which fields appear because of the level, and which disappear without the direction?
+Then open `reasoning.ts`, change `DECISION_THRESHOLD` to `0.9`, restart the service, and see which suggestions survive.
+Set it back to `0.5` when you're done.
 
-Next: [07.
-Accept or reject each suggestion](/docs/redact/tutorials/07-review)
+## Where to next
+
+- Every file in this checkpoint: [`redact/` at `redact-06-laya`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-06-laya/redact)
+- [About decision models](/docs/redact/concepts/decision-models) and the full list in [Decision questions](/docs/redact/reference/decision-questions)
+- QVAC: [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/)
+
+Next: [Accept or reject each suggestion](/docs/redact/tutorials/07-review) (lesson 07)

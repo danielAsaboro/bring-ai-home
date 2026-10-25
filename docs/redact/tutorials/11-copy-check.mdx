@@ -1,0 +1,229 @@
+---
+title: "11. Check the copy before it's shared"
+description: "We will have Redact read its own flattened copy with local OCR and Laya, and list anything private that is still readable before you save it."
+---
+
+import { LessonVideo } from "/snippets/lesson-video.jsx";
+
+<LessonVideo title="Redact · 11. Check the copy before it's shared" />
+
+Redact now suggests, you decide, and it saves a clean copy, even offline.
+But one mistake is still silent: a field nobody covered.
+In this lesson we give Redact a second pair of eyes that reads the finished copy before you share it.
+
+**Checkpoint:** [`redact-11-copy-check`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-11-copy-check/redact), after `redact-10-offline`
+
+## Why check the output, not just the input?
+
+Every check so far looked at the original document.
+But what you share is the copy, and the copy is what matters.
+If you rejected a suggestion by mistake, or a field was never suggested, the copy still shows it, and nothing has told you.
+
+The fix is simple to say: read the copy the same way we read the original.
+The covered fields are black boxes, so OCR finds no text there.
+Anything private that OCR *can* still read, and Laya still flags, is exactly what you'd be leaking.
+
+Because Laya decides a page in under a second, this second pass is cheap; most of its time is OCR.
+And it stays a reminder, not a gate: you may have left the email visible on purpose.
+More on why the person keeps the final say: [About Redact's trust boundary](/docs/redact/concepts/trust-boundary).
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
+
+```bash
+git cherry-pick redact-11-copy-check
+cd redact
+```
+
+No packages change, so there is nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-10-offline...redact-11-copy-check).
+
+| File | What changed |
+|---|---|
+| `src/features/redact/safe-copy.ts` | Keeps the flattened page images next to the saved file |
+| `src/features/redact/RedactApp.tsx` | Sends those pages back to the local service after **Done**; waits if the service is busy |
+| `src/features/redact/components/CompleteStage.tsx` | Shows the result of the check |
+| `src/app/globals.css` | Styles for the check |
+| `src/features/redact/RedactApp.test.tsx` | Tests for the check and the wait |
+
+## 2. Keep the flattened pages
+
+Open `src/features/redact/safe-copy.ts`.
+The copy already painted each page into new pixels; now it also hands those pages back:
+
+```ts
+export type GeneratedCopy = {
+  name: string;
+  mimeType: "image/png" | "application/pdf";
+  blob: Blob;
+  pageCount: number;
+  flattenedPages?: Uint8Array[];
+};
+```
+
+For a PDF, the saved file is a PDF, but the check needs page images.
+`flattenedPages` gives it exactly the pixels that went into the copy, page by page.
+
+## 3. Read the copy back
+
+Open `src/features/redact/RedactApp.tsx` and find `checkCopy`.
+Right after the copy is made, Redact starts it without waiting:
+
+```ts
+setGeneratedCopy(copy);
+void checkCopy(copy, exporting);
+```
+
+`checkCopy` sends each flattened page through the same analysis as the original, with the same privacy level and direction:
+
+```ts
+const result = await adapters.analysis.analyzePage({
+  documentId: `${reviewed.source.id}-copy`,
+  pageId: `${page.id}-copy`,
+  pageNumber: page.pageNumber,
+  width: page.width,
+  height: page.height,
+  pngBytes: pngBytes.slice().buffer as ArrayBuffer,
+  level: reviewed.configuration.level,
+  direction: reviewed.configuration.direction,
+});
+```
+
+Every suggestion that comes back is something private still readable on the copy, so it becomes a finding:
+
+```ts
+for (const candidate of result.candidates) {
+  findings.push({
+    pageNumber: page.pageNumber,
+    label: candidate.label,
+    text: result.ocrBlocks[candidate.blockIndex]?.text ?? "",
+  });
+}
+```
+
+The check ends in one of four states: `checking`, `clear`, `found`, or `unavailable` if the service can't be reached.
+If you go back to review or start a new document, `copyCheckSequence` moves on, so a late result from an old copy is ignored.
+
+## 4. Show the result
+
+Open `src/features/redact/components/CompleteStage.tsx`:
+
+```tsx
+{check?.status === "checking" && <p className="copy-check" role="status">Checking the copy locally for anything still readable…</p>}
+{check?.status === "clear" && <p className="copy-check copy-check-clear" role="status">Local check: nothing private is readable on the copy.</p>}
+```
+
+When something is found, it lists each finding's label and text, and the page number for multi-page copies.
+**Save copy** is never disabled by the check.
+
+## 5. Wait instead of failing
+
+The check uses the local service, which runs one analysis at a time.
+If you start the next document while a check is still running, the service is busy.
+Before, that showed "Local analyzer is busy"; now preparation waits:
+
+```ts
+const BUSY_POLL_MS = 1000;
+const BUSY_WAIT_MS = 60_000;
+```
+
+```ts
+let health = await adapters.analysis.health(controller.signal);
+for (let waited = 0; health.busy && waited < BUSY_WAIT_MS; waited += BUSY_POLL_MS) {
+  setAnalysisMessage("Waiting for the previous local check to finish…");
+  await new Promise((resolve) => setTimeout(resolve, BUSY_POLL_MS));
+  if (requestId !== analysisSequence.current) return;
+  health = await adapters.analysis.health(controller.signal);
+}
+```
+
+It asks the service every second, for up to a minute, then carries on.
+
+## 6. Start the service and the app
+
+In one terminal:
+
+```bash
+npm run qvac:service
+```
+
+In a second terminal:
+
+```bash
+npm run dev -- --port 3101
+```
+
+## 7. Leave one field visible on purpose
+
+Open [localhost:3101](http://localhost:3101).
+Upload `public/test-files/redact/chat-private.png`, choose **Private**, and type this direction:
+
+```text
+Redact direct identifiers, account numbers, and reference codes.
+```
+
+Select **Prepare for review**.
+You should see **7 suggested redactions**.
+
+Reject the **EMAIL** suggestion and accept the other six.
+Select **Done**.
+
+## 8. Watch the check
+
+The finished screen shows **Checking the copy locally for anything still readable…** for about 25 seconds.
+Then:
+
+![The copy check listing the email that is still readable](/docs/redact/images/laya-copy-check.png)
+
+**Still readable on the copy** lists the email.
+The covered fields are black boxes, so OCR found no text there; the email you rejected is still readable, so it's listed.
+**Save copy** stays enabled, because leaving the email visible was your decision.
+
+## 9. Cover it and check again
+
+Select **Return to review**.
+The **EMAIL** card still says `rejected`, and it keeps an **Accept** button: select it.
+The email is now covered; select **Done** again.
+This time the check reads **Local check: nothing private is readable on the copy.**
+
+Now select **Redact another document** and upload the chat again straight away.
+If the check is still running, you'll see **Waiting for the previous local check to finish…**, and analysis starts once the service is free.
+
+## If something goes wrong
+
+- **No check appears at all:** the service isn't running; start `npm run qvac:service` and select **Done** again.
+- **"Local analyzer is busy" after a minute:** something else is using the service; wait for it to finish, then select **Retry local analysis**.
+- **The check lists a field you covered:** your box doesn't fully cover the text; return to review and resize the mark.
+
+## 10. Check your work
+
+Stop both terminals, then:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
+`npm test` ends with `Tests  87 passed (87)`.
+
+## So what just happened?
+
+Redact now checks its own work.
+The same local OCR and Laya that suggested what to cover now read the copy before it leaves your machine.
+That catches the riskiest mistake, a field nobody covered, without taking the decision away from you.
+
+## Try it yourself
+
+Run the chat again and reject a different suggestion, such as the phone number, instead of the email.
+See whether the check catches it, and how the finding's label and text compare with the suggestion you rejected.
+
+## Where to next
+
+- Every file at this checkpoint: [`redact/` at `redact-11-copy-check`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-11-copy-check/redact)
+- [About Redact's trust boundary](/docs/redact/concepts/trust-boundary) and [Decision questions](/docs/redact/reference/decision-questions)
+
+You've built the whole app.
+Put it to work with the [how-to guides](/docs/redact/how-to/install-and-run), or read why it's built this way in [Concepts](/docs/redact/concepts/trust-boundary).

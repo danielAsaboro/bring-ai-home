@@ -15,10 +15,17 @@ If the error names another path, fix permissions there.
 
 ## `npm ci` or the first analysis fails with "no space left on device"
 
-**Cause:** Redact needs about 2.8 GB for `node_modules` and about 550 MB for models.
+**Cause:** Redact needs about 2.8 GB for `node_modules`, about 550 MB for models, and about 550 MB more for Playwright's Chromium if you run the browser tests.
 
 **Fix:** free space, then rerun.
 See [How to clear the model cache and free disk space](/docs/redact/how-to/clear-model-cache).
+
+## `npm run qvac:ocr-smoke` fails with `ENOENT` and `stat "…/.qvac"`
+
+**Cause:** the OCR script's QVAC worker keeps its registry in `~/.qvac`, and that path is a broken symlink or isn't writable.
+
+**Fix:** remove the broken link and create a real folder with `mkdir ~/.qvac`, then rerun.
+
 
 ## The service fails to start with a missing plugin or native module
 
@@ -26,9 +33,10 @@ See [How to clear the model cache and free disk space](/docs/redact/how-to/clear
 
 **Fix:** delete `node_modules`, run `npm ci` again, and check your OS and Node version against [requirements](/docs/redact/reference/requirements) and QVAC's [system requirements](https://docs.qvac.tether.io/sdk/system-requirements/).
 
-## The first analysis takes over a minute
+## The first analysis takes several minutes
 
-**Cause:** it downloads about 550 MB of models, then loads them.
+**Cause:** it downloads about 550 MB of models, which takes a few minutes depending on your connection, then loads them.
+The service terminal prints many `[QVACRegistryClient] [INFO]` lines while it downloads.
 
 **Fix:** none needed.
 Later runs take roughly 20–30 seconds of OCR per page.
@@ -51,21 +59,22 @@ Cancelling in the browser stops waiting but doesn't stop inference already runni
 If it doesn't clear, stop the service with Ctrl+C and start it again.
 Meanwhile, select **Continue without local analysis** to mark by hand.
 
-## The analysis fails with `Local reasoning returned invalid candidates`
+## The service logs `Local decisions did not match the OCR blocks`
 
-**Cause:** the model's answer named a block that doesn't exist or named one block twice, so the whole page's suggestions were rejected.
+The browser shows that local analysis is unavailable.
+
+**Cause:** Laya returned a different number of answers than there were OCR lines, so the page's suggestions were rejected.
 
 **Fix:** select **Try again**.
-If it repeats on the same page, check that `qvac-service/reasoning.ts` passes `generationParams: { temp: 0, seed: 42 }`; without it, answers vary between runs.
+If it repeats, check that `qvac-service/reasoning.ts` passes one state per OCR line to `decide()`.
 The review screen still lets you mark by hand.
 
 ## Suggestions miss fields you expected
 
-**Cause:** suggestions depend on the privacy level, your **Additional direction** text, OCR quality and a small 0.6B model.
-With no direction, Redact may suggest only a name.
+**Cause:** suggestions depend on the privacy level, your **Additional direction** text, OCR quality and a small 421M decision model.
 
 **Fix:** describe what to cover in the direction, choose **Confidential** for financial details, and always add manual marks for anything missed.
-To improve the model, see [How to use a larger reasoning model](/docs/redact/how-to/use-a-larger-model).
+To tune what Laya looks for, see [How to ask Laya your own questions](/docs/redact/how-to/ask-laya-questions).
 
 ## Outlines sit on the wrong text
 
@@ -108,7 +117,7 @@ With the service up, the page is still analysing.
 
 ## `QVAC cache is incomplete`
 
-**Cause:** the offline commands need the OCR detector, OCR recognizer and the suggestion model in `.qvac/models`: Laya by default, Qwen when `REDACT_REASONER=qwen`.
+**Cause:** the offline commands need the OCR detector, OCR recognizer and Laya in `.qvac/models`.
 
 **Fix:** [download the models](/docs/redact/how-to/download-models) while online.
 

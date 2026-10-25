@@ -1,32 +1,63 @@
 ---
 title: "05. Line OCR boxes up with the page"
-description: "We will convert OCR's pixel boxes into the editor's percentage boxes, work one out by hand, and see the outlines land exactly on the text."
+description: "We will convert OCR's pixel boxes into the editor's percentage boxes, work one out by hand, test the conversion against bad input, and see the outlines land on the text."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 05. Line OCR boxes up with the page" />
 
-In this lesson we will draw OCR's findings on the page.
-OCR returns boxes in pixels of the image it read; Redact's editor places marks in percentages of the page.
-We'll convert one box by hand, run the tests that try to break the conversion, and then watch the outlines line up with the text.
+At the end of lesson 04, Redact knew the text on the page but not where to show it.
+The OCR panel listed `Maya Chen`; the page itself showed nothing.
+Before any suggestion can become a black box, we need OCR's positions to land on exactly the right pixels in the editor.
 
-**Checkpoint:** [`bcfd046`](https://github.com/danielAsaboro/bring-ai-home/commit/bcfd046e2ed1d5c33495263901034ef4c5361e01), starting from `30293ed`
+**Checkpoint:** [`redact-05-coordinates`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-05-coordinates/redact), after `redact-04-connect-ocr`
 
-## 1. Apply the lesson patch
+## Two ways to describe a box
 
-Stop any running app or service.
-Download [`05-coordinate-mapping.patch`](/docs/downloads/redact/05-coordinate-mapping.patch) into your Downloads folder.
-From the parent `redact-course` folder:
+OCR and the editor describe the same rectangle in different languages.
+
+| | OCR's `bbox` | The editor's mark |
+|---|---|---|
+| Shape | `[x1, y1, x2, y2]` | `{ x, y, width, height }` |
+| Meaning | Top-left corner, bottom-right corner | Top-left corner, plus size |
+| Units | Pixels of the image OCR read | Percent of the page |
+
+The editor uses percentages because the page is drawn at different sizes: big on a monitor, small on a phone, scaled in the safe-share preview.
+A mark at `x: 17.5%` stays on the same word at any size.
+OCR uses pixels because that's all it knows: the image it was given.
+
+So every box needs converting once, from pixels to percentages, using the size of the exact image OCR read.
+That's why lesson 04's service refused images whose size didn't match the request.
+
+## Why be so strict about bad boxes?
+
+A wrong outline is worse than no outline.
+If an outline sits a line too low, a reviewer who trusts it covers the wrong words and shares the real ones.
+So the conversion fixes what it safely can, like corners given in the wrong order or a box that pokes past the page edge, and throws away what it can't.
+
+More on OCR's coordinates, including what rotation does to them: [OCR boxes and rotation](/docs/qvac/ocr-geometry).
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
 
 ```bash
-git apply --check ~/Downloads/05-coordinate-mapping.patch
-git apply ~/Downloads/05-coordinate-mapping.patch
+git cherry-pick redact-05-coordinates
 cd redact
-npm ci
 ```
 
-If `--check` reports an error, your previous lesson differs from the checkpoint; don't force it.
+No packages change, so there's nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-04-connect-ocr...redact-05-coordinates).
+
+| File | What changed |
+|---|---|
+| `src/features/redact/ocr-geometry.ts` | New: `normalizeOcrBbox`, the one conversion |
+| `src/features/redact/ocr-geometry.test.ts` | New: its tests |
+| `src/features/redact/workflow-domain.ts` | `OCRBlock` keeps both the raw pixel box and the converted one |
+| `src/features/redact/RedactApp.tsx` | Converts each block as it arrives and skips bad ones |
+| `components/DocumentSurface.tsx`, `ReviewStage.tsx`, `globals.css` | Draw the outlines on **Original** |
 
 ## 2. Convert one box by hand
 
@@ -37,8 +68,7 @@ In one run, OCR returned this box for `Maya Chen`:
 [211, 114, 397, 158]     x1, y1, x2, y2 in pixels
 ```
 
-The first two numbers are the top-left corner and the last two are the bottom-right corner.
-The editor wants a top-left corner plus a width and height, each as a percentage of the page:
+The editor wants the top-left corner and the size, each as a percentage of the page:
 
 ```text
 x      = 211 / 1200 × 100          = 17.583333
@@ -48,20 +78,83 @@ height = (158 − 114) / 1600 × 100  = 2.75
 ```
 
 Notice the subtraction.
-Dividing all four raw numbers by the page size would give a corner, not a size.
+Dividing all four numbers by the page size would give you the bottom-right corner, not the size, and every mark would be far too big.
 
-## 3. Check your arithmetic against the code
+## 3. Read the conversion
 
-Open `src/features/redact/ocr-geometry.test.ts`.
-The first test feeds exactly that box and page size into `normalizeOcrBbox` and expects:
+Open `src/features/redact/ocr-geometry.ts`:
 
 ```ts
-{ x: 17.583333, y: 7.125, width: 15.5, height: 2.75 }
+export function normalizeOcrBbox(
+  raw: readonly [number, number, number, number],
+  sourceWidth: number,
+  sourceHeight: number,
+): BoundingBox | null {
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error("Source dimensions must be positive");
+  }
+  if (!raw.every(Number.isFinite)) return null;
+
+  const x1 = clamp(Math.min(raw[0], raw[2]), sourceWidth);
+  const y1 = clamp(Math.min(raw[1], raw[3]), sourceHeight);
+  const x2 = clamp(Math.max(raw[0], raw[2]), sourceWidth);
+  const y2 = clamp(Math.max(raw[1], raw[3]), sourceHeight);
+  if (x2 <= x1 || y2 <= y1) return null;
+
+  return {
+    x: percentage(x1, sourceWidth),
+    y: percentage(y1, sourceHeight),
+    width: percentage(x2 - x1, sourceWidth),
+    height: percentage(y2 - y1, sourceHeight),
+  };
+}
 ```
 
-Your numbers should match.
+Read it top to bottom:
 
-## 4. Try to break it
+1. A page with no size is a bug, so it throws.
+2. A box with `NaN` or `Infinity` in it is skipped (`null`).
+3. `Math.min` and `Math.max` put the corners in order, whichever way OCR gave them.
+4. `clamp` pulls each edge back onto the page.
+5. If nothing is left, because the box had no width or lay entirely off the page, it's skipped.
+6. Otherwise it's converted, using `x2 - x1` for the width as you did by hand.
+
+`percentage` rounds to six decimal places, which is why you get `17.583333` instead of a long fraction.
+
+## 4. Read where it's used
+
+In `RedactApp.tsx`, each OCR block is converted as it arrives:
+
+```ts
+...result.ocrBlocks.flatMap((block, index) => {
+  const bbox = normalizeOcrBbox(block.bbox, page.width, page.height);
+  return bbox
+    ? [{
+        id: `ocr-${page.id}-${index + 1}`,
+        documentId: session.source.id,
+        pageId: page.id,
+        pageNumber: page.pageNumber,
+        text: block.text,
+        rawBbox: block.bbox,
+        bbox,
+        confidence: block.confidence,
+      }]
+    : [];
+}),
+```
+
+`flatMap` with an empty array is how a skipped box disappears.
+The block keeps `rawBbox` too, so you can always see what OCR originally said.
+
+`DocumentSurface.tsx` then draws one dashed outline per block, positioned with the percentages:
+
+```tsx
+{mode === "original" && evidence.map((block) => <span aria-label={`OCR evidence ${block.text}`} className="ocr-surface-evidence" key={block.id} style={{ left: `${block.bbox.x}%`, top: `${block.bbox.y}%`, width: `${block.bbox.width}%`, height: `${block.bbox.height}%` }} />)}
+```
+
+Only on **Original**, never on the safe-share preview: outlines show evidence, they don't cover anything.
+
+## 5. Try to break it
 
 Run only these tests:
 
@@ -73,10 +166,11 @@ npm test -- src/features/redact/ocr-geometry.test.ts
 Tests  3 passed (3)
 ```
 
-Read what they cover: corners given in the wrong order are put back in order, a box hanging off the page is clipped to it, and a box with `NaN` in it, no area, or lying entirely off the page comes back as `null` and is skipped.
-A page with a width of 0 throws an error instead, because then no box on it can be trusted.
+The first test is your hand calculation.
+The second feeds corners in the wrong order and far off the page, `[1300, 1700, -100, -200]`, and expects the whole page back.
+The third checks that `NaN`, a zero-width box and a box entirely off the page come back as `null`, and that a page with width 0 throws.
 
-## 5. See the outlines on the page
+## 6. See the outlines on the page
 
 Start the service in one terminal and the app in another:
 
@@ -90,42 +184,46 @@ npm run dev -- --port 3101
 
 Upload `public/test-files/redact/chat-private.png`, choose **Private**, and select **Prepare for review**.
 
-On **Original**, the header now reads **12 detected regions · drag to draw**, and every line of text has a thin outline drawn exactly around it.
+On **Original**, the header now reads **12 detected regions · drag to draw**, and every line of text has a thin dashed outline around it.
 Look at `Maya Chen`: the outline hugs the name.
 
 Now look at **Safe-share preview**.
 Nothing is covered.
-Outlines show where the text is; they aren't redactions.
-Drag across `Maya Chen` to cover it yourself.
+Drag across `Maya Chen` to cover it yourself, and notice your orange mark sits on top of OCR's dashed outline.
 
-## 6. Check your work
+## If something goes wrong
+
+- **Outlines are offset from the text:** the page the browser shows isn't the image OCR read.
+  That's what the size check in lesson 04 prevents; make sure you're on this lesson's code with `git log --oneline -1`.
+- **No outlines and "Drag to draw · drag marks to move" in the header:** no OCR blocks came back, usually because the service isn't running.
+  The OCR panel on the right will be missing too.
+
+## 7. Check your work
 
 Stop the app and service, then run:
 
 ```bash
-npm test -- src/features/redact/ocr-geometry.test.ts src/features/redact/RedactApp.test.tsx
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-The full `npm test` reports `Tests  49 passed (49)`.
+`npm test` reports `Tests  49 passed (49)`.
 
-Record the checkpoint from the parent folder:
+## So what just happened?
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 05: line OCR boxes up with the page"
-```
+OCR's pixel boxes now land on the right words in the editor, at any zoom.
+Boxes that would land in the wrong place are dropped instead of drawn.
+Every suggestion from here on is tied to one of these outlines.
 
-## What we built
+## Try it yourself
 
-One small conversion that every later feature relies on: OCR's pixels now land on the right words in the editor, and bad boxes are skipped instead of drawn in the wrong place.
+Pick another block from lesson 02's output, `phone is +1 415 555 0184.`, and convert its `bbox` by hand.
+Then upload the chat and check your numbers against where its outline sits, on the second line of the first message bubble.
 
-- Every file in this checkpoint: [`redact/` at `bcfd046`](https://github.com/danielAsaboro/bring-ai-home/tree/bcfd046e2ed1d5c33495263901034ef4c5361e01/redact)
-- What OCR's boxes mean, and what rotation does to them: [OCR boxes and rotation](/docs/qvac/ocr-geometry)
+## Where to next
 
-Next: [06.
-Ask a local model which fields are sensitive](/docs/redact/tutorials/06-suggestions)
+- Every file in this checkpoint: [`redact/` at `redact-05-coordinates`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-05-coordinates/redact)
+- [About local OCR](/docs/redact/concepts/local-ocr)
+
+Next: [Ask Laya which lines are sensitive](/docs/redact/tutorials/06-suggestions) (lesson 06)

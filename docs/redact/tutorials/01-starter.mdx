@@ -1,35 +1,62 @@
 ---
 title: "01. Run the manual starter"
-description: "We will unpack the Redact starter, cover a fictional chat's private details by hand, and save a separate flattened copy. Every later lesson keeps this workflow working."
+description: "We will get the Redact starter from GitHub, see how its manual workflow is built, cover a fictional chat by hand, and save a separate flattened copy that every later lesson must keep working."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 01. Run the manual starter" />
 
-In this lesson we will run Redact before it has any AI: upload a document, cover its private details by hand, and save a separate flattened copy.
-In the next nine lessons we add local AI to this app one commit at a time, and this manual path must keep working the whole way.
+Before any AI, Redact has to do its job by hand.
+In this lesson we run the base template, look at how it's put together, and use it to cover a document ourselves.
+Every later lesson adds AI on top of this, and this manual path has to keep working the whole way.
 
-**Checkpoint:** [`0eecfb4`](https://github.com/danielAsaboro/bring-ai-home/commit/0eecfb46c0790dec4bc3ae9e2d85607b54771d9f)
+**Checkpoint:** [`redact-01-starter`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-01-starter/redact)
 
-## 1. Unpack the starter
+## Why start without AI?
 
-Download [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) into your Downloads folder.
-Then:
+A suggestion is only useful if there's something to do with it.
+So the first thing Redact needs is the part a person uses: upload a file, draw boxes, check the result, save it.
+When the AI arrives in lesson 06, it slots into a workflow that already works, instead of being the workflow.
+
+That also gives us a fallback for free.
+If the local model is slow, missing or wrong, the person can still finish the job by hand.
+
+## What "flattened" means
+
+Covering text in a PDF editor usually just draws a black rectangle on top.
+The text underneath is still in the file: anyone can select it, copy it, or delete the rectangle.
+That's how lawyers for Paul Manafort leaked a "redacted" court filing in 2019.
+
+Redact avoids that by never editing your file.
+It turns each page into a picture, paints the black boxes into the pixels, and saves that picture as a new file.
+There's no text layer left to copy, and your original stays exactly as it was.
+More on this: [About flattened copies](/docs/redact/concepts/flattened-copies).
+
+## 1. Get the starter
+
+If you did lesson 00, stop the app and the service with `Ctrl+C` in both terminals.
+You're still inside `redact-course/redact`, so go up one folder and start your branch there:
 
 ```bash
-cd ~/Downloads
-unzip redact-starter.zip
-cd redact-course
-git init
-git add .
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Start Redact course"
+cd ..
+git switch -c my-redact redact-01-starter
 ```
 
-The zip holds a `redact-course` folder with the app in `redact-course/redact`.
-Git lives in `redact-course` because every lesson's patch names its files as `redact/...`.
+Otherwise, clone it first:
+
+```bash
+git clone https://github.com/danielAsaboro/bring-ai-home redact-course
+cd redact-course
+git switch -c my-redact redact-01-starter
+```
+
+You now have your own branch, `my-redact`, starting at the first lesson.
+Each later lesson adds its commit to this branch with `git cherry-pick`.
 
 ## 2. Install and start the app
+
+The app lives in the `redact` folder of the course branch:
 
 ```bash
 cd redact
@@ -37,9 +64,104 @@ npm ci
 npm run dev -- --port 3101
 ```
 
-When the terminal prints `Ready`, open [http://localhost:3101](http://localhost:3101). You'll see **What do you need to share safely?**
+If you came from lesson 00, `npm ci` reinstalls the packages for the starter, which has no AI packages yet.
 
-## 3. Cover a document by hand
+When the terminal prints `Ready`, open [localhost:3101](http://localhost:3101).
+You'll see **What do you need to share safely?**
+
+## 3. Take a tour of the code
+
+The whole workflow lives in `src/features/redact/`.
+Five files do the real work:
+
+| File | Job |
+|---|---|
+| `file-policy.ts` | Decides which files are accepted and how big they can be |
+| `rasterize.ts` | Turns an image or each PDF page into a PNG |
+| `workflow-domain.ts` | Holds the session: pages, marks, decisions and the audit trail |
+| `components/DocumentSurface.tsx` | Lets you draw, move and resize marks on the page |
+| `safe-copy.ts` | Paints the marks into new pixels and builds the output file |
+
+**`file-policy.ts` sets the limits.**
+
+```ts
+export const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+export const MAX_PDF_PAGES = 25;
+export const MAX_RASTER_LONG_EDGE = 2400;
+export const MAX_DIRECTION_CHARACTERS = 500;
+```
+
+Files over 25 MB or PDFs over 25 pages are refused up front, with a plain message, before anything heavy happens.
+Every page is drawn at most 2400 pixels on its long side, which keeps memory predictable.
+
+**`rasterize.ts` makes every page a PNG.**
+An image becomes one page; a PDF is drawn page by page with PDF.js, and the code checks the pages come back in order:
+
+```ts
+for await (const page of adapters.rasterPdf(bytes, MAX_RASTER_LONG_EDGE)) {
+  const expectedPageNumber = pages.length + 1;
+  if (page.pageNumber !== expectedPageNumber) {
+    throw new Error("Rasterized pages must be returned in page order");
+  }
+  pages.push(normalizePage(page, expectedPageNumber, file));
+}
+```
+
+From here on, nothing touches the uploaded bytes again; everything works on these page images.
+
+**`workflow-domain.ts` stores marks as percentages.**
+
+```ts
+export type RedactionMark = {
+  id: string;
+  documentId: string;
+  pageId: string;
+  pageNumber: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: RedactionLabel;
+  source: "manual" | "accepted";
+  createdAt: string;
+};
+```
+
+`x`, `y`, `width` and `height` are percentages of the page, not pixels.
+That's why a mark stays in the same place whether the page is shown small on your screen or drawn full size for the copy.
+`source` is `manual` for now; in lesson 07, marks you accept from a suggestion become `accepted`.
+
+**`DocumentSurface.tsx` turns your drag into those percentages:**
+
+```ts
+x: round(clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100)),
+y: round(clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)),
+```
+
+**`safe-copy.ts` turns them back into pixels and paints them.**
+The conversion is a small function called `markToPixelRect`:
+
+```ts
+const left = Math.max(0, Math.floor((mark.x / 100) * page.width));
+const top = Math.max(0, Math.floor((mark.y / 100) * page.height));
+const right = Math.min(
+  page.width,
+  Math.ceil(((mark.x + mark.width) / 100) * page.width),
+);
+```
+
+The left and top edges round down and the right and bottom round up, so a box never comes out a pixel short of what you drew.
+Then the page image is drawn and each box is filled black:
+
+```ts
+context.drawImage(bitmap, 0, 0, page.width, page.height);
+context.fillStyle = "#000000";
+```
+
+For a PNG upload the result is saved as a PNG.
+For a PDF, each flattened page is embedded as a picture in a brand-new PDF, so the copy has no text layer at all.
+
+## 4. Cover a document by hand
 
 Select **Choose a file** and pick `public/test-files/redact/chat-private.png`.
 It's fictional test material.
@@ -52,13 +174,13 @@ Drag the mark to move it, and drag a corner to resize it.
 Do the same for the email, the address, the phone number, the account number and the reference.
 Then select **Done**, then **Save copy**.
 
-## 4. Check the copy
+## 5. Check the copy
 
 Open the downloaded `chat-private.redacted.png` outside the browser.
 The six values you covered are solid black; the text around them is still readable.
 Open `public/test-files/redact/chat-private.png` too: it hasn't changed.
 
-## 5. Try a PDF
+## 6. Try a PDF
 
 Select **Redact another document** and upload `public/test-files/redact/statement-multipage.pdf`.
 Add one mark on page 1, select **Next →**, add one on page 2, then **Done** and **Save copy**.
@@ -67,7 +189,13 @@ Open `statement-multipage.redacted.pdf`.
 It has two pages, each with your mark.
 Try to select text in it: you can't, because every page is now an image.
 
-## 6. Run the checks
+## If something goes wrong
+
+- **`npm ci` fails:** check `node --version` is 22.17 or newer, then run it again.
+- **The upload is refused:** read the message; it's one of the limits in `file-policy.ts`, such as "File must be 25 MB or smaller" or "Choose a PNG, JPEG, or PDF file".
+- **A locked PDF:** Redact can't open password-protected PDFs and says "Choose an unlocked PDF"; unlock it first.
+
+## 7. Check your work
 
 Stop the dev server with `Ctrl+C`, then run:
 
@@ -78,24 +206,23 @@ npm test
 npm run build
 ```
 
-Each should finish without errors.
-`npm test` ends with a `Tests … passed` line and no failures.
+Each should finish without errors, and `npm test` reports `Tests  33 passed (33)`.
 
-Record the checkpoint from the parent folder:
+## So what just happened?
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 01: run the manual starter"
-```
+You ran a complete, manual privacy tool and saw the three rules it's built on.
+The original file is never changed, every mark is placed by a person, and the output is a new flattened file.
+Those rules hold for the rest of the course.
 
-## What we built
+## Try it yourself
 
-A working, manual privacy tool: the original file is never changed, every mark is placed by a person, and the output is a new flattened file.
-Those three rules hold for the rest of the course.
+Upload `public/test-files/redact/chat-private.jpg`, cover only the account number, and save it.
+Open the result and zoom in on the edges of the black box: it covers the whole number, with no half-pixel gap.
+That's the rounding in `markToPixelRect` at work.
 
-- Every file in this checkpoint: [`redact/` at `0eecfb4`](https://github.com/danielAsaboro/bring-ai-home/tree/0eecfb46c0790dec4bc3ae9e2d85607b54771d9f/redact)
-- Why the output is an image: [About flattened copies](/docs/redact/concepts/flattened-copies)
+## Where to next
 
-Next: [02.
-Read a page with local OCR](/docs/redact/tutorials/02-first-ocr)
+- Every file in this checkpoint: [`redact/` at `redact-01-starter`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-01-starter/redact)
+- [About flattened copies](/docs/redact/concepts/flattened-copies) and [About Redact's trust boundary](/docs/redact/concepts/trust-boundary)
+
+Next: [Read a page with local OCR](/docs/redact/tutorials/02-first-ocr) (lesson 02)

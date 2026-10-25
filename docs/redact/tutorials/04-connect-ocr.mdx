@@ -1,33 +1,191 @@
 ---
 title: "04. Send uploaded pages to local OCR"
-description: "We will connect the service to the real OCR model so that a page uploaded in the app is read locally, and check that manual review still works when the service is off."
+description: "We will connect the service to the real OCR model, send each uploaded page from the browser, show what OCR found, and make sure manual review still works when the service is off."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 04. Send uploaded pages to local OCR" />
 
-In this lesson we will close the loop: a page you upload in the browser goes to the local service, QVAC reads it, and the text comes back into the review screen.
-Then we'll turn the service off and make sure Redact still works by hand.
+We now have two halves that don't meet.
+Lesson 02 proved the OCR model works from a script; lesson 03 built a service with nothing behind it.
+In this lesson we join them, so a page you upload in the browser is read by a model on your own machine.
 
-**Checkpoint:** [`30293ed`](https://github.com/danielAsaboro/bring-ai-home/commit/30293edcadfb978a69a9e15db2af7ae431e00cef), starting from `242f480`
+**Checkpoint:** [`redact-04-connect-ocr`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-04-connect-ocr/redact), after `redact-03-local-service`
 
-## 1. Apply the lesson patch
+## What actually travels?
 
-Stop any running app or service.
-Download [`04-connect-ocr.patch`](/docs/downloads/redact/04-connect-ocr.patch) into your Downloads folder.
-From the parent `redact-course` folder:
+When you upload a PDF or screenshot, the starter app already turns every page into a PNG image in the browser.
+Those images are what the service will read.
+Each page goes as its own request: the PNG bytes encoded as base64 text, the page's width and height in pixels, and your privacy settings.
+
+Sending pages one at a time keeps every request small and lets the screen say **Reading page 2 of 5 locally…** as it goes.
+It also means one bad page can't take the whole document down with it.
+
+The service checks the image before the model sees it.
+It decodes the PNG, measures it, and refuses it if the size doesn't match what the browser said.
+That matters later: OCR's boxes are only meaningful against the exact image it read.
+
+## What if there's no model?
+
+The service might not be running, the model might fail to load, or the machine might be offline on first use.
+None of that should stop someone from redacting a document by hand, which the app could already do in lesson 01.
+So every failure in this lesson ends in the same place: the review screen, with a short message and the manual tools.
+
+This rule runs through the rest of the course: AI is an aid, never a gate.
+More on it: [About Redact's trust boundary](/docs/redact/concepts/trust-boundary).
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
 
 ```bash
-git apply --check ~/Downloads/04-connect-ocr.patch
-git apply ~/Downloads/04-connect-ocr.patch
+git cherry-pick redact-04-connect-ocr
 cd redact
-npm ci
 ```
 
-If `--check` reports an error, your previous lesson differs from the checkpoint; don't force it.
+No packages change, so there's nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-03-local-service...redact-04-connect-ocr).
 
-## 2. Start the service and the app
+| File | What changed |
+|---|---|
+| `qvac-service/qvac-analyzer.ts` | New: the real analyzer, wrapping QVAC's OCR |
+| `qvac-service/index.ts` | Configures QVAC and plugs the real analyzer into the service |
+| `qvac-service/local-config.ts` | Adds a private home folder for QVAC's worker |
+| `qvac-service/server.ts` | Logs why an analysis failed |
+| `src/features/redact/RedactApp.tsx` | Sends each page to the service and keeps what comes back |
+| `src/features/redact/workflow-domain.ts` | Adds `OCRBlock` to the session |
+| `components/ReviewStage.tsx`, `AnalyzeStage.tsx` | Show the OCR panel and the progress message |
+
+## 2. Read the analyzer
+
+Open `qvac-service/qvac-analyzer.ts`.
+It implements lesson 03's `DocumentAnalyzer` with QVAC.
+
+**It loads the model once, on first use.**
+
+```ts
+async function ensureModel() {
+  if (modelId) return modelId;
+  loading ??= options.runtime.loadModel({
+    modelSrc: options.modelSource,
+    modelConfig: {
+      langList: ["en"],
+      magRatio: 1.5,
+      defaultRotationAngles: [90, 180, 270],
+      contrastRetry: false,
+      lowConfidenceThreshold: 0.5,
+      recognizerBatchSize: 1,
+    },
+  });
+  try {
+    modelId = await loading;
+    failed = false;
+    return modelId;
+  } catch (error) {
+    failed = true;
+    loading = null;
+    throw error;
+  }
+}
+```
+
+The settings are lesson 02's.
+`loading ??=` means that if two pages arrive while the model is still loading, both wait for the same load instead of starting two.
+If loading fails, `loading` is cleared so the next request tries again.
+
+**It checks the page before reading it.**
+
+```ts
+const bytes = Buffer.from(input.pngBase64, "base64");
+if (bytes.length === 0 || bytes.toString("base64") !== input.pngBase64) {
+  throw new Error("Raster bytes are invalid");
+}
+const dimensions = await readImageSize(bytes);
+if (dimensions.width !== input.width || dimensions.height !== input.height) {
+  throw new Error("Raster dimensions do not match the request");
+}
+```
+
+The first check catches base64 that doesn't decode cleanly.
+The second reads the real PNG size with `sharp` and compares it with what the browser claimed.
+
+**It reads the page and checks the answer.**
+
+```ts
+const loadedModelId = await ensureModel();
+const operation = options.runtime.ocr({
+  modelId: loadedModelId,
+  image: bytes,
+  options: { paragraph: false },
+});
+const [unknownBlocks] = await Promise.all([operation.blocks, operation.stats]);
+const blocks = z.array(qvacBlockSchema).parse(unknownBlocks);
+```
+
+This time the image is the bytes from the request, not a file path.
+The blocks are parsed with a schema too: if the model ever returned something unexpected, it would fail here, not in the browser.
+
+The result goes back with a receipt: an id, start and finish times, the model name and `ocrMs`, how long OCR took.
+
+## 3. Read how the service starts QVAC
+
+Open `qvac-service/index.ts`:
+
+```ts
+process.env.QVAC_CONFIG_PATH = configPath;
+process.env.SNAP_USER_COMMON = runtimeHome;
+
+const qvac = await import("@qvac/sdk");
+const analyzer = createQvacOcrAnalyzer({
+  runtime: {
+    loadModel: (options) => qvac.loadModel(options as never),
+    ocr: (options) => qvac.ocr(options as never),
+    unloadModel: (options) => qvac.unloadModel(options),
+    close: () => qvac.close(),
+  },
+  modelSource: qvac.OCR_LATIN,
+});
+```
+
+`QVAC_CONFIG_PATH` is lesson 02's trick: keep the models in `redact/.qvac/models`.
+`SNAP_USER_COMMON` gives QVAC's background worker its own home folder inside the app, so it doesn't share `~/.qvac` with anything else ([Where QVAC writes files](/docs/qvac/where-qvac-writes-files)).
+The `runtime` object is a thin wrapper around the SDK; it's what lets the tests swap in a fake.
+
+## 4. Read the browser side
+
+Open `src/features/redact/RedactApp.tsx` and find `prepare`.
+After the pages are rasterized, it asks for health and then sends every page:
+
+```ts
+for (const page of pages) {
+  setAnalysisMessage(`Reading page ${page.pageNumber} of ${pages.length} locally…`);
+  const result = await adapters.analysis.analyzePage(
+    {
+      documentId: session.source.id,
+      pageId: page.id,
+      pageNumber: page.pageNumber,
+      width: page.width,
+      height: page.height,
+      pngBytes: page.pngBytes,
+      level: session.configuration.level,
+      direction: session.configuration.direction,
+    },
+    undefined,
+  );
+```
+
+And whatever goes wrong, the review still opens:
+
+```ts
+} catch {
+  setError("Local analysis is unavailable. You can still redact by hand.");
+  setSession(openManualReview(session, pages, { ocrBlocks, analysisRuns }));
+}
+```
+
+## 5. Start the service and the app
 
 In one terminal:
 
@@ -42,79 +200,84 @@ In a second terminal, in the same `redact` folder:
 npm run dev -- --port 3101
 ```
 
-Open [http://localhost:3101](http://localhost:3101).
+Open [localhost:3101](http://localhost:3101).
 
-## 3. Upload a page
+## 6. Upload a page
 
 Choose `public/test-files/redact/chat-private.png`, select **Private**, and select **Prepare for review**.
 
-The screen shows **Preparing locally** with the message **Reading page 1 of 1 locally…**.
-The OCR model loads from `.qvac/models` (you downloaded it in lesson 2), so this takes about 20–30 seconds.
+The screen shows **Preparing locally** and **Reading page 1 of 1 locally…**.
+There's also a **Loading the local OCR model and reading each page…** message in between, but it usually flashes past too quickly to read.
+The model loads from `.qvac/models`, which you filled in lesson 02, so this takes about 20–30 seconds.
 
-## 4. See the evidence
+## 7. See the evidence
 
 The review screen opens.
-In the right-hand column a new panel reads **12 text regions found locally**, and lists each line with its recognition score, for example `Maya Chen` and `maya.chen@example com`.
+In the right-hand column a new panel reads **12 text regions found locally**.
+It lists each line with its recognition score, for example `Maya Chen` and `maya.chen@example com`, each followed by something like `93% recognition`.
 
-Notice what hasn't changed: **Safe-share preview** is still uncovered, and the panel shows no boxes on the page yet.
-OCR found text; it hasn't decided anything.
+Notice what hasn't changed: **Safe-share preview** is still uncovered, and there are no outlines on the page yet.
+OCR found text; nothing has been decided.
 
-Check the service's health from a third terminal:
+Check the service from a third terminal:
 
 ```bash
 curl http://127.0.0.1:4317/health
 ```
 
 The OCR model's `state` is now `ready`.
+The model stays loaded, so the next file skips the loading step and only the reading takes time.
 
-## 5. Cover something by hand
+## 8. Cover something by hand
 
 Drag across `Maya Chen` on **Original**.
-The mark appears and the preview turns black there, just as in lesson 1.
+The mark appears and the preview turns black there, just as in lesson 01.
 Select **Done**, then **Save copy**, and open the file to confirm.
 
-## 6. Turn the service off
+## 9. Turn the service off
 
 Stop the service with `Ctrl+C` in its terminal.
+It unloads the model and exits without printing an error.
 In the app, select **Redact another document**, upload `chat-private.png` again, choose **Private**, and select **Prepare for review**.
 
-The review screen still opens, with the banner **Local analysis is unavailable.
-Manual review remains available.**
+The review screen still opens, with the message **Local analysis is unavailable. You can still redact by hand.**
 There's no OCR panel this time.
 Draw a mark, select **Done** and **Save copy**: the copy is saved as before.
 
-A missing model never blocks the person using the app.
+## If something goes wrong
 
-## 7. Check your work
+- **The service exits with `Redact QVAC service failed:`** while starting: read the rest of the line.
+  If it mentions the model, run `npm run qvac:ocr-smoke` from lesson 02 to check the download on its own.
+- **The service prints `Redact QVAC analyze-page failed: Raster dimensions do not match the request`:** the browser and service disagree about the page size, which shouldn't happen with the test files.
+  Upload a fresh file rather than reusing one mid-analysis.
+- **The app always shows "Local analysis is unavailable":** check the service is running on 4317 with `curl http://127.0.0.1:4317/health`.
+
+## 10. Check your work
 
 Stop the dev server, then run:
 
 ```bash
-npm test -- qvac-service/qvac-analyzer.test.ts src/features/redact/RedactApp.test.tsx
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-The full `npm test` reports `Tests  46 passed (46)`.
+`npm test` reports `Tests  46 passed (46)`.
+`qvac-analyzer.test.ts` drives the analyzer with a fake runtime: it checks that the model loads once, that a size mismatch is refused, and that malformed OCR blocks never leave the service.
 
-Record the checkpoint from the parent folder:
+## So what just happened?
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 04: send uploaded pages to local OCR"
-```
+A page left the browser, crossed to a process on your own machine, was read by QVAC, and came back as text with positions.
+When that process was missing, the app said so in one line and let you carry on by hand.
 
-## What we built
+## Try it yourself
 
-A real end-to-end path from the browser to a local model and back, with the manual workflow intact when that model isn't there.
-Every page you upload is now read on your own machine.
+Upload `public/test-files/redact/statement-multipage.pdf`.
+Watch the message count through the pages, then use **Next →** on the review screen to see each page's own OCR panel.
 
-- Every file in this checkpoint: [`redact/` at `30293ed`](https://github.com/danielAsaboro/bring-ai-home/tree/30293edcadfb978a69a9e15db2af7ae431e00cef/redact)
+## Where to next
+
+- Every file in this checkpoint: [`redact/` at `redact-04-connect-ocr`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-04-connect-ocr/redact)
 - [About running AI on your own machine](/docs/redact/concepts/local-inference)
-- [About the local service](/docs/redact/concepts/local-service)
 
-Next: [05.
-Line OCR boxes up with the page](/docs/redact/tutorials/05-coordinates)
+Next: [Line OCR boxes up with the page](/docs/redact/tutorials/05-coordinates) (lesson 05)

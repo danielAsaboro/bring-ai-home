@@ -12,9 +12,9 @@ The tempting design is to run OCR, ask a model which lines are sensitive, and pa
 It feels finished.
 It is also the design most likely to leak something.
 
-A local 0.6-billion-parameter model misses things.
-On Redact's labelled test pages it scores between 0.91 and 1.0 F1, which sounds high until you remember what the misses are: an account number left readable on a document you thought was clean.
-A model also over-reaches, covering a greeting like "Got it" as a name.
+A small local model misses things.
+On Redact's labelled test pages Laya scores between 0.83 and 0.92 F1, which sounds high until you remember what the misses are: an account number left readable on a document you thought was clean.
+A model also over-reaches, flagging a line like "keep the amount confidential." that nobody labelled as sensitive.
 If the model writes the output directly, both kinds of error ship silently.
 
 Putting a person between the suggestion and the output changes what an error costs.
@@ -33,6 +33,7 @@ There is no function that turns all proposals into marks at once.
 
 `finishReview` refuses to finish while any candidate is still `proposed`, so **Done** stays disabled until every suggestion has a human answer.
 Removing an accepted mark flips its candidate to `rejected` rather than back to `proposed`, so the record of what was decided stays honest.
+A rejected suggestion can still be accepted later, which is just another human decision, and the audit records both.
 
 The audit list shows every upload, accept, reject, manual mark and removal with a time.
 It isn't a security log; it exists so the person reviewing can see what they did before they share the result.

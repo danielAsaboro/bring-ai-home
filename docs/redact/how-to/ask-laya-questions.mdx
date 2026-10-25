@@ -4,12 +4,12 @@ description: "Add, reword or tune the yes/no questions Redact asks Laya about ea
 ---
 
 This guide changes what Redact's decision model looks for.
-It assumes the code at lesson 11 or later (`course/redact-qvac`).
+It assumes the code at lesson 06 or later (`course/redact-qvac`).
 For the current questions and threshold, see [Decision questions](/docs/redact/reference/decision-questions).
 
 ## Add a question for a new kind of field
 
-1. Open `qvac-service/decision-reasoner.ts`.
+1. Open `qvac-service/reasoning.ts`.
 2. Add an entry to `privateQuestions` (asked at both levels) or `confidentialQuestions` (Confidential only).
    Write it as a statement that is true or false about one line of text:
 
@@ -33,29 +33,19 @@ If Laya flags ordinary lines for a field, or misses obvious ones:
 
 ## Change how sure Laya must be
 
-`DECISION_THRESHOLD` in `decision-reasoner.ts` is `0.5`.
+`DECISION_THRESHOLD` in `reasoning.ts` is `0.5`.
 
 - To catch more fields at the cost of more suggestions to reject, lower it (for example `0.4`).
 - To show fewer, more certain suggestions, raise it (for example `0.7`).
 
 To see the raw probabilities before choosing, log `result.answers` inside `classify()` and run one page through the app.
 
-## Use Qwen instead
-
-Start the service, evaluation or offline proof with `REDACT_REASONER=qwen`:
-
-```bash
-REDACT_REASONER=qwen npm run qvac:service
-```
-
-The first analysis downloads Qwen3 0.6B (382 MB) if it isn't cached.
-
 ## Measure the change
 
-Stop the service, then run the labelled evaluation for the model you changed:
+Stop the service, then run the labelled evaluation:
 
 ```bash
-REDACT_REASONER=laya npm run --silent qvac:evaluate > after.json
+npm run --silent qvac:evaluate > after.json
 ```
 
 Compare each case's `f1`, `precision` and `recall` with your previous run.
@@ -64,5 +54,5 @@ See [Evaluation](/docs/redact/reference/evaluation).
 
 ## Related
 
-- [About decision models and generative models](/docs/redact/concepts/decision-models)
+- [About decision models](/docs/redact/concepts/decision-models)
 - [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) (official)

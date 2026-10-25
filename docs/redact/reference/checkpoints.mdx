@@ -1,45 +1,63 @@
 ---
-title: "Checkpoints and downloads"
-description: "Each lesson's commit on course/redact-qvac, its patch, and the downloadable packages."
+title: "Checkpoints"
+description: "Each lesson's tag and commit on course/redact-qvac, how to check one out, and how to step from one to the next."
 ---
 
 Branch: [`course/redact-qvac`](https://github.com/danielAsaboro/bring-ai-home/tree/course/redact-qvac/redact).
+Every lesson is one commit on that branch, with a tag.
 All checkpoints from lesson 02 on pin `@qvac/sdk` 0.22.0.
-Machine-readable list: [`manifest.json`](/docs/downloads/redact/manifest.json).
 
 ## Lessons
 
-| Lesson | Commit | Patch | Unit tests |
-|---|---|---|---|
-| [01. Run the manual starter](/docs/redact/tutorials/01-starter) | [`0eecfb4`](https://github.com/danielAsaboro/bring-ai-home/commit/0eecfb46c0790dec4bc3ae9e2d85607b54771d9f) | [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) | — |
-| [02. Read a page with local OCR](/docs/redact/tutorials/02-first-ocr) | [`731eb40`](https://github.com/danielAsaboro/bring-ai-home/commit/731eb40b3f1e31aa214e83b3714d9171ed3443d8) | [`02-first-ocr.patch`](/docs/downloads/redact/02-first-ocr.patch) | 35 |
-| [03. Start the local QVAC service](/docs/redact/tutorials/03-local-service) | [`242f480`](https://github.com/danielAsaboro/bring-ai-home/commit/242f4808c8d7122c920d59962c293d352e5722a3) | [`03-local-service.patch`](/docs/downloads/redact/03-local-service.patch) | 42 |
-| [04. Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr) | [`30293ed`](https://github.com/danielAsaboro/bring-ai-home/commit/30293edcadfb978a69a9e15db2af7ae431e00cef) | [`04-connect-ocr.patch`](/docs/downloads/redact/04-connect-ocr.patch) | 46 |
-| [05. Line OCR boxes up with the page](/docs/redact/tutorials/05-coordinates) | [`bcfd046`](https://github.com/danielAsaboro/bring-ai-home/commit/bcfd046e2ed1d5c33495263901034ef4c5361e01) | [`05-coordinate-mapping.patch`](/docs/downloads/redact/05-coordinate-mapping.patch) | 49 |
-| [06. Ask a local model which fields are sensitive](/docs/redact/tutorials/06-suggestions) | [`4e3987d`](https://github.com/danielAsaboro/bring-ai-home/commit/4e3987d07a230b0c88a7ab3574d31e5e6f25db0c) | [`06-sensitive-suggestions.patch`](/docs/downloads/redact/06-sensitive-suggestions.patch) | 68 |
-| [07. Accept or reject each suggestion](/docs/redact/tutorials/07-review) | [`234e4ce`](https://github.com/danielAsaboro/bring-ai-home/commit/234e4ced798995cf0f27ee193a29d9cc66a4f83e) | [`07-human-review.patch`](/docs/downloads/redact/07-human-review.patch) | 71 |
-| [08. Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery) | [`2d16cd9`](https://github.com/danielAsaboro/bring-ai-home/commit/2d16cd92961c0cd3f30a19ed733d1fde63758b31) | [`08-failure-recovery.patch`](/docs/downloads/redact/08-failure-recovery.patch) | 79 |
-| [09. Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation) | [`ad636f7`](https://github.com/danielAsaboro/bring-ai-home/commit/ad636f7a01f814158a154aa51b9cf8bd70fbd353) | [`09-evaluation.patch`](/docs/downloads/redact/09-evaluation.patch) | 85 |
-| [10. Run Redact with the network off](/docs/redact/tutorials/10-offline) | [`1d432a2`](https://github.com/danielAsaboro/bring-ai-home/commit/1d432a28deef8ce15e32f1f1b45a2d86d833d591) | [`10-offline-proof.patch`](/docs/downloads/redact/10-offline-proof.patch) | 88 |
-| [11. Swap the generator for a decision model](/docs/redact/tutorials/11-laya-decisions) | [`446b69c`](https://github.com/danielAsaboro/bring-ai-home/commit/446b69caf8003249f5c024f66fb657a50c054375) | [`11-laya-decisions.patch`](/docs/downloads/redact/11-laya-decisions.patch) | 93 |
+| Lesson | Tag | Commit | Changes | Unit tests |
+|---|---|---|---|---|
+| [01. Run the manual starter](/docs/redact/tutorials/01-starter) | [`redact-01-starter`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-01-starter/redact) | `10f44f74c36a5bc9ac929985cdcd49b774b752bf` | — | 33 |
+| [02. Read a page with local OCR](/docs/redact/tutorials/02-first-ocr) | [`redact-02-first-ocr`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-02-first-ocr/redact) | `e65d85317b52536e31ace568cfd1fc6d14f0c1af` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-01-starter...redact-02-first-ocr) | 35 |
+| [03. Start the local QVAC service](/docs/redact/tutorials/03-local-service) | [`redact-03-local-service`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-03-local-service/redact) | `6628614a3a2d6b473ac9c8f2dd84b0cfda43724f` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-02-first-ocr...redact-03-local-service) | 42 |
+| [04. Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr) | [`redact-04-connect-ocr`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-04-connect-ocr/redact) | `8355309c36a21a8675936e97110911110bcd297e` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-03-local-service...redact-04-connect-ocr) | 46 |
+| [05. Line OCR boxes up with the page](/docs/redact/tutorials/05-coordinates) | [`redact-05-coordinates`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-05-coordinates/redact) | `11fb1fb45686f3b031a466436b11614c8fee0d55` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-04-connect-ocr...redact-05-coordinates) | 49 |
+| [06. Ask Laya which lines are sensitive](/docs/redact/tutorials/06-suggestions) | [`redact-06-laya`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-06-laya/redact) | `e61e654e608ce30a965b506157677a54bc67199a` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-05-coordinates...redact-06-laya) | 63 |
+| [07. Accept or reject each suggestion](/docs/redact/tutorials/07-review) | [`redact-07-review`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-07-review/redact) | `7efac231fae8b6beec5d4a26d773b0b8d2579faf` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-06-laya...redact-07-review) | 67 |
+| [08. Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery) | [`redact-08-failure-recovery`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-08-failure-recovery/redact) | `8b97ea7775df544d67ca058ba30596aed154f1b2` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-07-review...redact-08-failure-recovery) | 76 |
+| [09. Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation) | [`redact-09-evaluation`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-09-evaluation/redact) | `35c5a0d2a309efeb8684177a60d4cd2cb658da70` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-08-failure-recovery...redact-09-evaluation) | 82 |
+| [10. Run Redact with the network off](/docs/redact/tutorials/10-offline) | [`redact-10-offline`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-10-offline/redact) | `4051b1960a0df6aecdbd89cc66c1990f5e08e9b0` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-09-evaluation...redact-10-offline) | 85 |
+| [11. Check the copy before it's shared](/docs/redact/tutorials/11-copy-check) | [`redact-11-copy-check`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-11-copy-check/redact) | `8b09dea2781dea1c0463d74a0f65034a1a8c5da8` | [compare](https://github.com/danielAsaboro/bring-ai-home/compare/redact-10-offline...redact-11-copy-check) | 87 |
 
-Each patch applies with `git apply` from the `redact-course` folder on top of the previous lesson.
-Applied in order to the starter, the ten patches produce exactly the files in `redact-completed.zip`.
+`redact-11-copy-check` is the tip of `course/redact-qvac`.
 
-## Packages
+## Getting a checkpoint
 
-| File | Contents |
-|---|---|
-| [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) | `redact-course/redact/` at `0eecfb4` |
-| [`redact-completed.zip`](/docs/downloads/redact/redact-completed.zip) | `redact-course/redact/` at `446b69c` |
+Clone once, then start a branch of your own at any tag:
 
-SHA-256 hashes and sizes for every file are in `manifest.json`.
+```bash
+git clone https://github.com/danielAsaboro/bring-ai-home
+cd bring-ai-home
+git switch -c my-redact redact-01-starter
+```
+
+The app is in the `redact/` folder of every checkpoint.
+
+## Stepping to the next lesson
+
+From your branch at the previous lesson, bring in the next lesson's commit:
+
+```bash
+git cherry-pick redact-02-first-ocr
+```
+
+The **compare** link in the table shows exactly what that commit changes.
+Run `npm ci` in `redact/` after a lesson that changes `package-lock.json` (lessons 02 and 03).
 
 ## Verification
 
-On 2026-10-25, at every commit above: `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` passed (lesson 11: typecheck, lint and test; it changes no packages).
-With real inference on macOS:
+On 2026-10-25, at every commit above: `npm run typecheck`, `npm run lint` and `npm test` passed, with the unit-test counts in the table.
+The package files of lessons 02 to 05 are unchanged from an earlier build of these commits, where each passed a clean `npm ci`.
 
-- At `1d432a2`: `npm run build`, `qvac:ocr-smoke`, `qvac:evaluate`, `qvac:offline` and the live browser test.
-- At `446b69c`: `qvac:evaluate` with Laya (twice, identical) and with Qwen, `qvac:offline` with Laya, and the live browser test including the copy check.
-  `npm run build` was not rerun at `446b69c`.
+At `8b09dea`, with real inference on an Apple Silicon Mac:
+
+- `npm run qvac:evaluate`, with the same results as the runs before it.
+- `npm run qvac:offline` with remote networking denied.
+- The live browser test, `e2e/offline-qvac-workflow.spec.ts`.
+- The lesson 08 and 11 flows in a real browser, and a clean `Ctrl+C` on the service with both models loaded.
+
+`npm run build` was not rerun at `8b09dea`.

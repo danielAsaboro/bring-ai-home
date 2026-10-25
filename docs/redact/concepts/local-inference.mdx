@@ -26,7 +26,7 @@ The **local service** (`npm run qvac:service`) is a small Node HTTP server bound
 It owns the QVAC SDK, loads the two models once, and turns one page into OCR blocks and suggestions.
 
 The **QVAC worker** is a separate process the SDK starts.
-It runs the native engines: an OCR pipeline for reading and a llama.cpp-based engine for the language model.
+It runs the native engines: an OCR pipeline for reading and a llama.cpp-based engine for Laya, the decision model.
 The SDK talks to it over local IPC.
 See [How it works](https://docs.qvac.tether.io/sdk/how-it-works/) for QVAC's own description.
 
@@ -44,7 +44,7 @@ On an Apple Silicon Mac with 36 GB of memory:
 
 - `npm ci` installs about 2.8 GB of dependencies with `@qvac/sdk` 0.22.
 - The OCR and decision models add about 550 MB on first use.
-- OCR takes 20 to 30 seconds per page; the language model adds 2 to 9 seconds.
+- OCR takes 20 to 30 seconds per page; Laya's decisions add under a second.
 - Pages are analysed one at a time, so a 25-page PDF can take more than ten minutes.
 
 A hosted vision API would usually be faster and more accurate.

@@ -16,7 +16,7 @@ npm run build
 ```
 
 Run `typecheck` and `build` one after the other, not at the same time: both write Next.js generated files.
-`npm test` runs 93 Vitest tests and needs no models.
+`npm test` runs 87 Vitest tests and needs no models.
 
 ## Browser tests
 
@@ -27,6 +27,7 @@ Install one once:
 npx playwright install chromium
 ```
 
+The browser is about 550 MB and took about five and a half minutes to install in testing.
 If you see `Executable doesn't exist at …/ms-playwright/…`, this step was skipped.
 
 The manual-workflow tests expect **no** local service: they check the screens Redact shows when analysis is unavailable.

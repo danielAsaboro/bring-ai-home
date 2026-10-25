@@ -1,32 +1,179 @@
 ---
 title: "08. Keep working when analysis fails"
-description: "We will make local analysis fail on purpose — service stopped, cancelled mid-run, slot already busy — and check that the document stays reviewable every time."
+description: "We will add timeouts, cancellation and retry to Redact's local analysis, then break it on purpose three ways and finish the copy by hand each time."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 08. Keep working when analysis fails" />
 
-In this lesson we will add timeouts, cancellation and retry, then break local analysis three ways on purpose.
-Each time, the prepared page stays on screen and we can finish the copy by hand.
+After lesson 07, Redact works well when everything goes right.
+But local AI has its own ways of going wrong: the service isn't running, the first model load takes minutes, a page is slow, you change your mind halfway.
+In this lesson we make sure none of that ever costs you the document.
 
-**Checkpoint:** [`2d16cd9`](https://github.com/danielAsaboro/bring-ai-home/commit/2d16cd92961c0cd3f30a19ed733d1fde63758b31), starting from `234e4ce`
+**Checkpoint:** [`redact-08-failure-recovery`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-08-failure-recovery/redact), after `redact-07-review`
 
-## 1. Apply the lesson's changes
+## What fails when AI runs locally
 
-Download [`08-failure-recovery.patch`](/docs/downloads/redact/08-failure-recovery.patch) into your Downloads folder.
-Stop the app and the service, then from the parent `redact-course` folder:
+With a cloud API, someone else keeps the model loaded and the server up.
+Locally, that's your machine's job, and each part can be missing or slow.
+
+| What happens | When you'll see it | What Redact does after this lesson |
+|---|---|---|
+| The service isn't running | You forgot the second terminal | Opens manual review with a **Retry local analysis** button |
+| The first load is slow | Models are downloading or loading | Lets you **Continue without local analysis** |
+| A page takes too long | A huge page, a busy laptop | Gives up after 190 seconds in the browser and 180 seconds in the service |
+| The service is still busy | You cancelled, but the model is still finishing | Refuses new work with `409 busy` until it's free |
+
+The rule behind all of them is the same.
+The AI is an extra, not a requirement: if it fails, you're left with the page you prepared and the manual tools from lesson 01.
+
+## The stale-answer problem
+
+Cancelling raises a subtle problem.
+You cancel, start a new analysis, and then the *old* one finishes.
+Without care, its suggestions would land on top of your new review.
+
+Redact gives each analysis a number.
+When an answer comes back, it's only used if its number is still the latest; anything older is ignored.
+It's a small idea that prevents a confusing class of bugs.
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
 
 ```bash
-git apply --check ~/Downloads/08-failure-recovery.patch
-git apply ~/Downloads/08-failure-recovery.patch
+git cherry-pick redact-08-failure-recovery
 cd redact
-npm ci
 ```
 
-If `--check` reports an error, your folder doesn't match lesson 07's checkpoint; fix that before going on.
+No packages change, so there's nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-07-review...redact-08-failure-recovery).
 
-## 2. Fail with the service stopped
+| File | What changed |
+|---|---|
+| `src/features/redact/analysis-client.ts` | A 190-second timeout and cancellation for every request |
+| `src/features/redact/RedactApp.tsx` | Numbers each analysis, ignores stale answers, adds cancel and retry |
+| `src/features/redact/components/AnalyzeStage.tsx` | The **Continue without local analysis** button |
+| `src/features/redact/components/ReviewStage.tsx` | The **Retry local analysis** button next to the error |
+| `qvac-service/server.ts` | The single analysis slot, the 180-second timeout, and clean shutdown |
+| `qvac-service/index.ts` | Shuts the service down once, cleanly |
+| `server.test.ts`, `analysis-client.test.ts`, `RedactApp.test.tsx` | Tests that simulate each failure |
+
+## 2. Read the browser's timeout
+
+Open `src/features/redact/analysis-client.ts`.
+Every request now goes through one helper:
+
+```ts
+  const requestTimeoutMs = options.requestTimeoutMs ?? 190_000;
+
+  async function request(
+    url: string,
+    init: RequestInit,
+    externalSignal?: AbortSignal,
+  ) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const cancel = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) cancel();
+    else externalSignal?.addEventListener("abort", cancel, { once: true });
+    const timer = globalThis.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, requestTimeoutMs);
+```
+
+An `AbortController` is the browser's way to stop a request.
+This one stops for either of two reasons: the app asked it to (you cancelled), or 190 seconds passed.
+The `catch` that follows turns every failure into a message a person can read:
+
+```ts
+    } catch (error) {
+      if (externalSignal?.aborted) {
+        throw new Error("Local analysis request was cancelled");
+      }
+      if (timedOut) throw new Error("Local analysis request timed out");
+      if (error instanceof TypeError) throw new Error("The local AI service isn't running");
+      throw error;
+```
+
+When nothing answers at all, the browser only says something like "Failed to fetch", as a `TypeError`.
+Here that becomes "The local AI service isn't running".
+
+## 3. Read the stale-answer guard
+
+Open `src/features/redact/RedactApp.tsx` and find `prepare`.
+Each run takes the next number:
+
+```ts
+    analysisRequest.current?.abort();
+    const controller = new AbortController();
+    analysisRequest.current = controller;
+    const requestId = ++analysisSequence.current;
+```
+
+After every `await`, it checks the number is still current before touching the screen:
+
+```ts
+          if (requestId !== analysisSequence.current) return;
+```
+
+Cancelling simply moves the counter on, which makes every answer from the old run stale:
+
+```ts
+  function cancelAnalysis() {
+    if (!session || preparedPages.current.length === 0) return;
+    analysisRequest.current?.abort();
+    analysisRequest.current = null;
+    analysisSequence.current += 1;
+    setBusy(false);
+    setCanCancel(false);
+    setError("Local analysis was cancelled. You can still redact by hand.");
+    setSession(
+      openManualReview(session, preparedPages.current, partialEvidence.current),
+    );
+  }
+```
+
+Notice the last line: it opens review with the pages already prepared, plus any evidence that arrived before you cancelled.
+
+## 4. Read the service's single slot
+
+Open `qvac-service/server.ts` and find `createQvacService`.
+The service runs one analysis at a time:
+
+```ts
+      if (busy) {
+        sendFailure(
+          request,
+          response,
+          new ServiceFailure(409, "busy", "Local analyzer is busy"),
+        );
+        return;
+      }
+```
+
+And it only frees the slot when the model really stops, not when the request gives up:
+
+```ts
+        const operation = options.analyzer.analyzePage(parsed.data);
+        operationStarted = true;
+        void operation.then(
+          () => { busy = false; },
+          () => { busy = false; },
+        );
+        const result = analysisResponseSchema.safeParse(
+          await withTimeout(operation, timeoutMs),
+        );
+```
+
+`withTimeout` answers the request with `504` after 180 seconds.
+But the model can't be interrupted mid-page, so `busy` stays true until `operation` finishes.
+Two analyses fighting over the same model would only make both slower.
+
+## 5. Fail with the service stopped
 
 Start only the app:
 
@@ -37,14 +184,14 @@ npm run dev -- --port 3101
 Upload `public/test-files/redact/chat-private.png`, choose **Private**, and select **Prepare for review**.
 Don't start the service.
 
-The review screen opens anyway, with a red banner ending in **Manual review remains available.** and a **Retry local analysis** button.
+The review screen opens anyway, with the banner **The local AI service isn't running. You can still redact by hand.** and a **Retry local analysis** button.
 There are no suggestions, but the page is there.
-Drag a mark over `Maya Chen`, select **Done**, then **Save copy**.
-You get a normal `chat-private.redacted.png`.
+Drag a mark over `Maya Chen`, select **Done**, then **Save copy**: you get a normal `chat-private.redacted.png`.
 
-## 3. Retry once the service is back
+## 6. Retry once the service is back
 
 Select **Return to review**.
+The banner and **Retry local analysis** are still there: saving a copy doesn't clear an analysis that never ran.
 In a second terminal, start the service:
 
 ```bash
@@ -52,21 +199,20 @@ npm run qvac:service
 ```
 
 Wait for `Redact QVAC service listening on http://127.0.0.1:4317`, then select **Retry local analysis**.
-After about half a minute the six suggestions appear next to the mark you already drew.
+After about half a minute the suggestions appear next to the mark you already drew, six of them with no direction typed, and the banner goes away.
 
-## 4. Cancel a run
+## 7. Cancel a run
 
 Select **Change settings**, then **Prepare for review** again.
 While the screen says **Building your review copy** and **Reading page 1 of 1 locally…**, select **Continue without local analysis**.
 
-The review screen opens straight away with the banner **Local analysis was cancelled.
-Manual review remains available.**
+The review screen opens straight away, with the banner **Local analysis was cancelled. You can still redact by hand.**
 Your page is ready for manual marks.
 
-## 5. See the single slot
+## 8. See the single slot
 
 Cancelling stopped the browser waiting, but the model may still be finishing that page.
-Ask the service:
+Ask the service straight away:
 
 ```bash
 curl -s http://127.0.0.1:4317/health
@@ -83,12 +229,21 @@ curl -s -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:431
 {"error":{"code":"busy","message":"Local analyzer is busy"}}
 ```
 
-Run the same two commands again a few seconds later.
-Health shows `"busy":false`, and the POST now returns `{"error":{"code":"invalid_request",...}}` because `{}` isn't a page.
-The service runs one analysis at a time and only frees the slot when the model really stops.
-A page that takes longer than 180 seconds gets a `504`, but the slot still stays taken until the work ends.
+Run both again once the model has finished that page, about 15 seconds in our testing.
+Health shows `"busy":false`, and the POST now returns `{"error":{"code":"invalid_request",...}}`, because `{}` isn't a page.
 
-## 6. Run the checks
+## If something goes wrong
+
+- **The banner says "Local analyzer is busy".**
+  A cancelled run is still finishing.
+  Wait about 15 seconds, then **Retry local analysis**.
+- **`curl` says connection refused.**
+  The service isn't running; start it with `npm run qvac:service`.
+- **You never see `"busy":true`.**
+  The page finished before you asked.
+  That's fine; the second response proves the slot is free again.
+
+## 9. Check your work
 
 Stop both terminals, then:
 
@@ -97,26 +252,25 @@ npm test -- src/features/redact/analysis-client.test.ts qvac-service/server.test
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-These tests also inject a timeout, a malformed response and a stale result; those failures are simulated, not live.
-`npm test` should end with `Tests  79 passed (79)`.
-Record the checkpoint from the parent folder:
+`npm test` reports `Tests  76 passed (76)`.
+These tests also simulate a timeout, a malformed response and a stale answer, which are hard to trigger by hand.
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 08: keep working when analysis fails"
-```
+## So what just happened?
 
-## What we built
+Every way local analysis can fail now ends in the same place: your prepared page, with manual tools and a way to retry.
+Old answers can't overwrite new ones, and the service never runs two analyses on top of each other.
 
-An app that degrades to manual review instead of breaking: a stopped service, a cancelled run or a busy slot all leave the prepared page usable, and retry brings the suggestions back without losing your marks.
+## Try it yourself
 
-- Every file in this checkpoint: [`redact/` at `2d16cd9`](https://github.com/danielAsaboro/bring-ai-home/tree/2d16cd92961c0cd3f30a19ed733d1fde63758b31/redact)
-- Why one analysis at a time: [About the local service](/docs/redact/concepts/local-service)
-- All status codes: [Local service API](/docs/redact/reference/service-api)
+Start an analysis and cancel it, then immediately select **Retry local analysis**.
+You'll probably see "Local analyzer is busy".
+Retry again after a few seconds and it works; lesson 11 makes the app wait for the slot on its own.
 
-Next: [09.
-Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation)
+## Where to next
+
+- Every file in this checkpoint: [`redact/` at `redact-08-failure-recovery`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-08-failure-recovery/redact)
+- [About the local service](/docs/redact/concepts/local-service) and every status code in [Local service API](/docs/redact/reference/service-api)
+
+Next: [Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation) (lesson 09)

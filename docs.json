@@ -4,9 +4,9 @@
   "name": "Bring AI Home",
   "description": "Learn local AI by building real apps with QVAC: video lessons, written walkthroughs, and tested checkpoints.",
   "colors": {
-    "primary": "#D4513D",
-    "light": "#F07761",
-    "dark": "#B64030"
+    "primary": "#FC412C",
+    "light": "#FF6B57",
+    "dark": "#D9301C"
   },
   "favicon": "/favicon.svg",
   "logo": {
@@ -50,7 +50,6 @@
           {
             "group": "QVAC notes",
             "pages": [
-              "docs/qvac/structured-output",
               "docs/qvac/ocr-geometry",
               "docs/qvac/where-qvac-writes-files"
             ]
@@ -84,7 +83,7 @@
                   "docs/redact/tutorials/08-failure-recovery",
                   "docs/redact/tutorials/09-evaluation",
                   "docs/redact/tutorials/10-offline",
-                  "docs/redact/tutorials/11-laya-decisions"
+                  "docs/redact/tutorials/11-copy-check"
                 ]
               }
             ]
@@ -100,7 +99,6 @@
                   "docs/redact/how-to/run-offline",
                   "docs/redact/how-to/redact-a-multipage-pdf",
                   "docs/redact/how-to/ask-laya-questions",
-                  "docs/redact/how-to/use-a-larger-model",
                   "docs/redact/how-to/add-a-label",
                   "docs/redact/how-to/add-an-evaluation-case",
                   "docs/redact/how-to/change-the-port",
@@ -140,6 +138,7 @@
                 "pages": [
                   "docs/redact/concepts/trust-boundary",
                   "docs/redact/concepts/local-inference",
+                  "docs/redact/concepts/choosing-a-model",
                   "docs/redact/concepts/local-ocr",
                   "docs/redact/concepts/grounded-suggestions",
                   "docs/redact/concepts/models-and-offline",
@@ -452,6 +451,18 @@
     {
       "source": "/docs/redact/troubleshooting",
       "destination": "/docs/redact/how-to/troubleshooting"
+    },
+    {
+      "source": "/docs/redact/tutorials/11-laya-decisions",
+      "destination": "/docs/redact/tutorials/11-copy-check"
+    },
+    {
+      "source": "/docs/redact/how-to/use-a-larger-model",
+      "destination": "/docs/redact/how-to/ask-laya-questions"
+    },
+    {
+      "source": "/docs/qvac/structured-output",
+      "destination": "/docs/redact/concepts/decision-models"
     }
   ]
 }

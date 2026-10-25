@@ -1,55 +1,183 @@
 ---
 title: "09. Measure suggestions against labelled documents"
-description: "We will run Redact's local models over four labelled versions of the chat — clean, rotated, low-contrast and partly covered — and read a pass/fail receipt with precision, recall and F1."
+description: "We will score Redact's local OCR and Laya against four labelled versions of the chat, clean, rotated, low-contrast and partly covered, and read a pass/fail receipt with precision, recall and F1."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 09. Measure suggestions against labelled documents" />
 
-In this lesson we will stop judging suggestions by eye.
-We'll score them against four images where we already know which six regions are sensitive, and get a JSON receipt that says whether the models pass.
+So far we've judged the suggestions by looking at them.
+That works for one screenshot, but it won't tell you if a change next week makes things quietly worse.
+In this lesson we build a test that scores the suggestions against answers we already know, and fails when they slip.
 
-**Checkpoint:** [`ad636f7`](https://github.com/danielAsaboro/bring-ai-home/commit/ad636f7a01f814158a154aa51b9cf8bd70fbd353), starting from `2d16cd9`
+**Checkpoint:** [`redact-09-evaluation`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-09-evaluation/redact), after `redact-08-failure-recovery`
 
-## 1. Apply the lesson's changes
+## How do you score a suggestion?
 
-Download [`09-evaluation.patch`](/docs/downloads/redact/09-evaluation.patch) into your Downloads folder.
-Stop the app and the service, then from the parent `redact-course` folder:
+Start with a page where a person has already marked every private field.
+Run the app on it, and compare what it proposed with what the person marked.
+
+Two things can go wrong, and they need separate numbers.
+**Precision** asks: of everything Redact proposed, how much was right?
+**Recall** asks: of everything that should have been proposed, how much did Redact find?
+
+For a privacy tool, recall matters most.
+A wrong suggestion costs one click on **Reject**; a missed account number is the whole failure.
+**F1** combines the two into one number, so neither can hide behind the other.
+
+## When is a box "the same" box?
+
+A suggestion and a person's mark will never line up to the pixel.
+So we measure overlap: the area they share divided by the area they cover together.
+That's called **intersection over union**, or IoU.
+
+Two identical boxes score 1.0, and boxes that don't touch score 0.
+Redact counts a suggestion as correct when its label matches and its IoU with a marked region is at least 0.45.
+More on what these numbers can and can't tell you: [About measuring suggestions](/docs/redact/concepts/measuring-suggestions).
+
+## Why four versions of the same chat?
+
+Real documents aren't clean.
+The evaluation uses the same fictional chat four ways: clear, rotated a quarter turn, low-contrast, and partly covered.
+Each has the same six labelled fields: name, email, address, phone, account and reference.
+
+The rotated one matters most here.
+OCR on a sideways page tends to return many short vertical fragments, one per word.
+This lesson also teaches the analyzer to notice that, read the page upright, and keep whichever reading has whole lines.
+
+## 1. Get this lesson's code
+
+Stop the app and the service if they're running.
+From the repository root, `redact-course`, bring in this lesson's commit:
 
 ```bash
-git apply --check ~/Downloads/09-evaluation.patch
-git apply ~/Downloads/09-evaluation.patch
+git cherry-pick redact-09-evaluation
 cd redact
-npm ci
 ```
 
-If `--check` reports an error, your folder doesn't match lesson 08's checkpoint; fix that before going on.
+No packages change, so there is nothing to install.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-08-failure-recovery...redact-09-evaluation).
 
-## 2. Look at the four inputs
+| File | What changed |
+|---|---|
+| `public/test-files/redact/evaluation/*.png` | The four labelled images |
+| `qvac-service/evaluation.ts` | The cases, the labels, IoU and the scoring rules |
+| `qvac-service/evaluation-cli.ts` | Runs real OCR and Laya on each case and prints a receipt |
+| `qvac-service/qvac-analyzer.ts` | Retries sideways pages upright |
+| `package.json` | Adds the `qvac:evaluate` script |
+| `.gitignore` | Ignores `*-receipt.json`, so evaluation receipts stay out of Git |
+| Tests | `evaluation.test.ts` and new cases in `qvac-analyzer.test.ts` |
 
-Open the four images in `public/test-files/redact/evaluation/`:
+## 2. Read the scoring rules
 
-- `chat-clear.png`
-- `chat-rotated.png`: the same chat turned on its side
-- `chat-low-contrast.png`
-- `chat-partially-obscured.png`
+Open `qvac-service/evaluation.ts`.
+The pass mark is in one place:
 
-Then open `qvac-service/evaluation.ts` and find `EVALUATION_CASES`.
-Each case lists the six regions a person marked as sensitive: name, email, address, phone, account and reference.
+```ts
+export const EVALUATION_THRESHOLDS = {
+  iou: 0.45,
+  minimumPrecision: 0.7,
+  minimumRecall: 0.7,
+  minimumF1: 0.7,
+} as const;
+```
+
+A case passes only if precision, recall and F1 are all at least 0.70.
+
+The labelled answers are just data, in percentages of the page:
+
+```ts
+const clearRegions: LabelledRegion[] = [
+  { id: "name", label: "name", bbox: { x: 17.583333, y: 7.125, width: 15.5, height: 2.75 } },
+  { id: "email", label: "email", bbox: { x: 17.75, y: 10.375, width: 22.083333, height: 1.75 } },
+```
+
+The rotated case doesn't need new labels.
+`rotateClockwise` turns each answer box a quarter turn, the same way the image was turned:
+
+```ts
+bbox: { x: 100 - y - height, y: x, width: height, height: width },
+```
+
 These answers are only used for scoring; the models never see them.
 
-## 3. Run the evaluation
+## 3. Read the rotated-page retry
 
-Both models must already be cached from earlier lessons, and the service must be stopped so the evaluation has the models to itself.
-Then:
+Open `qvac-service/qvac-analyzer.ts`.
+First the analyzer decides whether a page looks sideways:
+
+```ts
+if (width <= height || blocks.length < 4) return false;
+const vertical = blocks.filter((block) => {
+  const blockWidth = Math.abs(block.bbox[2] - block.bbox[0]);
+  const blockHeight = Math.abs(block.bbox[3] - block.bbox[1]);
+  return blockHeight > blockWidth * 1.5;
+}).length;
+return vertical / blocks.length >= 0.6;
+```
+
+A landscape page where at least 60% of the blocks are much taller than they are wide is probably text running sideways.
+
+If so, it reads the page again, turned upright, and keeps the better reading:
+
+```ts
+if (looksVerticallyFragmented(blocks, input.width, input.height)) {
+  const uprightBytes = await rotateImage(bytes, 270);
+  const recovered = await runOcr(loadedModelId, uprightBytes);
+  if (recoveredScore(recovered) > recoveredScore(blocks)) {
+    blocks = mapCounterClockwiseRetryToOriginal(recovered, input.width);
+  }
+}
+```
+
+"Better" means more readable text in fewer, longer blocks:
+
+```ts
+const characters = blocks.reduce((score, block) => score + (block.text.trim().length >= 3 ? block.text.trim().length : 0), 0);
+return characters * (characters / blocks.length);
+```
+
+Whole lines like "will use account 8841 0932" beat a dozen one-word fragments.
+`mapCounterClockwiseRetryToOriginal` then moves the upright boxes back onto the sideways page, so marks still land in the right place ([OCR boxes and rotation](/docs/qvac/ocr-geometry)).
+
+## 4. Read the runner
+
+Open `qvac-service/evaluation-cli.ts`.
+For each case it sends the image through exactly the same analyzer the app uses:
+
+```ts
+const response = await analyzer.analyzePage({
+  documentId: `evaluation-${item.id}`,
+  pageId: `${item.id}-page-1`,
+  pageNumber: 1,
+  width: metadata.width,
+  height: metadata.height,
+  pngBase64: bytes.toString("base64"),
+  level: "private",
+  direction: "Redact direct personal identifiers, account numbers, and reference codes.",
+});
+```
+
+So the score measures the real pipeline, not a copy of it.
+At the end it prints the receipt and sets a failing exit code if any case failed:
+
+```ts
+if (!passed) process.exitCode = 1;
+```
+
+## 5. Run the evaluation
+
+The OCR model and Laya must already be cached from earlier lessons.
+Stop the service, so the evaluation has the models to itself, then run:
 
 ```bash
 npm run --silent qvac:evaluate > evaluation-receipt.json
 ```
 
 `--silent` keeps npm's own banner out of the file.
-The terminal shows `Evaluating clear…` and the other cases as it goes, and takes about two minutes.
+The terminal shows one progress line per page as it goes, named by condition rather than case ID: `Evaluating clear…`, `Evaluating rotated…`, `Evaluating low-contrast…` and `Evaluating partially-obscured…`.
+The whole run takes about two minutes.
 When it ends, check the exit status:
 
 ```bash
@@ -58,27 +186,27 @@ echo $?
 
 `0` means every case passed.
 
-## 4. Read the receipt
+## 6. Read the receipt
 
 Open `evaluation-receipt.json`.
-Near the top, `"passed": true`.
-Under `results`, each case has its own `result` with `precision`, `recall` and `f1`.
-You should see:
+Near the top you'll see `"passed": true`.
+Under `results`, each case has its scores in a nested `result` object, `results[].result`, with `precision`, `recall` and `f1`:
 
-| Case | F1 |
-|---|---|
-| `chat-clear` | 0.91 |
-| `chat-rotated` | 0.91 |
-| `chat-low-contrast` | 1.00 |
-| `chat-partially-obscured` | 0.91 |
+| Case | Precision | Recall | F1 |
+|---|---|---|---|
+| `chat-clear` | 0.86 | 1.00 | 0.92 |
+| `chat-rotated` | 0.86 | 1.00 | 0.92 |
+| `chat-low-contrast` | 0.86 | 1.00 | 0.92 |
+| `chat-partially-obscured` | 0.83 | 0.83 | 0.83 |
 
-An F1 of 0.91 here means five of the six regions matched and nothing extra was proposed.
-A case passes when precision, recall and F1 are all at least 0.70, and a proposal only counts if its label matches and its box overlaps the answer by at least 0.45 (intersection over union).
-Look in `matches` to see which regions were found.
+On the first three, Laya found all six fields and proposed one more line: `keep the amount confidential.`, which the evaluation's direction asks it to consider.
+On the partly covered page, one field is missed and one extra line is proposed.
+Look in `matches` to see which regions were found, and with what IoU.
 
-Run it again: the numbers are the same, because the model decodes with a fixed seed.
+Run it again.
+The numbers are identical, because Laya gives the same answer for the same input.
 
-## 5. Isolate one case
+## 7. Run one case on its own
 
 When one case fails, run it alone:
 
@@ -86,36 +214,45 @@ When one case fails, run it alone:
 REDACT_EVALUATION_CASE=chat-rotated npm run qvac:evaluate
 ```
 
-The rotated page takes longer than the others because OCR reads it twice: once as given and once turned upright.
-Its boxes are mapped back onto the original sideways page before scoring ([OCR boxes and rotation](/docs/qvac/ocr-geometry)).
+The rotated page takes longer than the others, because OCR reads it twice.
+The other case IDs are `chat-clear`, `chat-low-contrast` and `chat-partially-obscured`.
 
-## 6. Run the checks
+## If something goes wrong
+
+- **`QVAC cache is empty`:** run `npm run qvac:ocr-smoke` and one analysis in the app first, so both models are downloaded.
+- **`QVAC evaluation failed: …` saying a model couldn't load:** the service may be holding the models; stop `npm run qvac:service` and try again.
+- **`Unknown evaluation case`:** check the spelling of `REDACT_EVALUATION_CASE`.
+
+## 8. Check your work
 
 ```bash
 npm test -- qvac-service/evaluation.test.ts qvac-service/qvac-analyzer.test.ts
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-`npm test` should end with `Tests  85 passed (85)`.
-Delete `evaluation-receipt.json` or keep it outside the app, then record the checkpoint from the parent folder:
+`npm test` ends with `Tests  82 passed (82)`.
+You can leave `evaluation-receipt.json` where it is: this lesson's `.gitignore` ignores any `*-receipt.json` file.
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 09: measure suggestions against labelled documents"
-```
+## So what just happened?
 
-## What we built
-
-A repeatable quality gate for the local models: four labelled images, a strict matching rule, and a receipt that fails the command when suggestions get worse.
+You turned "it looks right" into numbers that a script can check.
+The same command now fails if a change makes Redact miss fields or propose nonsense on these four pages.
 Four fictional images are a course gate, not proof of accuracy on your own documents.
 
-- Every file in this checkpoint: [`redact/` at `ad636f7`](https://github.com/danielAsaboro/bring-ai-home/tree/ad636f7a01f814158a154aa51b9cf8bd70fbd353/redact)
-- What these numbers can and can't tell you: [About measuring suggestions](/docs/redact/concepts/measuring-suggestions)
-- Every field and threshold: [Evaluation](/docs/redact/reference/evaluation)
+## Try it yourself
 
-Next: [10.
-Run Redact with the network off](/docs/redact/tutorials/10-offline)
+Open `qvac-service/evaluation.ts` and change `minimumPrecision: 0.7` to `0.9`, then run the evaluation.
+Every case now fails, and `echo $?` prints `1`, even though the suggestions haven't changed: one extra suggestion out of seven is no longer allowed.
+Put it back to `0.7` afterwards.
+
+Then run the lesson 02 OCR script on the sideways image, `npm run qvac:ocr-smoke -- public/test-files/redact/evaluation/chat-rotated.png`.
+The script has no upright retry, so you'll see the short vertical word blocks that this lesson's retry exists to fix.
+
+## Where to next
+
+- Every file in this checkpoint: [`redact/` at `redact-09-evaluation`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-09-evaluation/redact)
+- [About measuring suggestions](/docs/redact/concepts/measuring-suggestions) and the [Evaluation reference](/docs/redact/reference/evaluation)
+
+Next: [Run Redact with the network off](/docs/redact/tutorials/10-offline) (lesson 10)

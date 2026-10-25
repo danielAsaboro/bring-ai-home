@@ -1,34 +1,202 @@
 ---
 title: "03. Start the local QVAC service"
-description: "We will start a small HTTP service on 127.0.0.1 that the browser will use to ask for local analysis, and probe it with curl before any model is connected."
+description: "We will put the OCR model behind a small HTTP service on 127.0.0.1, define the request the browser will send, and probe the service with curl before any model is connected."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 03. Start the local QVAC service" />
 
-In this lesson we will start the service that sits between the browser and QVAC.
-The browser can't run the native OCR engine itself, so it will send each page to this process on your own machine.
-At this checkpoint the service answers, checks its input, and admits honestly that it can't analyse anything yet.
+In lesson 02 a script read the chat image from the terminal.
+But Redact is a web app: the page you upload lives in the browser, and the browser can't run the OCR model.
+So before the model can help, we need something that sits between the two.
 
-**Checkpoint:** [`242f480`](https://github.com/danielAsaboro/bring-ai-home/commit/242f4808c8d7122c920d59962c293d352e5722a3), starting from `731eb40`
+**Checkpoint:** [`redact-03-local-service`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-03-local-service/redact), after `redact-02-first-ocr`
 
-## 1. Apply the lesson patch
+## Why can't the browser just run the model?
 
-Stop any running app or script.
-Download [`03-local-service.patch`](/docs/downloads/redact/03-local-service.patch) into your Downloads folder.
-From the parent `redact-course` folder:
+QVAC's engines are native code: compiled programs that use your CPU and GPU directly, plus model files hundreds of megabytes in size.
+A web page can't load native code, and you wouldn't want each browser tab downloading and holding a model of its own.
+So the model lives in one ordinary Node.js process on your machine, and the page talks to it over HTTP.
+
+That process is the **local service**.
+It's the same idea as calling a cloud API, with one difference that matters here: the address is `127.0.0.1`, your own computer.
+The page image goes from one program on your laptop to another, and nowhere else.
+
+More on this design: [About the local service](/docs/redact/concepts/local-service).
+
+## What makes a boundary safe?
+
+Anything that listens for requests can be sent bad ones, so the service gets a few firm rules from the start.
+
+| Rule | Why |
+|---|---|
+| Listen on `127.0.0.1` only | Other machines on your network can't reach it |
+| Accept browser requests only from `localhost` pages | A website you happen to have open can't use it |
+| Check every request against a schema | A malformed request is rejected before any model sees it |
+| Say "unavailable" instead of guessing | A missing model never turns into made-up results |
+
+Both sides share one description of the request and response, written with [Zod](https://zod.dev/).
+The browser checks what it receives with the same schemas the service uses to check what it's sent.
+
+## 1. Get this lesson's code
+
+Stop the app if it's running.
+From the repository root, `redact-course`, bring in this lesson's commit and install the new packages:
 
 ```bash
-git apply --check ~/Downloads/03-local-service.patch
-git apply ~/Downloads/03-local-service.patch
+git cherry-pick redact-03-local-service
 cd redact
 npm ci
 ```
 
-If `--check` reports an error, your previous lesson differs from the checkpoint; don't force it.
+This lesson adds `zod` and `tsx`, so `npm ci` takes a minute or two.
+To see every change, open the [comparison on GitHub](https://github.com/danielAsaboro/bring-ai-home/compare/redact-02-first-ocr...redact-03-local-service).
 
-## 2. Start the service
+| File | What it is |
+|---|---|
+| `src/features/redact/analysis-contract.ts` | The shared schemas: health, request, response, error |
+| `qvac-service/analyzer.ts` | The interface any analyzer must implement |
+| `qvac-service/server.ts` | The HTTP service and its rules |
+| `qvac-service/index.ts` | Starts the service, with a placeholder analyzer for now |
+| `src/features/redact/analysis-client.ts` | The browser's side: calls the service and checks the replies |
+| `qvac-service/server.test.ts`, `analysis-client.test.ts` | Tests for both sides |
+| `package.json` | Adds `zod`, `tsx` and the `qvac:service` script |
+
+## 2. Read the contract
+
+Open `src/features/redact/analysis-contract.ts`.
+This is the request the browser will send for each page:
+
+```ts
+export const analyzePageRequestSchema = z.object({
+  documentId: z.string().min(1),
+  pageId: z.string().min(1),
+  pageNumber: z.number().int().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  pngBase64: z.string().min(1),
+  level: z.enum(["private", "confidential"]),
+  direction: z.string().max(500),
+});
+```
+
+One page at a time, as a PNG encoded as base64 text, with its size in pixels.
+`level` and `direction` are what you chose on the privacy screen; nothing uses them yet, but they travel with every page from now on.
+
+Each OCR block that comes back must look like this:
+
+```ts
+export const rawOcrBlockSchema = z.object({
+  text: z.string(),
+  bbox: z.tuple([
+    z.number().finite(),
+    z.number().finite(),
+    z.number().finite(),
+    z.number().finite(),
+  ]),
+  confidence: z.number().min(0).max(1).nullable(),
+});
+```
+
+That's lesson 02's output, written down as a rule: text, four finite numbers for the box, and a confidence between 0 and 1.
+
+## 3. Read the analyzer interface
+
+Open `qvac-service/analyzer.ts`:
+
+```ts
+export interface DocumentAnalyzer {
+  getState(): AnalyzerState;
+  analyzePage(input: AnalyzePageRequest): Promise<AnalysisResponse>;
+  close(): Promise<void>;
+}
+```
+
+The service doesn't know about QVAC at all.
+It only knows that something can report its state, analyse a page, and shut down.
+That lets us test the service with fakes, and swap in the real model next lesson without touching the server.
+
+At this checkpoint, `qvac-service/index.ts` plugs in a placeholder:
+
+```ts
+const analyzer: DocumentAnalyzer = {
+  getState: () => ({
+    service: "ready",
+    models: [
+      { kind: "ocr", id: "qvac-ocr-latin", state: "not_loaded" },
+      { kind: "reasoning", id: "not-configured", state: "not_loaded" },
+    ],
+  }),
+  analyzePage: async () => {
+    throw new Error("OCR is not connected at this checkpoint");
+  },
+  close: async () => undefined,
+};
+```
+
+It's honest: the OCR model isn't loaded, and asking it to analyse a page fails.
+
+## 4. Read the server's rules
+
+Open `qvac-service/server.ts`.
+The first thing every request meets is the origin check:
+
+```ts
+function localAppOrigin(request: IncomingMessage): string | null {
+  const origin = request.headers.origin;
+  if (!origin) return null;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+      ? origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+```
+
+Browsers send an `Origin` header saying which site made the request.
+If it's there and isn't a `localhost` page, the service answers `403 origin_forbidden` and stops.
+Tools like `curl` send no `Origin`, which is why you can test from the terminal.
+
+Then the analyse route parses the body against the schema before doing anything:
+
+```ts
+if (request.method === "POST" && request.url === "/v1/analyze-page") {
+  let input;
+  try {
+    input = analyzePageRequestSchema.parse(await readJson(request));
+  } catch {
+    sendJson(request, response, 400, {
+      error: { code: "invalid_request", message: "Invalid analyze-page request" },
+    });
+    return;
+  }
+
+  busy = true;
+  try {
+    sendJson(request, response, 200, await options.analyzer.analyzePage(input));
+  } catch {
+    sendJson(request, response, 503, {
+      error: { code: "analyzer_unavailable", message: "Local analysis is unavailable" },
+    });
+  } finally {
+    busy = false;
+  }
+  return;
+}
+```
+
+Bad input gets `400`.
+If the analyzer throws, for any reason, the browser gets `503 analyzer_unavailable` instead of a half-made result.
+The `busy` flag shows up in `/health` while a page is being analysed; lesson 08 uses it to turn away a second request.
+
+`readJson` also stops reading after 20 MB, so a huge upload can't fill your memory.
+
+## 5. Start the service
 
 ```bash
 npm run qvac:service
@@ -41,8 +209,9 @@ Redact QVAC service listening on http://127.0.0.1:4317
 ```
 
 Leave it running.
+The port comes from `REDACT_QVAC_PORT` if you set it, otherwise 4317.
 
-## 3. Ask for its health
+## 6. Ask for its health
 
 In a second terminal:
 
@@ -54,10 +223,10 @@ curl http://127.0.0.1:4317/health
 {"service":"ready","models":[{"kind":"ocr","id":"qvac-ocr-latin","state":"not_loaded"},{"kind":"reasoning","id":"not-configured","state":"not_loaded"}],"busy":false}
 ```
 
-Notice that the service is `ready` while the OCR model is `not_loaded` and there is no reasoning model at all.
+The service is `ready`, but the OCR model is `not_loaded` and there's no reasoning model at all.
 A running process and a loaded model are different things, and the service reports them separately.
 
-## 4. Send a bad request
+## 7. Send a bad request
 
 ```bash
 curl -X POST http://127.0.0.1:4317/v1/analyze-page \
@@ -69,9 +238,9 @@ curl -X POST http://127.0.0.1:4317/v1/analyze-page \
 {"error":{"code":"invalid_request","message":"Invalid analyze-page request"}}
 ```
 
-An empty body is rejected before anything is analysed.
+An empty body never reaches the analyzer.
 
-## 5. Send a well-formed request
+## 8. Send a well-formed request
 
 ```bash
 curl -X POST http://127.0.0.1:4317/v1/analyze-page \
@@ -83,11 +252,10 @@ curl -X POST http://127.0.0.1:4317/v1/analyze-page \
 {"error":{"code":"analyzer_unavailable","message":"Local analysis is unavailable"}}
 ```
 
-This request passes validation and reaches the analyzer, which at this checkpoint is a deliberate placeholder.
-Instead of inventing OCR results, it says it's unavailable.
-We connect the real model in the next lesson.
+This one passes the schema and reaches the placeholder, which throws.
+Instead of inventing OCR results, the service says it's unavailable.
 
-## 6. Try a request from a website
+## 9. Pretend to be a website
 
 ```bash
 curl -H "Origin: https://example.com" http://127.0.0.1:4317/health
@@ -97,39 +265,42 @@ curl -H "Origin: https://example.com" http://127.0.0.1:4317/health
 {"error":{"code":"origin_forbidden","message":"Origin is not allowed"}}
 ```
 
-Only pages served from `localhost` or `127.0.0.1` may call the service from a browser.
-A website you happen to have open can't use it.
+Try `-H "Origin: http://localhost:3101"` instead, and you get the health response back.
 
 Stop the service with `Ctrl+C`.
 
-## 7. Check your work
+## If something goes wrong
+
+- **`EADDRINUSE` when starting:** something else is on port 4317, maybe a service from an earlier lesson.
+  Stop it, or start this one with `REDACT_QVAC_PORT=4318 npm run qvac:service`.
+- **`curl: (7) Failed to connect`:** the service isn't running, or is on a different port.
+- **`tsx: command not found`:** `npm ci` didn't finish; run it again from the `redact` folder.
+
+## 10. Check your work
 
 ```bash
-npm test -- src/features/redact/analysis-client.test.ts qvac-service/server.test.ts
 npm run lint
 npm run typecheck
 npm test
-npm run build
 ```
 
-The full `npm test` reports `Tests  42 passed (42)`.
+`npm test` reports `Tests  42 passed (42)`.
+The new tests in `server.test.ts` start a real server with fake analyzers and check each rule above.
 
-Record the checkpoint from the parent folder:
+## So what just happened?
 
-```bash
-cd ..
-git add redact
-git -c user.name="Course learner" -c user.email="learner@example.invalid" commit -m "Lesson 03: start the local QVAC service"
-```
+The browser now has somewhere to send its pages: a small service on your own machine, with clear rules about who may call it and what it accepts.
+It doesn't read anything yet, and it says so instead of pretending.
 
-## What we built
+## Try it yourself
 
-A local boundary with clear rules: it listens only on your machine, accepts only localhost pages, validates every request, and says "unavailable" rather than guessing.
-The app now has somewhere safe to send its pages.
+Send a request whose `level` is `"secret"` instead of `"private"`.
+Before you run it, decide which error you expect; then check.
+Then send `pageNumber: 0` and see the same rule catch it.
 
-- Every file in this checkpoint: [`redact/` at `242f480`](https://github.com/danielAsaboro/bring-ai-home/tree/242f4808c8d7122c920d59962c293d352e5722a3/redact)
-- [About the local service](/docs/redact/concepts/local-service)
-- All routes and errors: [Local service API](/docs/redact/reference/service-api)
+## Where to next
 
-Next: [04.
-Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr)
+- Every file in this checkpoint: [`redact/` at `redact-03-local-service`](https://github.com/danielAsaboro/bring-ai-home/tree/redact-03-local-service/redact)
+- All routes and errors of the finished service: [Local service API](/docs/redact/reference/service-api)
+
+Next: [Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr) (lesson 04)

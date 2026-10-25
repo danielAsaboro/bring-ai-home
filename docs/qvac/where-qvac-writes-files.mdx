@@ -21,7 +21,7 @@ You set it in a QVAC config file, and point the SDK at that file with `QVAC_CONF
 { "cacheDirectory": "/absolute/path/to/your-app/.qvac/models" }
 ```
 
-Each file is named by a content hash and the original file name, for example `5b8aae816570a09d_Qwen3-0.6B-Q4_0.gguf`.
+Each file is named by a content hash and the original file name, for example `76264cc45d44f541_laya-Q8_0.gguf`.
 A later `loadModel()` with the same model constant checks this directory first and loads from disk without contacting the registry.
 
 ## The worker home
@@ -33,7 +33,9 @@ That worker keeps its own state under `<home>/.qvac/`: a `registry-corestore` da
 So by default every QVAC app on your machine shares `~/.qvac`.
 
 Setting `SNAP_USER_COMMON` to a directory inside the project gives each app its own worker home.
-Redact does this, so a broken or missing `~/.qvac` (for example a symlink to an unmounted drive) can't stop it:
+Redact's service, evaluation and offline proof do this, so a broken or missing `~/.qvac` (for example a symlink to an unmounted drive) can't stop them.
+The lesson 02 OCR script doesn't, so it does use `~/.qvac`, and fails with `ENOENT … stat "…/.qvac"` if that is a broken link; replace it with a real folder.
+The service's layout looks like this:
 
 ```text
 redact/.qvac/
