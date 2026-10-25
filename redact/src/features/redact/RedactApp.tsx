@@ -44,6 +44,14 @@ import {
   type SourceDocument,
 } from "./workflow-domain";
 
+const BUSY_POLL_MS = 1000;
+const BUSY_WAIT_MS = 60_000;
+
+export type CopyCheck = {
+  status: "checking" | "clear" | "found" | "unavailable";
+  findings: Array<{ pageNumber: number; label: string; text: string }>;
+};
+
 export type RedactAppAdapters = {
   inspect(file: File): Promise<SourceInspection>;
   rasterize(file: File, inspection: SourceInspection): Promise<RedactSession["pages"]>;
@@ -99,6 +107,8 @@ export function RedactApp({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+  const [copyCheck, setCopyCheck] = useState<CopyCheck | null>(null);
+  const copyCheckSequence = useRef(0);
   const [analysisMessage, setAnalysisMessage] = useState("Rasterizing pages without changing the original file…");
   const [canCancel, setCanCancel] = useState(false);
   const analysisRequest = useRef<AbortController | null>(null);
@@ -184,7 +194,13 @@ export function RedactApp({
       partialEvidence.current = { ocrBlocks, candidates, analysisRuns };
       try {
         setAnalysisMessage("Loading the local OCR model and reading each page…");
-        const health = await adapters.analysis.health(controller.signal);
+        let health = await adapters.analysis.health(controller.signal);
+        for (let waited = 0; health.busy && waited < BUSY_WAIT_MS; waited += BUSY_POLL_MS) {
+          setAnalysisMessage("Waiting for the previous local check to finish…");
+          await new Promise((resolve) => setTimeout(resolve, BUSY_POLL_MS));
+          if (requestId !== analysisSequence.current) return;
+          health = await adapters.analysis.health(controller.signal);
+        }
         if (requestId !== analysisSequence.current) return;
         if (health.service !== "ready") {
           throw new Error("Local analysis is unavailable");
@@ -309,6 +325,7 @@ export function RedactApp({
         marks: session.marks,
       });
       setGeneratedCopy(copy);
+      void checkCopy(copy, exporting);
       setSession(
         recordGeneratedCopy(exporting, {
           name: copy.name,
@@ -323,6 +340,43 @@ export function RedactApp({
       setSession(session);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function checkCopy(copy: GeneratedCopy, reviewed: RedactSession) {
+    const request = ++copyCheckSequence.current;
+    if (!copy.flattenedPages?.length) {
+      setCopyCheck(null);
+      return;
+    }
+    setCopyCheck({ status: "checking", findings: [] });
+    try {
+      const findings: CopyCheck["findings"] = [];
+      for (const [index, pngBytes] of copy.flattenedPages.entries()) {
+        const page = reviewed.pages[index];
+        const result = await adapters.analysis.analyzePage({
+          documentId: `${reviewed.source.id}-copy`,
+          pageId: `${page.id}-copy`,
+          pageNumber: page.pageNumber,
+          width: page.width,
+          height: page.height,
+          pngBytes: pngBytes.slice().buffer as ArrayBuffer,
+          level: reviewed.configuration.level,
+          direction: reviewed.configuration.direction,
+        });
+        for (const candidate of result.candidates) {
+          findings.push({
+            pageNumber: page.pageNumber,
+            label: candidate.label,
+            text: result.ocrBlocks[candidate.blockIndex]?.text ?? "",
+          });
+        }
+      }
+      if (request === copyCheckSequence.current) {
+        setCopyCheck({ status: findings.length > 0 ? "found" : "clear", findings });
+      }
+    } catch {
+      if (request === copyCheckSequence.current) setCopyCheck({ status: "unavailable", findings: [] });
     }
   }
 
@@ -447,10 +501,13 @@ export function RedactApp({
           <CompleteStage
             copy={generatedCopy}
             source={session.source}
+            check={copyCheck}
             message={clipboardMessage}
             onCopy={copyToClipboard}
             onSave={() => saveGeneratedCopy(generatedCopy, adapters.downloader)}
             onReview={() => {
+              copyCheckSequence.current += 1;
+              setCopyCheck(null);
               setClipboardMessage(null);
               setSession({ ...session, stage: "review" });
             }}
@@ -459,6 +516,8 @@ export function RedactApp({
               setFile(null);
               setInspection(null);
               setGeneratedCopy(null);
+              copyCheckSequence.current += 1;
+              setCopyCheck(null);
               setClipboardMessage(null);
             }}
           />

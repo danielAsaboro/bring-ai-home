@@ -10,9 +10,15 @@ describe("offline ownership proof", () => {
       assertWarmedCache([
         "latin_g2.gguf",
         "craft_mlt_25k.gguf",
-        "Qwen3-0.6B-Q4_0.gguf",
+        "laya-Q8_0.gguf",
       ]),
     ).not.toThrow();
+    expect(() =>
+      assertWarmedCache(["latin_g2.gguf", "craft_mlt_25k.gguf", "Qwen3-0.6B-Q4_0.gguf"], "qwen"),
+    ).not.toThrow();
+    expect(() =>
+      assertWarmedCache(["latin_g2.gguf", "craft_mlt_25k.gguf", "Qwen3-0.6B-Q4_0.gguf"]),
+    ).toThrow("warm both models");
     expect(() => assertWarmedCache(["latin_g2.gguf"])).toThrow("warm both models");
   });
 

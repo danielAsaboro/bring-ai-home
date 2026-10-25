@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { createQvacOcrAnalyzer } from "./qvac-analyzer";
 import { resolveLocalQvacPaths } from "./local-config";
 import { assertWarmedCache, withRemoteFetchBlocked } from "./offline-proof";
-import { createStructuredReasoner } from "./reasoning";
+import { createReasoner, reasonerKindFromEnv } from "./reasoner-choice";
 
 async function main() {
   const appDirectory = fileURLToPath(new URL("../", import.meta.url));
@@ -16,7 +16,8 @@ async function main() {
     mkdir(paths.cacheDirectory, { recursive: true }),
     mkdir(paths.tempDirectory, { recursive: true }),
   ]);
-  assertWarmedCache(await readdir(paths.cacheDirectory));
+  const reasonerKind = reasonerKindFromEnv();
+  assertWarmedCache(await readdir(paths.cacheDirectory), reasonerKind);
   await writeFile(paths.configPath, `${JSON.stringify({ cacheDirectory: paths.cacheDirectory }, null, 2)}\n`);
   process.env.QVAC_CONFIG_PATH = paths.configPath;
   process.env.SNAP_USER_COMMON = paths.runtimeHome;
@@ -38,14 +39,7 @@ async function main() {
       unloadModel: (options) => qvac.unloadModel(options),
       close: () => qvac.close(),
     },
-    reasoner: createStructuredReasoner({
-      modelSource: qvac.QWEN3_600M_INST_Q4,
-      runtime: {
-        loadModel: (options) => qvac.loadModel(options as never),
-        completion: (options) => qvac.completion(options as never),
-        unloadModel: (options) => qvac.unloadModel(options),
-      },
-    }),
+    reasoner: createReasoner(qvac, reasonerKind),
   });
   const source = await readFile(
     fileURLToPath(new URL("../public/test-files/redact/chat-private.png", import.meta.url)),

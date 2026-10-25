@@ -1,8 +1,10 @@
 import type { GeneratedCopy } from "../safe-copy";
+import type { CopyCheck } from "../RedactApp";
 import type { SourceDocument } from "../workflow-domain";
 
-export function CompleteStage({ copy, source, message, onCopy, onSave, onReview, onNew }: {
+export function CompleteStage({ copy, source, check, message, onCopy, onSave, onReview, onNew }: {
   copy: GeneratedCopy;
+  check: CopyCheck | null;
   source: SourceDocument;
   message: string | null;
   onCopy(): void;
@@ -17,6 +19,14 @@ export function CompleteStage({ copy, source, message, onCopy, onSave, onReview,
       <h1>Your safe copy is ready</h1>
       <p>The original <strong>{source.name}</strong> was not modified.</p>
       <div className="copy-card"><div className="file-badge">{copy.mimeType === "application/pdf" ? "PDF" : "PNG"}</div><div><strong>{copy.name}</strong><span>{copy.pageCount} {copy.pageCount === 1 ? "page" : "pages"} · {formatBytes(copy.blob.size)}</span></div></div>
+      {check?.status === "checking" && <p className="copy-check" role="status">Checking the copy locally for anything still readable…</p>}
+      {check?.status === "clear" && <p className="copy-check copy-check-clear" role="status">Local check: nothing private is readable on the copy.</p>}
+      {check?.status === "found" && (
+        <section className="copy-check copy-check-found" aria-label="Still readable on the copy">
+          <strong>Still readable on the copy</strong>
+          <ul>{check.findings.map((finding, index) => <li key={index}><span>{finding.label}</span> {finding.text}{copy.pageCount > 1 ? ` · page ${finding.pageNumber}` : ""}</li>)}</ul>
+        </section>
+      )}
       <div className="complete-actions"><button className="secondary-button" onClick={onCopy}>Copy to clipboard</button><button className="primary-button" onClick={onSave}>Save copy</button></div>
       {message && <p className="clipboard-message" role="status">{message}</p>}
       <div className="complete-links"><button onClick={onReview}>Return to review</button><button onClick={onNew}>Redact another document</button></div>

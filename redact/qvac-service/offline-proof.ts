@@ -1,7 +1,7 @@
-export function assertWarmedCache(files: readonly string[]) {
+export function assertWarmedCache(files: readonly string[], reasoner: "laya" | "qwen" = "laya") {
   const hasDetector = files.some((file) => /craft/i.test(file));
   const hasRecognizer = files.some((file) => /latin/i.test(file));
-  const hasReasoner = files.some((file) => /qwen/i.test(file));
+  const hasReasoner = files.some((file) => (reasoner === "laya" ? /laya/i : /qwen/i).test(file));
   if (!hasDetector || !hasRecognizer || !hasReasoner) {
     throw new Error(
       "QVAC cache is incomplete; warm both models with qvac:ocr-smoke and one successful app analysis first.",

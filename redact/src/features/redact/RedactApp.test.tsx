@@ -204,6 +204,67 @@ describe("Redact application", () => {
     expect(appAdapters.downloader.save).toHaveBeenCalledOnce();
   });
 
+  it("waits for a busy local service before analysing", async () => {
+    const user = userEvent.setup();
+    const appAdapters = adapters();
+    vi.mocked(appAdapters.analysis.health)
+      .mockResolvedValueOnce({ service: "ready", busy: true, models: [] })
+      .mockResolvedValueOnce({ service: "ready", busy: false, models: [] });
+    render(<RedactApp adapters={appAdapters} />);
+
+    await user.upload(
+      screen.getByLabelText("Choose a document"),
+      new File([new Uint8Array([1, 2, 3])], "chat-private.png", { type: "image/png" }),
+    );
+    await screen.findByText("Privacy level");
+    await user.click(screen.getByRole("button", { name: "Prepare for review" }));
+
+    expect(await screen.findByText("Original", undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(appAdapters.analysis.health).toHaveBeenCalledTimes(2);
+    expect(appAdapters.analysis.analyzePage).toHaveBeenCalledOnce();
+  });
+
+  it("checks the flattened copy locally and lists what is still readable", async () => {
+    const user = userEvent.setup();
+    const base = adapters();
+    const appAdapters = adapters({
+      exportCopy: vi.fn().mockResolvedValue({
+        name: "chat-private.redacted.png",
+        mimeType: "image/png",
+        blob: new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }),
+        pageCount: 1,
+        flattenedPages: [new Uint8Array([4, 5, 6])],
+      }),
+    });
+    const firstAnalysis = await base.analysis.analyzePage({} as never);
+    vi.mocked(appAdapters.analysis.analyzePage)
+      .mockResolvedValueOnce(firstAnalysis)
+      .mockResolvedValueOnce({
+        ...firstAnalysis,
+        ocrBlocks: [firstAnalysis.ocrBlocks[1]],
+        candidates: [{ blockIndex: 0, label: "email", explanation: "The block contains an email address.", confidence: 0.97 }],
+      });
+    render(<RedactApp adapters={appAdapters} />);
+
+    await user.upload(
+      screen.getByLabelText("Choose a document"),
+      new File([new Uint8Array([1, 2, 3])], "chat-private.png", { type: "image/png" }),
+    );
+    await screen.findByText("Privacy level");
+    await user.click(screen.getByRole("button", { name: "Prepare for review" }));
+    await screen.findByText("Original");
+    await user.click(screen.getByRole("button", { name: "Accept name proposal" }));
+    await user.click(screen.getByRole("button", { name: "Reject email proposal" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    const finding = await screen.findByLabelText("Still readable on the copy");
+    expect(finding).toHaveTextContent("maya.chen@example com");
+    expect(appAdapters.analysis.analyzePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageId: "page-1-copy", pageNumber: 1 }),
+    );
+    expect(screen.getByRole("button", { name: "Save copy" })).toBeEnabled();
+  });
+
   it("keeps moved geometry when a mark is dragged on the document", async () => {
     const user = userEvent.setup();
     render(<RedactApp adapters={adapters()} />);

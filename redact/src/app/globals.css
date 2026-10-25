@@ -171,6 +171,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .complete-stage > p { color: var(--muted); }
 .complete-stage .copy-card { text-align: left; grid-template-columns: auto 1fr; margin-top: 2rem; }
 .complete-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.copy-check { margin: 0 0 1rem; padding: .75rem .9rem; border: 1px solid var(--line); border-radius: 7px; font-size: .8rem; font-weight: 700; }
+.copy-check-clear { background: var(--mint); border-color: transparent; }
+.copy-check-found { color: #6f421f; background: #fff5ec; border-color: #efc7a9; }
+.copy-check-found ul { margin: .45rem 0 0; padding-left: 1.1rem; font-weight: 500; }
+.copy-check-found li span { text-transform: uppercase; font-size: .68rem; letter-spacing: .04em; margin-right: .3rem; }
 .clipboard-message { padding: .75rem; background: var(--mint); border-radius: 7px; font-weight: 700; }
 .complete-links { display: flex; justify-content: center; gap: 1.5rem; margin: 1.5rem 0; }
 .complete-links button { color: var(--green-2); background: none; border: 0; border-bottom: 1px solid currentColor; font-weight: 700; }

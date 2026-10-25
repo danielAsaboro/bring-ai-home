@@ -6,7 +6,7 @@ import sharp from "sharp";
 
 import { normalizeOcrBbox } from "../src/features/redact/ocr-geometry";
 import { createQvacOcrAnalyzer } from "./qvac-analyzer";
-import { createStructuredReasoner } from "./reasoning";
+import { createReasoner, reasonerKindFromEnv } from "./reasoner-choice";
 import { EVALUATION_CASES, EVALUATION_IDENTIFIERS, runEvaluationCases } from "./evaluation";
 import { resolveLocalQvacPaths } from "./local-config";
 
@@ -26,17 +26,11 @@ async function main() {
 
   const qvac = await import("@qvac/sdk");
   const modelLoadMs = { ocr: 0, reasoning: 0 };
-  const reasoner = createStructuredReasoner({
-    modelSource: qvac.QWEN3_600M_INST_Q4,
-    runtime: {
-      async loadModel(options) {
-        const started = Date.now();
-        try { return await qvac.loadModel(options as never); }
-        finally { modelLoadMs.reasoning += Date.now() - started; }
-      },
-      completion: (options) => qvac.completion(options as never),
-      unloadModel: (options) => qvac.unloadModel(options),
-    },
+  const reasonerKind = reasonerKindFromEnv();
+  const reasoner = createReasoner(qvac, reasonerKind, async (options) => {
+    const started = Date.now();
+    try { return await qvac.loadModel(options as never); }
+    finally { modelLoadMs.reasoning += Date.now() - started; }
   });
   const analyzer = createQvacOcrAnalyzer({
     modelSource: qvac.OCR_LATIN,
@@ -102,7 +96,10 @@ async function main() {
     const passed = results.every((item) => item.result.passed);
     process.stdout.write(`${JSON.stringify({
       mode: "real-cached-local-qvac",
-      identifiers: EVALUATION_IDENTIFIERS,
+      identifiers: {
+        ...EVALUATION_IDENTIFIERS,
+        reasoning: reasonerKind === "laya" ? "LAYA_421M_Q8_0/laya-421m-q8" : EVALUATION_IDENTIFIERS.reasoning,
+      },
       passed,
       modelLoadMs,
       timings,

@@ -12,6 +12,7 @@ export type GeneratedCopy = {
   mimeType: "image/png" | "application/pdf";
   blob: Blob;
   pageCount: number;
+  flattenedPages?: Uint8Array[];
 };
 
 export type CanvasFactory = {
@@ -73,6 +74,7 @@ export async function generateSafeCopy(input: {
       mimeType: "image/png",
       blob: new Blob([copyArrayBuffer(bytes)], { type: "image/png" }),
       pageCount: 1,
+      flattenedPages,
     };
   }
 
@@ -96,6 +98,7 @@ export async function generateSafeCopy(input: {
     mimeType: "application/pdf",
     blob: new Blob([copyArrayBuffer(pdfBytes)], { type: "application/pdf" }),
     pageCount: input.pages.length,
+    flattenedPages,
   };
 }
 
