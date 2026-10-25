@@ -3,11 +3,15 @@ title: "Redact"
 description: "Share a screenshot or PDF without its private details. Local OCR and a local decision model suggest what to cover; you decide; nothing leaves your machine."
 ---
 
-Imagine you run the front desk at a small clinic. A patient's insurer wants a screenshot of a message thread to process a claim. The thread has the patient's name, phone number, home address and policy number in it, and you need to send everything except those. It's late, there are twelve of these to do, and there's an AI chat window open in the next tab that would find every name in a second. You'd just have to paste the screenshot in.
+Imagine you run the front desk at a small clinic. 
 
-## It isn't only clinics
+A patient's insurer wants a screenshot of a message thread to process a claim. The thread has the patient's name, phone number, home address and policy number in it, and you need to send everything except those. It's late, there are twelve of these to do, and there's an AI chat window open in the next tab that would find every name in a second. You'd just have to paste the screenshot in.
 
-The same moment happens wherever people share documents that contain other people's details: a paralegal sending a contract excerpt to opposing counsel, a support agent attaching a chat log to a bug report, an HR officer forwarding a payslip, an engineer pasting a log file into a ticket, a journalist publishing a leaked memo without exposing its sources. The document has to go out; parts of it must not.
+## This isn't isolated to Clinics alone
+
+The same moment happens wherever people share documents that contain other people's details: a paralegal sending a contract excerpt to opposing counsel, a support agent attaching a chat log to a bug report, an HR officer forwarding a payslip, an engineer pasting a log file into a ticket, a journalist publishing a leaked memo without exposing its sources. 
+
+The document has to go out; parts of it must not.
 
 ## What the evidence says
 
@@ -21,13 +25,13 @@ And covering text by hand has its own famous failure. In January 2019, lawyers f
 
 ## The options
 
-**Don't use AI.** Read every line and cover it by hand. It works, but it's slow, and attention fades by the twelfth document. Misses are silent.
+- **Don't use AI.** Read every line and cover it by hand. It works, but it's slow, and attention fades by the twelfth document. Misses are silent.
 
-**Use a cloud AI tool.** It's fast and good at spotting names. But the document, with everything you meant to hide, is sent to someone else's servers before anything is hidden. What happens to it next depends on that provider's retention and training terms, your plan, and your settings. For a clinic or a law firm, that's often the end of the discussion.
+- **Use a cloud AI tool.** It's fast and good at spotting names. But the document, with everything you meant to hide, is sent to someone else's servers before anything is hidden. What happens to it next depends on that provider's retention and training terms, your plan, and your settings. For a clinic or a law firm, that's often the end of the discussion.
 
-**Use a PDF editor's box tool.** Unless it truly removes the content, the text under the box is still in the file, as the Manafort filing showed.
+- **Use a PDF editor's box tool.** Unless it truly removes the content, the text under the box is still in the file, as the Manafort filing showed.
 
-**Use local AI.** Run the models on your own computer, so the document never leaves it. Until recently the models small enough to do this were too weak to be useful. They are now good enough for this job, with limits we measure honestly: on Redact's labelled test pages, local suggestions score between 0.83 and 0.92 F1, and the app is built on the assumption that a person checks every one.
+- **Use local AI.** Run the models on your own computer, so the document never leaves it. Until recently the models small enough to do this were too weak to be useful. They are now good enough for this job, with limits we measure honestly: on Redact's labelled test pages, local suggestions score between 0.83 and 0.92 F1, and the app is built on the assumption that a person checks every one.
 
 ## What we'll build
 
