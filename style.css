@@ -1,5 +1,0 @@
-/* Keep prose at a comfortable reading length (about 65 characters per line).
-   Tables, code blocks, images, diagrams, cards and video slots keep the full column. */
-#content > :is(p, span[data-as="p"], ul, ol, blockquote, h2, h3, h4, h5) {
-  max-width: 34rem;
-}
