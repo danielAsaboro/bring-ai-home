@@ -110,6 +110,6 @@
       "bytes": 236097
     }
   ],
-  "branch": "course/redact-qvac-v2",
+  "branch": "course/redact-qvac",
   "sdk": "@qvac/sdk@0.22.0"
 }

@@ -1,9 +1,9 @@
 ---
 title: "Checkpoints and downloads"
-description: "Each lesson's commit on course/redact-qvac-v2, its patch, and the downloadable packages."
+description: "Each lesson's commit on course/redact-qvac, its patch, and the downloadable packages."
 ---
 
-Branch: [`course/redact-qvac-v2`](https://github.com/danielAsaboro/bring-ai-home/tree/course/redact-qvac-v2/redact). All checkpoints from lesson 02 on pin `@qvac/sdk` 0.22.0. Machine-readable list: [`manifest.json`](/docs/downloads/redact/manifest.json).
+Branch: [`course/redact-qvac`](https://github.com/danielAsaboro/bring-ai-home/tree/course/redact-qvac/redact). All checkpoints from lesson 02 on pin `@qvac/sdk` 0.22.0. Machine-readable list: [`manifest.json`](/docs/downloads/redact/manifest.json).
 
 ## Lessons
 
@@ -34,7 +34,3 @@ SHA-256 hashes and sizes for every file are in `manifest.json`.
 ## Verification
 
 At every commit above, on 2026-10-25: `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` passed. At `1d432a2`, `npm run build`, `npm run qvac:ocr-smoke`, `npm run qvac:evaluate`, `npm run qvac:offline` and the live browser test also passed with real inference on macOS.
-
-## Earlier branch
-
-`course/redact-qvac` holds the same lessons on `@qvac/sdk` 0.17.1. It is kept for history; these docs don't use it.
