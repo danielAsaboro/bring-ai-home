@@ -49,6 +49,8 @@ Everything for this project lives in this one folder:
 | `dist/` | Output of `scripts/build-site.sh`, linked to the Vercel project | Ignored |
 | `plans/`, `internal/`, `private/` | Notes and working files | Ignored |
 
+Writing rules for every page: no paragraph or list item longer than four sentences (`node scripts/check-prose.mjs docs` lists offenders; `scripts/build-site.sh` runs it too), and prose is capped at about 65 characters per line by `style.css`.
+
 Run Redact from its worktree:
 
 ```bash
