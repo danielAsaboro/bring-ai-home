@@ -1,5 +1,5 @@
 diff --git a/redact/qvac-service/index.ts b/redact/qvac-service/index.ts
-index b2cbffe..f583704 100644
+index ebf044b..8dd1cb9 100644
 --- a/redact/qvac-service/index.ts
 +++ b/redact/qvac-service/index.ts
 @@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ index b2cbffe..f583704 100644
  
  const port = Number.parseInt(process.env.REDACT_QVAC_PORT ?? "4317", 10);
  const appDirectory = fileURLToPath(new URL("../", import.meta.url));
-@@ -40,9 +40,11 @@ async function main() {
+@@ -45,9 +45,11 @@ async function main() {
      process.stdout.write(`Redact QVAC service listening on http://127.0.0.1:${port}\n`);
    });
  

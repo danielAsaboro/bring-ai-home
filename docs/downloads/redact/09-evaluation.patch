@@ -74,7 +74,7 @@ index 7c5132c..0e7b4c4 100644
 +sensitive field. QVAC suggestions are evidence for review, not an automatic
 +guarantee.
 diff --git a/redact/package.json b/redact/package.json
-index 9c8e2fe..1b30e36 100644
+index 71ecd15..cc08f14 100644
 --- a/redact/package.json
 +++ b/redact/package.json
 @@ -16,7 +16,8 @@
@@ -86,7 +86,7 @@ index 9c8e2fe..1b30e36 100644
 +    "qvac:evaluate": "tsx qvac-service/evaluation-cli.ts"
    },
    "dependencies": {
-     "@qvac/sdk": "0.17.1",
+     "@qvac/sdk": "0.22.0",
 diff --git a/redact/public/test-files/redact/evaluation/chat-clear.png b/redact/public/test-files/redact/evaluation/chat-clear.png
 new file mode 100644
 index 0000000000000000000000000000000000000000..b55613c9bf3cac32d2cd56ad9cb10d7cef8b3ea0
@@ -5030,7 +5030,7 @@ fcmbQBG(l;D2_vhase!4<WJ|`o5Y}dCrmuVeaV-bW
 
 diff --git a/redact/qvac-service/evaluation-cli.ts b/redact/qvac-service/evaluation-cli.ts
 new file mode 100644
-index 0000000..43cac29
+index 0000000..59beee6
 --- /dev/null
 +++ b/redact/qvac-service/evaluation-cli.ts
 @@ -0,0 +1,121 @@
@@ -5082,7 +5082,7 @@ index 0000000..43cac29
 +        try { return await qvac.loadModel(options as never); }
 +        finally { modelLoadMs.ocr += Date.now() - started; }
 +      },
-+      ocr: (options) => qvac.ocr(options),
++      ocr: (options) => qvac.ocr(options as never),
 +      unloadModel: (options) => qvac.unloadModel(options),
 +      close: () => qvac.close(),
 +    },
@@ -5157,7 +5157,7 @@ index 0000000..43cac29
 +});
 diff --git a/redact/qvac-service/evaluation.test.ts b/redact/qvac-service/evaluation.test.ts
 new file mode 100644
-index 0000000..fbb9425
+index 0000000..7bfbf97
 --- /dev/null
 +++ b/redact/qvac-service/evaluation.test.ts
 @@ -0,0 +1,108 @@
@@ -5183,7 +5183,7 @@ index 0000000..fbb9425
 +describe("labelled QVAC evaluation", () => {
 +  it("pins the tested runtime and gate configuration", () => {
 +    expect(EVALUATION_IDENTIFIERS).toMatchObject({
-+      sdk: "@qvac/sdk@0.17.1",
++      sdk: "@qvac/sdk@0.22.0",
 +      ocr: "OCR_LATIN/qvac-ocr-latin",
 +      reasoning: "QWEN3_600M_INST_Q4/qwen3-600m-instruct-q4",
 +      policy: "redact-sensitive-fields-v2",
@@ -5271,7 +5271,7 @@ index 0000000..fbb9425
 +});
 diff --git a/redact/qvac-service/evaluation.ts b/redact/qvac-service/evaluation.ts
 new file mode 100644
-index 0000000..4910733
+index 0000000..c0c017a
 --- /dev/null
 +++ b/redact/qvac-service/evaluation.ts
 @@ -0,0 +1,154 @@
@@ -5298,7 +5298,7 @@ index 0000000..4910733
 +} as const;
 +
 +export const EVALUATION_IDENTIFIERS = {
-+  sdk: "@qvac/sdk@0.17.1",
++  sdk: "@qvac/sdk@0.22.0",
 +  ocr: "OCR_LATIN/qvac-ocr-latin",
 +  reasoning: "QWEN3_600M_INST_Q4/qwen3-600m-instruct-q4",
 +  policy: "redact-sensitive-fields-v2",
@@ -5536,7 +5536,7 @@ index 1db877c..8fd436c 100644
 +  });
  });
 diff --git a/redact/qvac-service/qvac-analyzer.ts b/redact/qvac-service/qvac-analyzer.ts
-index 6e900e8..5fd3919 100644
+index 6e900e8..6ec9bef 100644
 --- a/redact/qvac-service/qvac-analyzer.ts
 +++ b/redact/qvac-service/qvac-analyzer.ts
 @@ -41,6 +41,7 @@ type Options = {
@@ -5547,7 +5547,7 @@ index 6e900e8..5fd3919 100644
    now?: () => number;
    reasoner?: DocumentReasoner;
  };
-@@ -59,6 +60,56 @@ export function createQvacOcrAnalyzer(options: Options): DocumentAnalyzer {
+@@ -59,6 +60,58 @@ export function createQvacOcrAnalyzer(options: Options): DocumentAnalyzer {
        }
        return { width: metadata.width, height: metadata.height };
      });
@@ -5584,7 +5584,9 @@ index 6e900e8..5fd3919 100644
 +  }
 +
 +  function recoveredScore(blocks: Array<z.infer<typeof qvacBlockSchema>>) {
-+    return blocks.reduce((score, block) => score + (block.text.trim().length >= 3 ? block.text.trim().length : 0), 0);
++    if (blocks.length === 0) return 0;
++    const characters = blocks.reduce((score, block) => score + (block.text.trim().length >= 3 ? block.text.trim().length : 0), 0);
++    return characters * (characters / blocks.length);
 +  }
 +
 +  function mapCounterClockwiseRetryToOriginal(
@@ -5604,7 +5606,7 @@ index 6e900e8..5fd3919 100644
  
    async function ensureModel() {
      if (modelId) return modelId;
-@@ -116,16 +167,14 @@ export function createQvacOcrAnalyzer(options: Options): DocumentAnalyzer {
+@@ -116,16 +169,14 @@ export function createQvacOcrAnalyzer(options: Options): DocumentAnalyzer {
        }
  
        const loadedModelId = await ensureModel();

@@ -1,6 +1,6 @@
 {
   "baseline": "0eecfb46c0790dec4bc3ae9e2d85607b54771d9f",
-  "final": "a22cd5f1dcfa9b3a7ea2d54120e5b7d13e1c9617",
+  "final": "1d432a28deef8ce15e32f1f1b45a2d86d833d591",
   "checkpoints": [
     {
       "chapter": 1,
@@ -10,64 +10,64 @@
     {
       "chapter": 2,
       "page": "02-first-ocr",
-      "commit": "1b0c9300f2265e6d45cbf37774bf8d59b230f9a7"
+      "commit": "731eb40b3f1e31aa214e83b3714d9171ed3443d8"
     },
     {
       "chapter": 3,
       "page": "03-local-service",
-      "commit": "37b6780094a7a105bb1be71d801d698e8524c6d3"
+      "commit": "242f4808c8d7122c920d59962c293d352e5722a3"
     },
     {
       "chapter": 4,
       "page": "04-connect-ocr",
-      "commit": "6ee04022b688332da4804aa87ee19537643af5bb"
+      "commit": "30293edcadfb978a69a9e15db2af7ae431e00cef"
     },
     {
       "chapter": 5,
       "page": "05-coordinate-mapping",
-      "commit": "2e6c0bbdc8fccdf17f5170eeb353831320d133c4"
+      "commit": "bcfd046e2ed1d5c33495263901034ef4c5361e01"
     },
     {
       "chapter": 6,
       "page": "06-sensitive-suggestions",
-      "commit": "a0108922b7a00da74aba332bf98aebb0131cc18e"
+      "commit": "4e3987d07a230b0c88a7ab3574d31e5e6f25db0c"
     },
     {
       "chapter": 7,
       "page": "07-human-review",
-      "commit": "d16e6a1e8d031b4481fcee256edf216d30ac2597"
+      "commit": "234e4ced798995cf0f27ee193a29d9cc66a4f83e"
     },
     {
       "chapter": 8,
       "page": "08-failure-recovery",
-      "commit": "1376820511cb3f41992a4021ce8655e32117f1f6"
+      "commit": "2d16cd92961c0cd3f30a19ed733d1fde63758b31"
     },
     {
       "chapter": 9,
       "page": "09-evaluation",
-      "commit": "a72b7dafcdc4ff9cb949556dcd7262ae69869243"
+      "commit": "ad636f7a01f814158a154aa51b9cf8bd70fbd353"
     },
     {
       "chapter": 10,
       "page": "10-offline-proof",
-      "commit": "a22cd5f1dcfa9b3a7ea2d54120e5b7d13e1c9617"
+      "commit": "1d432a28deef8ce15e32f1f1b45a2d86d833d591"
     }
   ],
   "downloads": [
     {
       "file": "02-first-ocr.patch",
-      "sha256": "94119ff0b1f60e954bf83f992470e45958fd6742b062c3890d7053b0776d81d4",
-      "bytes": 121383
+      "sha256": "15763c8efea2582038f4804f2eaf9836fb5af360ab847fe0f7dd1d22eeaeee36",
+      "bytes": 275184
     },
     {
       "file": "03-local-service.patch",
-      "sha256": "30d6f69e8be91cc78d3b5dc81a2742b0d024e5b78862dafa260667733a6a97c3",
-      "bytes": 38948
+      "sha256": "8d4f3d258cfd9098f4ddd3803d5e8eb70357e8992dc31380f3a4eec818116dbf",
+      "bytes": 40805
     },
     {
       "file": "04-connect-ocr.patch",
-      "sha256": "9c9a9b3afebda36bc4898a8e651a20630ea960847108ce40ce6861f8983bc0b6",
-      "bytes": 29858
+      "sha256": "e5ec3c196aa6cc2799e7d340360efcd9a829c8e5fb56c165b7040af0d3b426a1",
+      "bytes": 30074
     },
     {
       "file": "05-coordinate-mapping.patch",
@@ -76,8 +76,8 @@
     },
     {
       "file": "06-sensitive-suggestions.patch",
-      "sha256": "b678d59fba63735d64304bb28c1fd9f9ed4f6ac826c5b393626921e4c85e152d",
-      "bytes": 39007
+      "sha256": "e52ee9441c3c868ede9381b7e0884ba8d5122ab5f8b703a55b721d7a95e02e37",
+      "bytes": 39257
     },
     {
       "file": "07-human-review.patch",
@@ -86,28 +86,30 @@
     },
     {
       "file": "08-failure-recovery.patch",
-      "sha256": "7f65fa8f5e363c34b654821c8aa1ce60ca74986ce0466ef77fad80aa030a234b",
+      "sha256": "9335e1cee44cbe4907dbb40725a24d8cecfeebd0e30e399d6590454ac061780d",
       "bytes": 35878
     },
     {
       "file": "09-evaluation.patch",
-      "sha256": "6f0ec6335d0d0085208add9b1a9eb6a5bdb1e663fd580bb502a9f4515fad5d33",
-      "bytes": 357883
+      "sha256": "f23f19629b82b77bd211f429f5234c2d8e9c893e7a5b73bb53404df9720551af",
+      "bytes": 357999
     },
     {
       "file": "10-offline-proof.patch",
-      "sha256": "62ea9e9708934460b5cdfacf4c70057fa79eb017ccd2f9c39845f0f6463b75b7",
-      "bytes": 15245
+      "sha256": "b094f86caf5c24f590a549d7244ee4a29e5be904b60e7ef5403a4c7a4a449e85",
+      "bytes": 15461
     },
     {
       "file": "redact-completed.zip",
-      "sha256": "274821a23434ace9aadb59786cda1627e1d6ecb73b2362b49df6fee84ff3892b",
-      "bytes": 566043
+      "sha256": "c4cf9e8454269b4b8cbc11441539b45b5f3d33734dedd74bfc8ddacdc8b79382",
+      "bytes": 571824
     },
     {
       "file": "redact-starter.zip",
       "sha256": "3352108fad032d4dd5a7e218baf5ddefba60a7940baf36e0cc31580a9152081c",
       "bytes": 236097
     }
-  ]
+  ],
+  "branch": "course/redact-qvac-v2",
+  "sdk": "@qvac/sdk@0.22.0"
 }

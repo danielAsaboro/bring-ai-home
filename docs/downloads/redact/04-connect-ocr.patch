@@ -1,8 +1,8 @@
 diff --git a/redact/qvac-service/index.ts b/redact/qvac-service/index.ts
-index 13b453e..a8a49f0 100644
+index 13b453e..a3bdd44 100644
 --- a/redact/qvac-service/index.ts
 +++ b/redact/qvac-service/index.ts
-@@ -1,31 +1,45 @@
+@@ -1,31 +1,50 @@
 -import type { DocumentAnalyzer } from "./analyzer";
 +import { access, mkdir, writeFile } from "node:fs/promises";
 +import { fileURLToPath } from "node:url";
@@ -45,7 +45,12 @@ index 13b453e..a8a49f0 100644
 -});
 +  const qvac = await import("@qvac/sdk");
 +  const analyzer = createQvacOcrAnalyzer({
-+    runtime: qvac,
++    runtime: {
++      loadModel: (options) => qvac.loadModel(options as never),
++      ocr: (options) => qvac.ocr(options as never),
++      unloadModel: (options) => qvac.unloadModel(options),
++      close: () => qvac.close(),
++    },
 +    modelSource: qvac.OCR_LATIN,
 +  });
 +  const server = createQvacService({ analyzer });
