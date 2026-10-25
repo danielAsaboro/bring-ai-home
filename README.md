@@ -27,7 +27,8 @@ npm ci
 npm run dev
 ```
 
-Check out the branch instead of a hash to get the finished app. Redact's lessons use the starter zip and patches in `docs/downloads/redact/`.
+Check out the branch instead of a hash to get the finished app.
+Redact's lessons are tags on `course/redact-qvac`, from `redact-01-starter` to `redact-11-copy-check`: start a branch at the starter with `git switch -c my-redact redact-01-starter`, then bring in each lesson with `git cherry-pick <tag>`.
 
 ## Run the site
 
