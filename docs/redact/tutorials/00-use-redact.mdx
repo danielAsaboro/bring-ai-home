@@ -12,7 +12,7 @@ In this course we build **Redact**, a small web app that finds the private detai
 Every AI model runs on your own computer, through [QVAC](https://docs.qvac.tether.io/), Tether's SDK for local AI.
 The document never leaves the machine; the only download is the models, once.
 
-## How Redact works
+## Here's how it works
 
 ```mermaid
 flowchart LR
@@ -35,13 +35,13 @@ flowchart LR
 Nothing becomes a black box until you say so.
 The model suggests; you decide.
 
-## Why QVAC
+## Why we use QVAC
 
 QVAC runs both kinds of model Redact needs, a text reader and a decision model, through one JavaScript API on your machine.
 There is no server to host, no API key, and no request that leaves the computer.
 It runs on macOS, Linux and Windows, using the GPU where there is one.
 
-## What you'll run
+## What runs on your machine
 
 Redact is two processes on your machine:
 
@@ -57,7 +57,7 @@ The models download once, into `redact/.qvac/models`:
 | `OCR_LATIN` | 98 MB | Finds each line of text and where it sits on the page |
 | `LAYA_421M_Q8_0` | 450 MB | Answers yes/no questions about each line: is this a name, an email, an account number? |
 
-## What it costs
+## What it'll cost you
 
 - **Disk:** about 4 GB: 2.8 GB of dependencies and about 550 MB of models.
 - **Network:** only for installing and the first run, which downloads the models.
@@ -68,7 +68,7 @@ The models download once, into `redact/.qvac/models`:
 This course is for developers who know React and TypeScript and want to learn local AI by building something real.
 You don't need any machine-learning background.
 
-## The base template
+## You won't start from scratch
 
 You won't start from an empty folder.
 We've prepared a base template: the complete Redact interface with **no AI in it**.
@@ -86,7 +86,7 @@ The **Build it** lessons start from that template and add the AI one step at a t
 
 You can [download the template](/docs/downloads/redact/redact-starter.zip) now, or get it in lesson 01.
 
-## Try the finished app first
+## But first, try the finished app
 
 In the rest of this lesson we will run the finished app, give it a screenshot of a fictional chat, and turn its suggestions into a safe copy we could share.
 
@@ -206,14 +206,14 @@ The covered text is gone from the file itself: the copy is a new image, not the 
 Now open `public/test-files/redact/chat-private.png` again.
 It's unchanged.
 
-## What we did
+## So what did we just do?
 
 We ran a privacy tool whose OCR and decision model both ran on our own machine, let it propose what to cover, overruled it once, and produced a flattened copy that contains only what we approved.
 
 To stop, press `Ctrl+C` in both terminals.
 The models stay in `redact/.qvac/models` for next time.
 
-## Next
+## Where to next
 
 - Build this app yourself, starting from a version with no AI: [01.
   Run the manual starter](/docs/redact/tutorials/01-starter).
