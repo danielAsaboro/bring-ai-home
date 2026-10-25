@@ -8,6 +8,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 cd "$root"
+node scripts/format-prose.mjs --check docs || echo "Warning: run node scripts/format-prose.mjs to put one sentence per line."
 node scripts/check-prose.mjs docs || echo "Warning: shorten the paragraphs above to four sentences or fewer."
 mint export --output "$tmp/export.zip"
 mkdir -p "$out"

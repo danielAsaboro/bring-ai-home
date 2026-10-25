@@ -49,7 +49,12 @@ Everything for this project lives in this one folder:
 | `dist/` | Output of `scripts/build-site.sh`, linked to the Vercel project | Ignored |
 | `plans/`, `internal/`, `private/` | Notes and working files | Ignored |
 
-Writing rules for every page: no paragraph or list item longer than four sentences (`node scripts/check-prose.mjs docs` lists offenders; `scripts/build-site.sh` runs it too), and prose is capped at about 65 characters per line by `style.css`.
+Writing rules for every page:
+
+- One sentence per line in the `.mdx` source, and one empty line between paragraphs. `node scripts/format-prose.mjs docs` does this without changing the rendered page.
+- No paragraph or list item longer than four sentences. `node scripts/check-prose.mjs docs` lists offenders.
+
+`scripts/build-site.sh` runs both checks and warns.
 
 Run Redact from its worktree:
 

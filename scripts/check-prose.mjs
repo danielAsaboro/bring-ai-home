@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // Flags prose paragraphs and list items longer than four sentences in docs/**/*.mdx.
+// Pages keep one sentence per line (scripts/format-prose.mjs), so a block's sentences are its lines;
+// a line that is only a bold lead-in, like "**Use local AI.**", doesn't count.
 // Usage: node scripts/check-prose.mjs [dir]   (default: docs). Exits 1 when anything is flagged.
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -33,7 +35,7 @@ function* blocks(source) {
   let block = [];
   let start = 0;
   const flush = function* () {
-    if (block.length) yield { text: block.join(" "), line: start + 1 };
+    if (block.length) yield { lines: [...block], text: block.join(" "), line: start + 1 };
     block = [];
   };
   for (let i = inFrontmatter ? 1 : 0; i < lines.length; i += 1) {
@@ -61,8 +63,11 @@ function* blocks(source) {
 let flagged = 0;
 for await (const file of mdxFiles(root)) {
   const source = await readFile(file, "utf8");
-  for (const { text, line } of blocks(source)) {
-    const sentences = countSentences(text);
+  for (const { lines, text, line } of blocks(source)) {
+    const sentences = Math.max(
+      lines.filter((entry) => !/^\*\*[^*]+\*\*$/.test(entry)).length,
+      countSentences(text) - lines.filter((entry) => /^\*\*[^*]+\*\*$/.test(entry)).length,
+    );
     if (sentences > MAX_SENTENCES) {
       flagged += 1;
       console.log(`${path.relative(process.cwd(), file)}:${line}  ${sentences} sentences`);
