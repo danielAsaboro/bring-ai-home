@@ -11,6 +11,24 @@ In this lesson we will run the finished Redact app on our own machine, give it a
 
 You need Node.js 22.17 or newer, Git, about 4 GB of free disk, and an internet connection for the first run.
 
+## What you'll run
+
+Redact is two processes on your machine:
+
+| Process | Command | What it does |
+|---|---|---|
+| The app | `npm run dev` | A Next.js page at `localhost:3101`. Turns your file into page images, shows suggestions, paints the marks, saves the copy. |
+| The local AI service | `npm run qvac:service` | Listens on `127.0.0.1:4317` only. Uses the [QVAC SDK](https://docs.qvac.tether.io/sdk/js-ts-sdk/) to run two models on your machine. |
+
+The models download once, into `redact/.qvac/models`:
+
+| Model | Size | Job |
+|---|---|---|
+| `OCR_LATIN` | 98 MB | Finds each line of text and where it sits on the page |
+| `LAYA_421M_Q8_0` | 450 MB | Answers yes/no questions about each line: is this a name, an email, an account number? |
+
+We use QVAC because it runs both kinds of model through one local API, with nothing to host and no data sent anywhere. On an Apple Silicon Mac, expect about 20–30 seconds per page for OCR, under a second for Laya's decisions, and about 25 seconds for the final check of the copy.
+
 ## 1. Get the app
 
 ```bash
