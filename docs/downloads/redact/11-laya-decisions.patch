@@ -1,0 +1,675 @@
+diff --git a/redact/qvac-service/decision-reasoner.test.ts b/redact/qvac-service/decision-reasoner.test.ts
+new file mode 100644
+index 0000000..2252738
+--- /dev/null
++++ b/redact/qvac-service/decision-reasoner.test.ts
+@@ -0,0 +1,79 @@
++// @vitest-environment node
++
++import { describe, expect, it, vi } from "vitest";
++
++import { createDecisionReasoner, decisionQuestions, type DecisionRuntime } from "./decision-reasoner";
++
++const bbox = [0, 0, 10, 10] as [number, number, number, number];
++const blocks = [
++  { text: "Maya Chen", bbox, confidence: 0.93 },
++  { text: "phone is +1 415 555 0184.", bbox, confidence: 0.68 },
++  { text: "Got it.", bbox, confidence: 0.98 },
++  { text: "and reference APOLLO-4471", bbox, confidence: 0.69 },
++];
++
++function runtimeFor(answers: Array<Record<string, number>>): DecisionRuntime {
++  return {
++    loadModel: vi.fn(async () => "decision-model-1"),
++    decide: vi.fn(async () =>
++      answers.map((byQuestion) => ({
++        answers: Object.fromEntries(Object.entries(byQuestion).map(([id, noul]) => [id, { noul }])),
++      })),
++    ),
++    unloadModel: vi.fn(async () => undefined),
++  };
++}
++
++describe("local decision reasoning", () => {
++  it("asks one yes/no question per field and adds the user's direction", () => {
++    expect(Object.keys(decisionQuestions("private", ""))).toEqual([
++      "name", "email", "phone", "address", "account", "identity",
++    ]);
++    const confidential = decisionQuestions("confidential", " Hide Apollo references ");
++    expect(Object.keys(confidential)).toContain("reference");
++    expect(confidential.direction).toEqual({
++      type: "noul",
++      instructions: "This text is something the user asked to hide: Hide Apollo references",
++    });
++  });
++
++  it("keeps the most likely field above the threshold and grounds its label", async () => {
++    const runtime = runtimeFor([
++      { name: 0.85, phone: 0.01 },
++      { name: 0.14, phone: 1, account: 0.73 },
++      { name: 0.05, phone: 0.09 },
++      { name: 0.09, account: 0.82, direction: 0.9 },
++    ]);
++    const reasoner = createDecisionReasoner({
++      runtime,
++      modelSource: {},
++      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1700),
++    });
++
++    const result = await reasoner.classify({
++      documentId: "document-1",
++      level: "private",
++      direction: "reference codes",
++      blocks,
++    });
++
++    expect(result.reasoningMs).toBe(700);
++    expect(result.candidates).toEqual([
++      expect.objectContaining({ blockIndex: 0, label: "name", confidence: 0.85 }),
++      expect.objectContaining({ blockIndex: 1, label: "phone", confidence: 1 }),
++      expect.objectContaining({ blockIndex: 3, label: "reference", confidence: 0.9 }),
++    ]);
++    expect(vi.mocked(runtime.decide).mock.calls[0][0]).toMatchObject({
++      modelId: "decision-model-1",
++      states: blocks.map((block) => block.text),
++    });
++    expect(reasoner.getState()).toEqual({ id: "laya-421m-q8", state: "ready" });
++  });
++
++  it("rejects a result count that doesn't match the blocks", async () => {
++    const reasoner = createDecisionReasoner({ runtime: runtimeFor([{ name: 0.9 }]), modelSource: {} });
++    await expect(
++      reasoner.classify({ documentId: "d", level: "private", direction: "", blocks }),
++    ).rejects.toThrow("did not match");
++  });
++});
+diff --git a/redact/qvac-service/decision-reasoner.ts b/redact/qvac-service/decision-reasoner.ts
+new file mode 100644
+index 0000000..d61c1d8
+--- /dev/null
++++ b/redact/qvac-service/decision-reasoner.ts
+@@ -0,0 +1,125 @@
++import type { CandidateSuggestion } from "../src/features/redact/analysis-contract";
++import { validateCandidateForEvidence } from "./candidate-validation";
++import type { DocumentReasoner } from "./reasoning";
++
++type NoulQuestion = { type: "noul"; instructions: string };
++
++export type DecisionRuntime = {
++  loadModel(options: {
++    modelSrc: unknown;
++    modelType: "llamacpp-decision";
++    modelConfig: { device: "gpu" | "cpu" };
++  }): Promise<string>;
++  decide(options: {
++    modelId: string;
++    states: string[];
++    questions: Record<string, NoulQuestion>;
++  }): Promise<Array<{ answers: Record<string, { noul?: number }> }>>;
++  unloadModel(options: { modelId: string; clearStorage: boolean }): Promise<unknown>;
++};
++
++export const DECISION_THRESHOLD = 0.5;
++
++const privateQuestions = {
++  name: "This text contains a person's name.",
++  email: "This text contains an email address.",
++  phone: "This text contains a telephone number.",
++  address: "This text contains a street address.",
++  account: "This text contains a bank, card or account number.",
++  identity: "This text contains a passport, national ID or employee ID number.",
++} as const;
++
++const confidentialQuestions = {
++  ...privateQuestions,
++  amount: "This text contains a specific amount of money.",
++  date: "This text contains a sensitive date such as a birth date.",
++  reference: "This text contains a tracking, case or project reference code.",
++  business: "This text contains a private company detail.",
++} as const;
++
++type FieldLabel = keyof typeof confidentialQuestions;
++
++export function decisionQuestions(level: "private" | "confidential", direction: string) {
++  const fields = level === "confidential" ? confidentialQuestions : privateQuestions;
++  const questions: Record<string, NoulQuestion> = Object.fromEntries(
++    Object.entries(fields).map(([id, instructions]) => [id, { type: "noul", instructions }]),
++  );
++  if (direction.trim()) {
++    questions.direction = {
++      type: "noul",
++      instructions: `This text is something the user asked to hide: ${direction.trim()}`,
++    };
++  }
++  return questions;
++}
++
++export function createDecisionReasoner(options: {
++  runtime: DecisionRuntime;
++  modelSource: unknown;
++  now?: () => number;
++}): DocumentReasoner {
++  let modelId: string | null = null;
++  let loading: Promise<string> | null = null;
++  let failed = false;
++  const now = options.now ?? Date.now;
++
++  async function ensureModel() {
++    if (modelId) return modelId;
++    loading ??= options.runtime.loadModel({
++      modelSrc: options.modelSource,
++      modelType: "llamacpp-decision",
++      modelConfig: { device: "gpu" },
++    });
++    try {
++      modelId = await loading;
++      failed = false;
++      return modelId;
++    } catch (error) {
++      loading = null;
++      failed = true;
++      throw error;
++    }
++  }
++
++  return {
++    getState: () => ({
++      id: "laya-421m-q8",
++      state: failed ? "error" : modelId ? "ready" : loading ? "loading" : "not_loaded",
++    }),
++    async classify(input) {
++      const started = now();
++      if (input.blocks.length === 0) return { candidates: [], reasoningMs: 0 };
++      const loadedModelId = await ensureModel();
++      const questions = decisionQuestions(input.level, input.direction);
++      const results = await options.runtime.decide({
++        modelId: loadedModelId,
++        states: input.blocks.map((block) => block.text),
++        questions,
++      });
++      if (results.length !== input.blocks.length) {
++        throw new Error("Local decisions did not match the OCR blocks");
++      }
++      const candidates = results.flatMap((result, blockIndex) => {
++        const [question, probability] = Object.keys(questions)
++          .map((id) => [id, result.answers[id]?.noul ?? 0] as const)
++          .reduce((best, entry) => (entry[1] > best[1] ? entry : best));
++        if (probability < DECISION_THRESHOLD) return [];
++        const proposed: CandidateSuggestion = {
++          blockIndex,
++          label: question === "direction" ? "other" : (question as FieldLabel),
++          explanation: "Proposed by local decisions.",
++          confidence: probability,
++        };
++        const validated = validateCandidateForEvidence(proposed, input.blocks[blockIndex].text);
++        return validated ? [validated] : [];
++      });
++      return { candidates, reasoningMs: now() - started };
++    },
++    async close() {
++      if (modelId) {
++        await options.runtime.unloadModel({ modelId, clearStorage: false });
++        modelId = null;
++      }
++    },
++  };
++}
+diff --git a/redact/qvac-service/evaluation-cli.ts b/redact/qvac-service/evaluation-cli.ts
+index 59beee6..f6efe3b 100644
+--- a/redact/qvac-service/evaluation-cli.ts
++++ b/redact/qvac-service/evaluation-cli.ts
+@@ -6,7 +6,7 @@ import sharp from "sharp";
+ 
+ import { normalizeOcrBbox } from "../src/features/redact/ocr-geometry";
+ import { createQvacOcrAnalyzer } from "./qvac-analyzer";
+-import { createStructuredReasoner } from "./reasoning";
++import { createReasoner, reasonerKindFromEnv } from "./reasoner-choice";
+ import { EVALUATION_CASES, EVALUATION_IDENTIFIERS, runEvaluationCases } from "./evaluation";
+ import { resolveLocalQvacPaths } from "./local-config";
+ 
+@@ -26,17 +26,11 @@ async function main() {
+ 
+   const qvac = await import("@qvac/sdk");
+   const modelLoadMs = { ocr: 0, reasoning: 0 };
+-  const reasoner = createStructuredReasoner({
+-    modelSource: qvac.QWEN3_600M_INST_Q4,
+-    runtime: {
+-      async loadModel(options) {
+-        const started = Date.now();
+-        try { return await qvac.loadModel(options as never); }
+-        finally { modelLoadMs.reasoning += Date.now() - started; }
+-      },
+-      completion: (options) => qvac.completion(options as never),
+-      unloadModel: (options) => qvac.unloadModel(options),
+-    },
++  const reasonerKind = reasonerKindFromEnv();
++  const reasoner = createReasoner(qvac, reasonerKind, async (options) => {
++    const started = Date.now();
++    try { return await qvac.loadModel(options as never); }
++    finally { modelLoadMs.reasoning += Date.now() - started; }
+   });
+   const analyzer = createQvacOcrAnalyzer({
+     modelSource: qvac.OCR_LATIN,
+@@ -102,7 +96,10 @@ async function main() {
+     const passed = results.every((item) => item.result.passed);
+     process.stdout.write(`${JSON.stringify({
+       mode: "real-cached-local-qvac",
+-      identifiers: EVALUATION_IDENTIFIERS,
++      identifiers: {
++        ...EVALUATION_IDENTIFIERS,
++        reasoning: reasonerKind === "laya" ? "LAYA_421M_Q8_0/laya-421m-q8" : EVALUATION_IDENTIFIERS.reasoning,
++      },
+       passed,
+       modelLoadMs,
+       timings,
+diff --git a/redact/qvac-service/index.ts b/redact/qvac-service/index.ts
+index 8dd1cb9..0caf062 100644
+--- a/redact/qvac-service/index.ts
++++ b/redact/qvac-service/index.ts
+@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
+ 
+ import { createQvacOcrAnalyzer } from "./qvac-analyzer";
+ import { resolveLocalQvacPaths } from "./local-config";
+-import { createStructuredReasoner } from "./reasoning";
++import { createReasoner, reasonerKindFromEnv } from "./reasoner-choice";
+ import { closeQvacService, createQvacService } from "./server";
+ 
+ const port = Number.parseInt(process.env.REDACT_QVAC_PORT ?? "4317", 10);
+@@ -22,14 +22,7 @@ async function main() {
+   process.env.SNAP_USER_COMMON = runtimeHome;
+ 
+   const qvac = await import("@qvac/sdk");
+-  const reasoner = createStructuredReasoner({
+-    runtime: {
+-      loadModel: (options) => qvac.loadModel(options as never),
+-      completion: (options) => qvac.completion(options as never),
+-      unloadModel: (options) => qvac.unloadModel(options),
+-    },
+-    modelSource: qvac.QWEN3_600M_INST_Q4,
+-  });
++  const reasoner = createReasoner(qvac, reasonerKindFromEnv());
+   const analyzer = createQvacOcrAnalyzer({
+     runtime: {
+       loadModel: (options) => qvac.loadModel(options as never),
+diff --git a/redact/qvac-service/offline-cli.ts b/redact/qvac-service/offline-cli.ts
+index 3049e58..22724ae 100644
+--- a/redact/qvac-service/offline-cli.ts
++++ b/redact/qvac-service/offline-cli.ts
+@@ -7,7 +7,7 @@ import sharp from "sharp";
+ import { createQvacOcrAnalyzer } from "./qvac-analyzer";
+ import { resolveLocalQvacPaths } from "./local-config";
+ import { assertWarmedCache, withRemoteFetchBlocked } from "./offline-proof";
+-import { createStructuredReasoner } from "./reasoning";
++import { createReasoner, reasonerKindFromEnv } from "./reasoner-choice";
+ 
+ async function main() {
+   const appDirectory = fileURLToPath(new URL("../", import.meta.url));
+@@ -16,7 +16,8 @@ async function main() {
+     mkdir(paths.cacheDirectory, { recursive: true }),
+     mkdir(paths.tempDirectory, { recursive: true }),
+   ]);
+-  assertWarmedCache(await readdir(paths.cacheDirectory));
++  const reasonerKind = reasonerKindFromEnv();
++  assertWarmedCache(await readdir(paths.cacheDirectory), reasonerKind);
+   await writeFile(paths.configPath, `${JSON.stringify({ cacheDirectory: paths.cacheDirectory }, null, 2)}\n`);
+   process.env.QVAC_CONFIG_PATH = paths.configPath;
+   process.env.SNAP_USER_COMMON = paths.runtimeHome;
+@@ -38,14 +39,7 @@ async function main() {
+       unloadModel: (options) => qvac.unloadModel(options),
+       close: () => qvac.close(),
+     },
+-    reasoner: createStructuredReasoner({
+-      modelSource: qvac.QWEN3_600M_INST_Q4,
+-      runtime: {
+-        loadModel: (options) => qvac.loadModel(options as never),
+-        completion: (options) => qvac.completion(options as never),
+-        unloadModel: (options) => qvac.unloadModel(options),
+-      },
+-    }),
++    reasoner: createReasoner(qvac, reasonerKind),
+   });
+   const source = await readFile(
+     fileURLToPath(new URL("../public/test-files/redact/chat-private.png", import.meta.url)),
+diff --git a/redact/qvac-service/offline-proof.test.ts b/redact/qvac-service/offline-proof.test.ts
+index 2c47650..455e142 100644
+--- a/redact/qvac-service/offline-proof.test.ts
++++ b/redact/qvac-service/offline-proof.test.ts
+@@ -10,9 +10,15 @@ describe("offline ownership proof", () => {
+       assertWarmedCache([
+         "latin_g2.gguf",
+         "craft_mlt_25k.gguf",
+-        "Qwen3-0.6B-Q4_0.gguf",
++        "laya-Q8_0.gguf",
+       ]),
+     ).not.toThrow();
++    expect(() =>
++      assertWarmedCache(["latin_g2.gguf", "craft_mlt_25k.gguf", "Qwen3-0.6B-Q4_0.gguf"], "qwen"),
++    ).not.toThrow();
++    expect(() =>
++      assertWarmedCache(["latin_g2.gguf", "craft_mlt_25k.gguf", "Qwen3-0.6B-Q4_0.gguf"]),
++    ).toThrow("warm both models");
+     expect(() => assertWarmedCache(["latin_g2.gguf"])).toThrow("warm both models");
+   });
+ 
+diff --git a/redact/qvac-service/offline-proof.ts b/redact/qvac-service/offline-proof.ts
+index 81b0bbe..fcb483d 100644
+--- a/redact/qvac-service/offline-proof.ts
++++ b/redact/qvac-service/offline-proof.ts
+@@ -1,7 +1,7 @@
+-export function assertWarmedCache(files: readonly string[]) {
++export function assertWarmedCache(files: readonly string[], reasoner: "laya" | "qwen" = "laya") {
+   const hasDetector = files.some((file) => /craft/i.test(file));
+   const hasRecognizer = files.some((file) => /latin/i.test(file));
+-  const hasReasoner = files.some((file) => /qwen/i.test(file));
++  const hasReasoner = files.some((file) => (reasoner === "laya" ? /laya/i : /qwen/i).test(file));
+   if (!hasDetector || !hasRecognizer || !hasReasoner) {
+     throw new Error(
+       "QVAC cache is incomplete; warm both models with qvac:ocr-smoke and one successful app analysis first.",
+diff --git a/redact/qvac-service/reasoner-choice.ts b/redact/qvac-service/reasoner-choice.ts
+new file mode 100644
+index 0000000..24238f3
+--- /dev/null
++++ b/redact/qvac-service/reasoner-choice.ts
+@@ -0,0 +1,37 @@
++import { createDecisionReasoner } from "./decision-reasoner";
++import { createStructuredReasoner, type DocumentReasoner } from "./reasoning";
++
++export type ReasonerKind = "laya" | "qwen";
++
++type Qvac = typeof import("@qvac/sdk");
++
++export function reasonerKindFromEnv(value = process.env.REDACT_REASONER): ReasonerKind {
++  if (!value || value === "laya") return "laya";
++  if (value === "qwen") return "qwen";
++  throw new Error(`REDACT_REASONER must be "laya" or "qwen", not "${value}"`);
++}
++
++export function createReasoner(
++  qvac: Qvac,
++  kind: ReasonerKind,
++  loadModel: (options: unknown) => Promise<string> = (options) => qvac.loadModel(options as never),
++): DocumentReasoner {
++  if (kind === "laya") {
++    return createDecisionReasoner({
++      modelSource: qvac.LAYA_421M_Q8_0,
++      runtime: {
++        loadModel,
++        decide: (options) => qvac.decide(options as never) as never,
++        unloadModel: (options) => qvac.unloadModel(options),
++      },
++    });
++  }
++  return createStructuredReasoner({
++    modelSource: qvac.QWEN3_600M_INST_Q4,
++    runtime: {
++      loadModel,
++      completion: (options) => qvac.completion(options as never),
++      unloadModel: (options) => qvac.unloadModel(options),
++    },
++  });
++}
+diff --git a/redact/src/app/globals.css b/redact/src/app/globals.css
+index df0f925..c2da8fe 100644
+--- a/redact/src/app/globals.css
++++ b/redact/src/app/globals.css
+@@ -171,6 +171,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
+ .complete-stage > p { color: var(--muted); }
+ .complete-stage .copy-card { text-align: left; grid-template-columns: auto 1fr; margin-top: 2rem; }
+ .complete-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
++.copy-check { margin: 0 0 1rem; padding: .75rem .9rem; border: 1px solid var(--line); border-radius: 7px; font-size: .8rem; font-weight: 700; }
++.copy-check-clear { background: var(--mint); border-color: transparent; }
++.copy-check-found { color: #6f421f; background: #fff5ec; border-color: #efc7a9; }
++.copy-check-found ul { margin: .45rem 0 0; padding-left: 1.1rem; font-weight: 500; }
++.copy-check-found li span { text-transform: uppercase; font-size: .68rem; letter-spacing: .04em; margin-right: .3rem; }
+ .clipboard-message { padding: .75rem; background: var(--mint); border-radius: 7px; font-weight: 700; }
+ .complete-links { display: flex; justify-content: center; gap: 1.5rem; margin: 1.5rem 0; }
+ .complete-links button { color: var(--green-2); background: none; border: 0; border-bottom: 1px solid currentColor; font-weight: 700; }
+diff --git a/redact/src/features/redact/RedactApp.test.tsx b/redact/src/features/redact/RedactApp.test.tsx
+index 83329e1..dd90465 100644
+--- a/redact/src/features/redact/RedactApp.test.tsx
++++ b/redact/src/features/redact/RedactApp.test.tsx
+@@ -204,6 +204,67 @@ describe("Redact application", () => {
+     expect(appAdapters.downloader.save).toHaveBeenCalledOnce();
+   });
+ 
++  it("waits for a busy local service before analysing", async () => {
++    const user = userEvent.setup();
++    const appAdapters = adapters();
++    vi.mocked(appAdapters.analysis.health)
++      .mockResolvedValueOnce({ service: "ready", busy: true, models: [] })
++      .mockResolvedValueOnce({ service: "ready", busy: false, models: [] });
++    render(<RedactApp adapters={appAdapters} />);
++
++    await user.upload(
++      screen.getByLabelText("Choose a document"),
++      new File([new Uint8Array([1, 2, 3])], "chat-private.png", { type: "image/png" }),
++    );
++    await screen.findByText("Privacy level");
++    await user.click(screen.getByRole("button", { name: "Prepare for review" }));
++
++    expect(await screen.findByText("Original", undefined, { timeout: 3000 })).toBeInTheDocument();
++    expect(appAdapters.analysis.health).toHaveBeenCalledTimes(2);
++    expect(appAdapters.analysis.analyzePage).toHaveBeenCalledOnce();
++  });
++
++  it("checks the flattened copy locally and lists what is still readable", async () => {
++    const user = userEvent.setup();
++    const base = adapters();
++    const appAdapters = adapters({
++      exportCopy: vi.fn().mockResolvedValue({
++        name: "chat-private.redacted.png",
++        mimeType: "image/png",
++        blob: new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }),
++        pageCount: 1,
++        flattenedPages: [new Uint8Array([4, 5, 6])],
++      }),
++    });
++    const firstAnalysis = await base.analysis.analyzePage({} as never);
++    vi.mocked(appAdapters.analysis.analyzePage)
++      .mockResolvedValueOnce(firstAnalysis)
++      .mockResolvedValueOnce({
++        ...firstAnalysis,
++        ocrBlocks: [firstAnalysis.ocrBlocks[1]],
++        candidates: [{ blockIndex: 0, label: "email", explanation: "The block contains an email address.", confidence: 0.97 }],
++      });
++    render(<RedactApp adapters={appAdapters} />);
++
++    await user.upload(
++      screen.getByLabelText("Choose a document"),
++      new File([new Uint8Array([1, 2, 3])], "chat-private.png", { type: "image/png" }),
++    );
++    await screen.findByText("Privacy level");
++    await user.click(screen.getByRole("button", { name: "Prepare for review" }));
++    await screen.findByText("Original");
++    await user.click(screen.getByRole("button", { name: "Accept name proposal" }));
++    await user.click(screen.getByRole("button", { name: "Reject email proposal" }));
++    await user.click(screen.getByRole("button", { name: "Done" }));
++
++    const finding = await screen.findByLabelText("Still readable on the copy");
++    expect(finding).toHaveTextContent("maya.chen@example com");
++    expect(appAdapters.analysis.analyzePage).toHaveBeenLastCalledWith(
++      expect.objectContaining({ pageId: "page-1-copy", pageNumber: 1 }),
++    );
++    expect(screen.getByRole("button", { name: "Save copy" })).toBeEnabled();
++  });
++
+   it("keeps moved geometry when a mark is dragged on the document", async () => {
+     const user = userEvent.setup();
+     render(<RedactApp adapters={adapters()} />);
+diff --git a/redact/src/features/redact/RedactApp.tsx b/redact/src/features/redact/RedactApp.tsx
+index 720bfab..5528763 100644
+--- a/redact/src/features/redact/RedactApp.tsx
++++ b/redact/src/features/redact/RedactApp.tsx
+@@ -44,6 +44,14 @@ import {
+   type SourceDocument,
+ } from "./workflow-domain";
+ 
++const BUSY_POLL_MS = 1000;
++const BUSY_WAIT_MS = 60_000;
++
++export type CopyCheck = {
++  status: "checking" | "clear" | "found" | "unavailable";
++  findings: Array<{ pageNumber: number; label: string; text: string }>;
++};
++
+ export type RedactAppAdapters = {
+   inspect(file: File): Promise<SourceInspection>;
+   rasterize(file: File, inspection: SourceInspection): Promise<RedactSession["pages"]>;
+@@ -99,6 +107,8 @@ export function RedactApp({
+   const [busy, setBusy] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
++  const [copyCheck, setCopyCheck] = useState<CopyCheck | null>(null);
++  const copyCheckSequence = useRef(0);
+   const [analysisMessage, setAnalysisMessage] = useState("Rasterizing pages without changing the original file…");
+   const [canCancel, setCanCancel] = useState(false);
+   const analysisRequest = useRef<AbortController | null>(null);
+@@ -184,7 +194,13 @@ export function RedactApp({
+       partialEvidence.current = { ocrBlocks, candidates, analysisRuns };
+       try {
+         setAnalysisMessage("Loading the local OCR model and reading each page…");
+-        const health = await adapters.analysis.health(controller.signal);
++        let health = await adapters.analysis.health(controller.signal);
++        for (let waited = 0; health.busy && waited < BUSY_WAIT_MS; waited += BUSY_POLL_MS) {
++          setAnalysisMessage("Waiting for the previous local check to finish…");
++          await new Promise((resolve) => setTimeout(resolve, BUSY_POLL_MS));
++          if (requestId !== analysisSequence.current) return;
++          health = await adapters.analysis.health(controller.signal);
++        }
+         if (requestId !== analysisSequence.current) return;
+         if (health.service !== "ready") {
+           throw new Error("Local analysis is unavailable");
+@@ -309,6 +325,7 @@ export function RedactApp({
+         marks: session.marks,
+       });
+       setGeneratedCopy(copy);
++      void checkCopy(copy, exporting);
+       setSession(
+         recordGeneratedCopy(exporting, {
+           name: copy.name,
+@@ -326,6 +343,43 @@ export function RedactApp({
+     }
+   }
+ 
++  async function checkCopy(copy: GeneratedCopy, reviewed: RedactSession) {
++    const request = ++copyCheckSequence.current;
++    if (!copy.flattenedPages?.length) {
++      setCopyCheck(null);
++      return;
++    }
++    setCopyCheck({ status: "checking", findings: [] });
++    try {
++      const findings: CopyCheck["findings"] = [];
++      for (const [index, pngBytes] of copy.flattenedPages.entries()) {
++        const page = reviewed.pages[index];
++        const result = await adapters.analysis.analyzePage({
++          documentId: `${reviewed.source.id}-copy`,
++          pageId: `${page.id}-copy`,
++          pageNumber: page.pageNumber,
++          width: page.width,
++          height: page.height,
++          pngBytes: pngBytes.slice().buffer as ArrayBuffer,
++          level: reviewed.configuration.level,
++          direction: reviewed.configuration.direction,
++        });
++        for (const candidate of result.candidates) {
++          findings.push({
++            pageNumber: page.pageNumber,
++            label: candidate.label,
++            text: result.ocrBlocks[candidate.blockIndex]?.text ?? "",
++          });
++        }
++      }
++      if (request === copyCheckSequence.current) {
++        setCopyCheck({ status: findings.length > 0 ? "found" : "clear", findings });
++      }
++    } catch {
++      if (request === copyCheckSequence.current) setCopyCheck({ status: "unavailable", findings: [] });
++    }
++  }
++
+   async function copyToClipboard() {
+     if (!generatedCopy || !session) return;
+     setClipboardMessage(null);
+@@ -447,10 +501,13 @@ export function RedactApp({
+           <CompleteStage
+             copy={generatedCopy}
+             source={session.source}
++            check={copyCheck}
+             message={clipboardMessage}
+             onCopy={copyToClipboard}
+             onSave={() => saveGeneratedCopy(generatedCopy, adapters.downloader)}
+             onReview={() => {
++              copyCheckSequence.current += 1;
++              setCopyCheck(null);
+               setClipboardMessage(null);
+               setSession({ ...session, stage: "review" });
+             }}
+@@ -459,6 +516,8 @@ export function RedactApp({
+               setFile(null);
+               setInspection(null);
+               setGeneratedCopy(null);
++              copyCheckSequence.current += 1;
++              setCopyCheck(null);
+               setClipboardMessage(null);
+             }}
+           />
+diff --git a/redact/src/features/redact/components/CompleteStage.tsx b/redact/src/features/redact/components/CompleteStage.tsx
+index 1324e97..9504e10 100644
+--- a/redact/src/features/redact/components/CompleteStage.tsx
++++ b/redact/src/features/redact/components/CompleteStage.tsx
+@@ -1,8 +1,10 @@
+ import type { GeneratedCopy } from "../safe-copy";
++import type { CopyCheck } from "../RedactApp";
+ import type { SourceDocument } from "../workflow-domain";
+ 
+-export function CompleteStage({ copy, source, message, onCopy, onSave, onReview, onNew }: {
++export function CompleteStage({ copy, source, check, message, onCopy, onSave, onReview, onNew }: {
+   copy: GeneratedCopy;
++  check: CopyCheck | null;
+   source: SourceDocument;
+   message: string | null;
+   onCopy(): void;
+@@ -17,6 +19,14 @@ export function CompleteStage({ copy, source, message, onCopy, onSave, onReview,
+       <h1>Your safe copy is ready</h1>
+       <p>The original <strong>{source.name}</strong> was not modified.</p>
+       <div className="copy-card"><div className="file-badge">{copy.mimeType === "application/pdf" ? "PDF" : "PNG"}</div><div><strong>{copy.name}</strong><span>{copy.pageCount} {copy.pageCount === 1 ? "page" : "pages"} · {formatBytes(copy.blob.size)}</span></div></div>
++      {check?.status === "checking" && <p className="copy-check" role="status">Checking the copy locally for anything still readable…</p>}
++      {check?.status === "clear" && <p className="copy-check copy-check-clear" role="status">Local check: nothing private is readable on the copy.</p>}
++      {check?.status === "found" && (
++        <section className="copy-check copy-check-found" aria-label="Still readable on the copy">
++          <strong>Still readable on the copy</strong>
++          <ul>{check.findings.map((finding, index) => <li key={index}><span>{finding.label}</span> {finding.text}{copy.pageCount > 1 ? ` · page ${finding.pageNumber}` : ""}</li>)}</ul>
++        </section>
++      )}
+       <div className="complete-actions"><button className="secondary-button" onClick={onCopy}>Copy to clipboard</button><button className="primary-button" onClick={onSave}>Save copy</button></div>
+       {message && <p className="clipboard-message" role="status">{message}</p>}
+       <div className="complete-links"><button onClick={onReview}>Return to review</button><button onClick={onNew}>Redact another document</button></div>
+diff --git a/redact/src/features/redact/safe-copy.ts b/redact/src/features/redact/safe-copy.ts
+index 1d28fc3..5e6cadb 100644
+--- a/redact/src/features/redact/safe-copy.ts
++++ b/redact/src/features/redact/safe-copy.ts
+@@ -12,6 +12,7 @@ export type GeneratedCopy = {
+   mimeType: "image/png" | "application/pdf";
+   blob: Blob;
+   pageCount: number;
++  flattenedPages?: Uint8Array[];
+ };
+ 
+ export type CanvasFactory = {
+@@ -73,6 +74,7 @@ export async function generateSafeCopy(input: {
+       mimeType: "image/png",
+       blob: new Blob([copyArrayBuffer(bytes)], { type: "image/png" }),
+       pageCount: 1,
++      flattenedPages,
+     };
+   }
+ 
+@@ -96,6 +98,7 @@ export async function generateSafeCopy(input: {
+     mimeType: "application/pdf",
+     blob: new Blob([copyArrayBuffer(pdfBytes)], { type: "application/pdf" }),
+     pageCount: input.pages.length,
++    flattenedPages,
+   };
+ }
+ 

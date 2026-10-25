@@ -19,18 +19,22 @@ Branch: [`course/redact-qvac`](https://github.com/danielAsaboro/bring-ai-home/tr
 | [08. Keep working when analysis fails](/docs/redact/tutorials/08-failure-recovery) | [`2d16cd9`](https://github.com/danielAsaboro/bring-ai-home/commit/2d16cd92961c0cd3f30a19ed733d1fde63758b31) | [`08-failure-recovery.patch`](/docs/downloads/redact/08-failure-recovery.patch) | 79 |
 | [09. Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation) | [`ad636f7`](https://github.com/danielAsaboro/bring-ai-home/commit/ad636f7a01f814158a154aa51b9cf8bd70fbd353) | [`09-evaluation.patch`](/docs/downloads/redact/09-evaluation.patch) | 85 |
 | [10. Run Redact with the network off](/docs/redact/tutorials/10-offline) | [`1d432a2`](https://github.com/danielAsaboro/bring-ai-home/commit/1d432a28deef8ce15e32f1f1b45a2d86d833d591) | [`10-offline-proof.patch`](/docs/downloads/redact/10-offline-proof.patch) | 88 |
+| [11. Swap the generator for a decision model](/docs/redact/tutorials/11-laya-decisions) | [`446b69c`](https://github.com/danielAsaboro/bring-ai-home/commit/446b69caf8003249f5c024f66fb657a50c054375) | [`11-laya-decisions.patch`](/docs/downloads/redact/11-laya-decisions.patch) | 93 |
 
-Each patch applies with `git apply` from the `redact-course` folder on top of the previous lesson. Applied in order to the starter, the nine patches produce exactly the files in `redact-completed.zip`.
+Each patch applies with `git apply` from the `redact-course` folder on top of the previous lesson. Applied in order to the starter, the ten patches produce exactly the files in `redact-completed.zip`.
 
 ## Packages
 
 | File | Contents |
 |---|---|
 | [`redact-starter.zip`](/docs/downloads/redact/redact-starter.zip) | `redact-course/redact/` at `0eecfb4` |
-| [`redact-completed.zip`](/docs/downloads/redact/redact-completed.zip) | `redact-course/redact/` at `1d432a2` |
+| [`redact-completed.zip`](/docs/downloads/redact/redact-completed.zip) | `redact-course/redact/` at `446b69c` |
 
 SHA-256 hashes and sizes for every file are in `manifest.json`.
 
 ## Verification
 
-At every commit above, on 2026-10-25: `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` passed. At `1d432a2`, `npm run build`, `npm run qvac:ocr-smoke`, `npm run qvac:evaluate`, `npm run qvac:offline` and the live browser test also passed with real inference on macOS.
+On 2026-10-25, at every commit above: `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` passed (lesson 11: typecheck, lint and test; it changes no packages). With real inference on macOS:
+
+- At `1d432a2`: `npm run build`, `qvac:ocr-smoke`, `qvac:evaluate`, `qvac:offline` and the live browser test.
+- At `446b69c`: `qvac:evaluate` with Laya (twice, identical) and with Qwen, `qvac:offline` with Laya, and the live browser test including the copy check. `npm run build` was not rerun at `446b69c`.

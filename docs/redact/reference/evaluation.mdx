@@ -54,14 +54,16 @@ JSON on stdout:
 
 ## Last recorded result
 
-`@qvac/sdk` 0.22.0, Apple Silicon, four consecutive runs with identical output:
+`@qvac/sdk` 0.22.0, Apple Silicon. Each model run twice or more with identical output.
 
-| Case | F1 |
-|---|---|
-| `chat-clear` | 0.91 |
-| `chat-rotated` | 0.91 |
-| `chat-low-contrast` | 1.00 |
-| `chat-partially-obscured` | 0.91 |
+| Case | Laya F1 (P / R) | Qwen3 0.6B F1 (P / R) |
+|---|---|---|
+| `chat-clear` | 0.92 (0.86 / 1.00) | 0.91 (1.00 / 0.83) |
+| `chat-rotated` | 0.92 (0.86 / 1.00) | 0.91 (1.00 / 0.83) |
+| `chat-low-contrast` | 0.92 (0.86 / 1.00) | 1.00 (1.00 / 1.00) |
+| `chat-partially-obscured` | 0.83 (0.83 / 0.83) | 0.91 (1.00 / 0.83) |
+
+Choose the model with `REDACT_REASONER=laya` (default) or `REDACT_REASONER=qwen`.
 
 ## Related
 

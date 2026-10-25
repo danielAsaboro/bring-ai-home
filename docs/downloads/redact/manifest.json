@@ -1,6 +1,6 @@
 {
   "baseline": "0eecfb46c0790dec4bc3ae9e2d85607b54771d9f",
-  "final": "1d432a28deef8ce15e32f1f1b45a2d86d833d591",
+  "final": "446b69caf8003249f5c024f66fb657a50c054375",
   "checkpoints": [
     {
       "chapter": 1,
@@ -51,6 +51,11 @@
       "chapter": 10,
       "page": "10-offline-proof",
       "commit": "1d432a28deef8ce15e32f1f1b45a2d86d833d591"
+    },
+    {
+      "chapter": 11,
+      "page": "11-laya-decisions",
+      "commit": "446b69caf8003249f5c024f66fb657a50c054375"
     }
   ],
   "downloads": [
@@ -100,9 +105,14 @@
       "bytes": 15461
     },
     {
+      "file": "11-laya-decisions.patch",
+      "sha256": "2006c0b0401a557caaa551a38ba2d0d53e08a9495ec790f0de87d803fbf1f6ae",
+      "bytes": 29565
+    },
+    {
       "file": "redact-completed.zip",
-      "sha256": "c4cf9e8454269b4b8cbc11441539b45b5f3d33734dedd74bfc8ddacdc8b79382",
-      "bytes": 571824
+      "sha256": "7c57aed8d37113d84fbaec794510e9e20f43a994f869ce63f2f8ec614917af3e",
+      "bytes": 577055
     },
     {
       "file": "redact-starter.zip",

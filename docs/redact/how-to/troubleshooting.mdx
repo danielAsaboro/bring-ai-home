@@ -13,7 +13,7 @@ Each entry is a symptom, its usual cause and the fix. Before sharing logs, remov
 
 ## `npm ci` or the first analysis fails with "no space left on device"
 
-**Cause:** Redact needs about 2.8 GB for `node_modules` and about 480 MB for models.
+**Cause:** Redact needs about 2.8 GB for `node_modules` and about 550 MB for models.
 
 **Fix:** free space, then rerun. See [How to clear the model cache and free disk space](/docs/redact/how-to/clear-model-cache).
 
@@ -25,7 +25,7 @@ Each entry is a symptom, its usual cause and the fix. Before sharing logs, remov
 
 ## The first analysis takes over a minute
 
-**Cause:** it downloads about 480 MB of models, then loads them.
+**Cause:** it downloads about 550 MB of models, then loads them.
 
 **Fix:** none needed. Later runs take roughly 20–30 seconds of OCR per page. To download ahead of time, see [How to download the models](/docs/redact/how-to/download-models).
 
@@ -91,7 +91,7 @@ Each entry is a symptom, its usual cause and the fix. Before sharing logs, remov
 
 ## `QVAC cache is incomplete`
 
-**Cause:** the offline commands need the OCR detector, OCR recognizer and Qwen model in `.qvac/models`.
+**Cause:** the offline commands need the OCR detector, OCR recognizer and the suggestion model in `.qvac/models`: Laya by default, Qwen when `REDACT_REASONER=qwen`.
 
 **Fix:** [download the models](/docs/redact/how-to/download-models) while online.
 

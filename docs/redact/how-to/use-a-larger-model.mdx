@@ -1,9 +1,9 @@
 ---
 title: "How to use a larger reasoning model"
-description: "Swap Qwen3 0.6B for a bigger QVAC catalog model and check suggestion quality afterwards."
+description: "Run Redact's generative path on a bigger Qwen model and check suggestion quality afterwards."
 ---
 
-This guide replaces the model that classifies sensitive fields. OCR is unchanged. A larger model can improve suggestions, at the cost of download size, memory and time per page.
+This guide changes the generative model Redact uses when `REDACT_REASONER=qwen`. Since lesson 11 the default is the Laya decision model; to tune that instead, see [How to ask Laya your own questions](/docs/redact/how-to/ask-laya-questions). OCR is unchanged. A larger model can improve suggestions, at the cost of download size, memory and time per page.
 
 ## Pick a model
 
@@ -11,7 +11,7 @@ Catalog constants in `@qvac/sdk` 0.22.0 that fit this role include:
 
 | Constant | Notes |
 |---|---|
-| `QWEN3_600M_INST_Q4` | Default. About 382 MB. |
+| `QWEN3_600M_INST_Q4` | Current Qwen model. About 382 MB. |
 | `QWEN3_1_7B_INST_Q4` | Next size up. |
 | `QWEN3_4B_INST_Q4_K_M` | |
 | `QWEN3_8B_INST_Q4_K_M` | |
@@ -20,15 +20,13 @@ Check that your machine can hold it before downloading. See [Assess model fit](h
 
 ## Change the model
 
-The model is chosen in three entry points. Change all three so the service, the evaluation and the offline proof run the same model:
+The Qwen model is chosen in one place, `qvac-service/reasoner-choice.ts`:
 
-| File | Change |
-|---|---|
-| `qvac-service/index.ts` | `modelSource: qvac.QWEN3_600M_INST_Q4` |
-| `qvac-service/evaluation-cli.ts` | `modelSource: qvac.QWEN3_600M_INST_Q4` |
-| `qvac-service/offline-cli.ts` | `modelSource: qvac.QWEN3_600M_INST_Q4` |
+```ts
+modelSource: qvac.QWEN3_600M_INST_Q4,
+```
 
-Replace `QWEN3_600M_INST_Q4` with your constant in each.
+Replace `QWEN3_600M_INST_Q4` with your constant. The service, the evaluation and the offline proof all use this function.
 
 Then update the labels that name the model, so receipts don't lie:
 
@@ -42,9 +40,9 @@ Keep `ctx_size: 4096` in `reasoning.ts` unless a page has more OCR text than fit
 ```bash
 npm run typecheck
 npm test
-npm run qvac:evaluate
+REDACT_REASONER=qwen npm run qvac:evaluate
 ```
 
 `qvac:evaluate` downloads the new model on first run. Compare precision, recall and F1 per case with the previous model; see [evaluation reference](/docs/redact/reference/evaluation). If `"passed": false`, keep the old model or adjust the prompt before shipping.
 
-`offline-proof.ts` checks the cache for a file name containing `qwen`. If you switch to a non-Qwen model, update `assertWarmedCache` too.
+With `REDACT_REASONER=qwen`, `offline-proof.ts` checks the cache for a file name containing `qwen`. If you switch to a model whose file name doesn't, update `assertWarmedCache` too.

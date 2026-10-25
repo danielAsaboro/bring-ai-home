@@ -3,7 +3,7 @@ title: "About choosing a model size"
 description: "Why Redact uses a 0.6-billion-parameter model, and when a larger one would be worth it."
 ---
 
-Redact's reasoning model is Qwen3 0.6B in 4-bit quantization, the `QWEN3_600M_INST_Q4` constant in QVAC. It is about 382 MB on disk and runs with a 4,096-token context. Choosing it was deliberate.
+Redact's generative model is Qwen3 0.6B in 4-bit quantization, the `QWEN3_600M_INST_Q4` constant in QVAC. It is about 382 MB on disk and runs with a 4,096-token context. Choosing it was deliberate. Since lesson 11 the default is a different kind of model altogether, Laya, a 421-million-parameter decision model (450 MB); the same size argument applies to it, and [About decision models and generative models](/docs/redact/concepts/decision-models) covers why the kind of model mattered more than its size.
 
 ## What the model actually has to do
 

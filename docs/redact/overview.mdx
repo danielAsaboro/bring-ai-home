@@ -9,7 +9,7 @@ You have a screenshot or PDF to share, and it contains a name, an address, a pho
 flowchart LR
   A[Your file] --> B[Page images]
   B --> C[Local OCR]
-  C --> D[Local model suggests fields]
+  C --> D[Laya decides which lines are sensitive]
   D --> E[You accept or reject]
   B --> E
   E --> F[New flattened copy]
@@ -20,7 +20,7 @@ flowchart LR
     Run the finished app and redact your first document with local AI.
   </Card>
   <Card title="Build Redact" icon="hammer" href="/docs/redact/tutorials/01-starter">
-    Ten lessons, from a manual app to local OCR, suggestions, review and an offline proof.
+    Eleven lessons, from a manual app to local OCR, suggestions, review, an offline proof and a decision model.
   </Card>
 </CardGroup>
 
@@ -36,7 +36,7 @@ flowchart LR
 ## Before you start
 
 - Node.js 22.17 or newer, Git, and about 4 GB of free disk.
-- An internet connection for the first run, which downloads about 480 MB of models. After that, Redact runs offline.
+- An internet connection for the first run, which downloads about 550 MB of models. After that, Redact runs offline.
 - macOS (Apple Silicon), Linux or Windows supported by QVAC. The lessons were tested on macOS; the offline proof in lesson 10 needs macOS.
 
 Full details: [Requirements](/docs/redact/reference/requirements).

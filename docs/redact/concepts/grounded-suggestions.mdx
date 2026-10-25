@@ -3,7 +3,7 @@ title: "About grounded suggestions"
 description: "How Redact asks a small local model which text is sensitive without letting it invent anything."
 ---
 
-After OCR, Redact has a list of text blocks with positions. The next question is which of them are sensitive. Redact asks a local language model, Qwen3 0.6B, and then refuses to believe anything the model says that the page itself doesn't support. That second half is what "grounded" means here.
+After OCR, Redact has a list of text blocks with positions. The next question is which of them are sensitive. Redact asks a local model, and then refuses to believe anything the model says that the page itself doesn't support. That second half is what "grounded" means here. Lessons 6 to 10 use a generative model, Qwen3 0.6B; from lesson 11 the default is the Laya decision model ([About decision models and generative models](/docs/redact/concepts/decision-models)). The grounding below applies to both.
 
 ## The model chooses blocks, not text
 

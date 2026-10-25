@@ -1,0 +1,39 @@
+---
+title: "About decision models and generative models"
+description: "Why Redact asks Laya yes/no questions instead of asking a language model to write JSON, and what that trade costs."
+---
+
+For ten lessons, Redact's suggestions came from a generative model. Qwen3 0.6B read every OCR line and wrote a JSON list of the ones it thought were sensitive. That works, but look at how much of the surrounding code exists only to make it work: a JSON Schema turned into a grammar so the output parses, Zod to check it anyway, a rule that fails the whole run if an index repeats, fixed sampling settings so the same page gives the same list. Most of the effort is spent making text generation behave like classification.
+
+A decision model skips the pretence. [Laya](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) doesn't write anything. You give it some text and a set of questions you wrote in advance, and it returns a number for each: the probability that "this text contains a person's name" holds. Redact's question was always a set of yes/no questions; now the model's interface matches it.
+
+## What changes
+
+**Shape is no longer a risk.** With Qwen, a malformed answer is a failure mode we had to code for ("Local reasoning returned invalid candidates"). With Laya, the result is a fixed structure: one probability per question per line. There is no output to parse.
+
+**Probabilities mean something.** Qwen's `confidence` field is a number the model writes, like any other token. Laya's probability comes from the model's own scoring of each option. That's what makes a threshold, and later a sensitivity slider, honest.
+
+**Answers repeat without tuning.** On SDK 0.22, one run in three of the Qwen evaluation gave different results until we set `temp: 0` and a seed. Laya gave identical answers on every run with no settings at all.
+
+**It's faster where it matters.** On Redact's labelled pages Laya decides a 12-line page in about 0.8 seconds; Qwen took 5 to 7. OCR still takes 20 to 30 seconds per page, so the whole analysis is only modestly faster. But a decision that cheap can run again. That's what made the copy check in [lesson 11](/docs/redact/tutorials/11-laya-decisions) affordable: it repeats the analysis on the flattened copy.
+
+## What it costs
+
+The two models fail differently. On the four evaluation pages, Laya found every labelled field on three of them and added one suggestion the labels didn't expect: `keep the amount confidential.`, which it flagged because the user's direction asked to hide sensitive content. Qwen never added an extra suggestion but missed one field on three pages.
+
+For a privacy tool, that difference matters more than the F1 scores, which are close (0.83 to 0.92 against 0.91 to 1.0). An extra suggestion costs one click on **Reject**. A missed field is something the person has to notice on their own. Redact keeps a human in charge of every mark ([About Redact's trust boundary](/docs/redact/concepts/trust-boundary)), so leaning towards recall is the safer error.
+
+How you ask matters a lot. A single multiple-choice question ("which kind of information is this?", with "none" among the options) failed badly in our tests: Laya answered "none" at 98% for the name, the email and the address. Asking one yes/no question per field caught all six. Decision models reward questions written as statements a person could check.
+
+Laya is also slightly bigger on disk than Qwen3 0.6B (450 MB against 382 MB), and it can only answer questions. If Redact needed to explain a suggestion in its own words, or rewrite text, it would need a generator again.
+
+## When to use which
+
+Use a decision model when the answer is a choice you can list in advance: is this sensitive, which team handles this, how urgent is it. Use a generative model when the answer is new text. Many apps need both. The useful habit is noticing when you're forcing a generator to fill in a form; often the form is the real question.
+
+## Related
+
+- [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/) (official)
+- [Structured output](/docs/qvac/structured-output), the generative route
+- [Decision questions](/docs/redact/reference/decision-questions)
+- [About measuring suggestions](/docs/redact/concepts/measuring-suggestions)

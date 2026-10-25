@@ -83,7 +83,8 @@
                   "docs/redact/tutorials/07-review",
                   "docs/redact/tutorials/08-failure-recovery",
                   "docs/redact/tutorials/09-evaluation",
-                  "docs/redact/tutorials/10-offline"
+                  "docs/redact/tutorials/10-offline",
+                  "docs/redact/tutorials/11-laya-decisions"
                 ]
               }
             ]
@@ -98,6 +99,7 @@
                   "docs/redact/how-to/download-models",
                   "docs/redact/how-to/run-offline",
                   "docs/redact/how-to/redact-a-multipage-pdf",
+                  "docs/redact/how-to/ask-laya-questions",
                   "docs/redact/how-to/use-a-larger-model",
                   "docs/redact/how-to/add-a-label",
                   "docs/redact/how-to/add-an-evaluation-case",
@@ -120,6 +122,7 @@
                   "docs/redact/reference/environment",
                   "docs/redact/reference/service-api",
                   "docs/redact/reference/models",
+                  "docs/redact/reference/decision-questions",
                   "docs/redact/reference/labels",
                   "docs/redact/reference/file-limits",
                   "docs/redact/reference/evaluation",
@@ -140,6 +143,7 @@
                   "docs/redact/concepts/local-ocr",
                   "docs/redact/concepts/grounded-suggestions",
                   "docs/redact/concepts/models-and-offline",
+                  "docs/redact/concepts/decision-models",
                   "docs/redact/concepts/model-size",
                   "docs/redact/concepts/flattened-copies",
                   "docs/redact/concepts/measuring-suggestions",

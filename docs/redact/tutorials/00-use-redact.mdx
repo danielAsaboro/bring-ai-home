@@ -35,7 +35,7 @@ You should see:
 Redact QVAC service listening on http://127.0.0.1:4317
 ```
 
-This is the process that runs OCR and the language model. It only listens on `127.0.0.1`, so nothing outside your machine can reach it. Leave it running.
+This is the process that runs OCR and the decision model. It only listens on `127.0.0.1`, so nothing outside your machine can reach it. Leave it running.
 
 ## 3. Start the app
 
@@ -63,7 +63,7 @@ Select **Prepare for review**.
 
 ## 5. Wait for the first analysis
 
-The screen shows **Preparing locally** while the page is read. The first time, QVAC downloads two models, about 480 MB in all, into `redact/.qvac/models`, so expect a minute or two. Watch the service terminal: it stays quiet unless something fails.
+The screen shows **Preparing locally** while the page is read. The first time, QVAC downloads the OCR model and Laya, the decision model that suggests what to cover, about 550 MB in all, into `redact/.qvac/models`, so expect a few minutes. Watch the service terminal: it stays quiet unless something fails.
 
 Later runs skip the download. Reading one page then takes about 20–30 seconds.
 
@@ -71,21 +71,25 @@ Later runs skip the download. Reading one page then takes about 20–30 seconds.
 
 The review screen opens with the original on the left and a **Safe-share preview** in the middle.
 
-![The review screen with OCR outlines on the original and six suggestions on the right](/docs/redact/images/use-04-review.png)
+![The review screen with OCR outlines on the original and seven suggestions on the right](/docs/redact/images/laya-review.png)
 
 Notice three things:
 
 - Every outlined box on the original is text that OCR found. The right panel says **12 text regions found locally**.
-- Under **6 suggested redactions** are the name, email, address, phone number, account number and reference. Each has a label, a score and the text it would cover.
-- **Done** is disabled. The banner says **Review 6 remaining suggestions before creating a safe copy.** Nothing is covered until you decide.
+- Under **7 suggested redactions** are the name, email, address, phone number, account number and reference, plus `keep the amount confidential.` labelled **OTHER**, which matched your direction. Each has a label, a score and the text it would cover.
+- **Done** is disabled. The banner says **Review 7 remaining suggestions before creating a safe copy.** Nothing is covered until you decide.
 
-Let's make one decision differently from the rest. On the **EMAIL** card, select **Reject**. Then select **Accept** on the other five cards.
+Let's make one decision differently from the rest. On the **EMAIL** card, select **Reject**. Then select **Accept** on the other six cards.
 
 The preview updates as you go: accepted fields turn into black boxes, and the email stays readable. The **Recent activity** list records each decision.
 
 ## 7. Save the copy
 
-Select **Done**. The screen changes to **Your safe copy is ready**.
+Select **Done**. The screen changes to **Your safe copy is ready**, and Redact reads the copy it just made, the same way it read the original. After about 25 seconds it lists what is still readable:
+
+![The finished screen listing the email as still readable on the copy](/docs/redact/images/laya-copy-check.png)
+
+That's the email we rejected. The check is a reminder, not a block: you decided to keep the email, so **Save copy** stays enabled.
 
 Select **Save copy**. Your browser downloads `chat-private.redacted.png`.
 
@@ -93,15 +97,15 @@ Select **Save copy**. Your browser downloads `chat-private.redacted.png`.
 
 Open the downloaded file outside the browser.
 
-![The saved copy with five fields covered and the email still visible](/docs/redact/images/use-07-result.png)
+![The saved copy with six fields covered and the email still visible](/docs/redact/images/use-07-result.png)
 
-The name, address, phone number, account number and reference are solid black. The email is still there, because we rejected that suggestion. The covered text is gone from the file itself: the copy is a new image, not the original with boxes drawn on top.
+The name, address, phone number, account number, reference and the "amount" line are solid black. The email is still there, because we rejected that suggestion. The covered text is gone from the file itself: the copy is a new image, not the original with boxes drawn on top.
 
 Now open `public/test-files/redact/chat-private.png` again. It's unchanged.
 
 ## What we did
 
-We ran a privacy tool whose OCR and language model both ran on our own machine, let it propose what to cover, overruled it once, and produced a flattened copy that contains only what we approved.
+We ran a privacy tool whose OCR and decision model both ran on our own machine, let it propose what to cover, overruled it once, and produced a flattened copy that contains only what we approved.
 
 To stop, press `Ctrl+C` in both terminals. The models stay in `redact/.qvac/models` for next time.
 

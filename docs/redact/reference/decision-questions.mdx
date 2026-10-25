@@ -1,0 +1,71 @@
+---
+title: "Decision questions"
+description: "The Laya questions Redact asks about each OCR line, the threshold, and how answers become suggestions."
+---
+
+Defined in `qvac-service/decision-reasoner.ts`; selected by `qvac-service/reasoner-choice.ts`. Since lesson 11.
+
+## Model
+
+| Item | Value |
+|---|---|
+| SDK constant | `LAYA_421M_Q8_0` |
+| Health ID | `laya-421m-q8` |
+| File | `laya-Q8_0.gguf` (450 MB) |
+| `loadModel` | `modelType: "llamacpp-decision"`, `modelConfig: { device: "gpu" }` |
+| Call | `decide({ modelId, states, questions })`, one state per OCR line |
+
+Official page: [Decisions](https://docs.qvac.tether.io/sdk/ai-capabilities/decisions/).
+
+## Questions
+
+Every question is `type: "noul"`: the answer is the probability that the statement holds.
+
+| Question ID | Statement | Asked at |
+|---|---|---|
+| `name` | This text contains a person's name. | Private, Confidential |
+| `email` | This text contains an email address. | Private, Confidential |
+| `phone` | This text contains a telephone number. | Private, Confidential |
+| `address` | This text contains a street address. | Private, Confidential |
+| `account` | This text contains a bank, card or account number. | Private, Confidential |
+| `identity` | This text contains a passport, national ID or employee ID number. | Private, Confidential |
+| `amount` | This text contains a specific amount of money. | Confidential |
+| `date` | This text contains a sensitive date such as a birth date. | Confidential |
+| `reference` | This text contains a tracking, case or project reference code. | Confidential |
+| `business` | This text contains a private company detail. | Confidential |
+| `direction` | This text is something the user asked to hide: *(the typed direction)* | When a direction is typed |
+
+## From answers to suggestions
+
+For each OCR line:
+
+1. Take the question with the highest probability.
+2. If it is below `DECISION_THRESHOLD` (`0.5`), make no suggestion.
+3. Otherwise propose that question's label (`other` for `direction`) with the probability as `confidence`.
+4. Apply the same evidence rules as the Qwen path ([Labels](/docs/redact/reference/labels)): the rule's label wins, and a line the rules don't support is dropped, except `name` and `other`.
+
+The `decide()` call fails the analysis (`503 analyzer_unavailable`) if it returns a different number of results than lines.
+
+## Choosing the model
+
+| `REDACT_REASONER` | Suggestion model |
+|---|---|
+| unset or `laya` | Laya, `LAYA_421M_Q8_0` |
+| `qwen` | Qwen3 0.6B, `QWEN3_600M_INST_Q4`, structured output |
+
+Read by `npm run qvac:service`, `qvac:evaluate` and `qvac:offline`. `qvac:offline` requires the chosen model's file in `.qvac/models`.
+
+## Copy check
+
+After **Done**, the browser sends each flattened page to `POST /v1/analyze-page` with the same level and direction. Any suggestion returned is listed under **Still readable on the copy**. It doesn't block **Save copy**. If the service is busy, preparing the next document waits up to 60 s for it.
+
+## Measured
+
+Apple Silicon, `@qvac/sdk` 0.22.0, the four evaluation pages:
+
+| Item | Laya | Qwen3 0.6B |
+|---|---|---|
+| Decide one page (12 lines) | 0.77–1.04 s | 5.2–7.4 s |
+| Model load, cached | 0.8 s | 1.7 s |
+| F1 (clear / rotated / low contrast / obscured) | 0.92 / 0.92 / 0.92 / 0.83 | 0.91 / 0.91 / 1.00 / 0.91 |
+| Same answers on repeat runs | Yes, with no settings | Yes, with `temp: 0, seed: 42` |

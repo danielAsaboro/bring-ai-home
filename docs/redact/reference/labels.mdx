@@ -32,7 +32,7 @@ A candidate is kept only if its OCR text passes the label's evidence rule. When 
 | `date` | `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YY(YY)` or `DD/MM/YY(YY)` | The block contains a potentially sensitive date. |
 | `business` | `ltd`, `limited`, `llc`, `inc`, `company`, `corporation`, `corp` | The block contains a private business detail. |
 | `name` | Model proposed `name`, and the text is 2–4 capitalised words | The block contains a person name. |
-| `other` | Model proposed `other` and no rule above matched | The block contains other potentially sensitive information. |
+| `other` | Model proposed `other` (with Laya: the typed-direction question) and no rule above matched | The block contains other potentially sensitive information. |
 
 Rules are checked top to bottom; the first match wins. Text containing "controlled test document" or "no real personal information" is never suggested.
 

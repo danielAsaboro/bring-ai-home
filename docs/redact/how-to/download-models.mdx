@@ -17,7 +17,7 @@ This reads `public/test-files/redact/chat-private.png` and prints JSON with `blo
 
 ## Download the reasoning model
 
-The Qwen3 0.6B model (about 382 MB) loads on the first full analysis. Run one:
+The decision model, Laya (`laya-Q8_0.gguf`, 450 MB), loads on the first full analysis. Run one:
 
 1. Start the service: `npm run qvac:service`.
 2. Start the app: `npm run dev -- --port 3101`.
@@ -37,7 +37,7 @@ This loads both models and runs the four labelled cases.
 ls .qvac/models
 ```
 
-You should see three files: one containing `craft`, one containing `latin`, and one containing `Qwen3`. The offline commands refuse to start until all three are present.
+You should see three files: one containing `craft`, one containing `latin`, and one containing `laya`. If you run with `REDACT_REASONER=qwen`, the third is `Qwen3` instead. The offline commands refuse to start until all three are present.
 
 ## Next
 
