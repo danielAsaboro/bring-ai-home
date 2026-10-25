@@ -19,8 +19,8 @@ async function* mdxFiles(target) {
   }
 }
 
-// Spans that must never be split: inline code, link targets, bare URLs.
-const PROTECTED = /`[^`]*`|\]\([^)]*\)|https?:\/\/\S+/g;
+// Spans that must never be split: inline code, whole links, bare URLs (without trailing punctuation).
+const PROTECTED = /`[^`]*`|!?\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s)]*[^\s).,;:!?]/g;
 const ABBREVIATION = /(?:\b(?:e\.g|i\.e|vs|etc|Mr|Ms|Dr|No|Fig)\.)$/;
 // A line starting like this would turn into block syntax, so it stays on the previous line.
 const BLOCK_START = /^(?:[-*+]\s|\d+[.)]\s|#|>|\||<|\{|```|~~~)/;
@@ -37,6 +37,7 @@ export function splitSentences(text) {
   for (const match of masked.matchAll(boundary)) {
     const end = match.index + match[1].length;
     if (ABBREVIATION.test(masked.slice(start, end))) continue;
+    if ((masked.slice(0, end).match(/\*\*/g) ?? []).length % 2 === 1) continue;
     parts.push(masked.slice(start, end));
     start = match.index + match[0].length;
   }

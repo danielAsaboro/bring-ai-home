@@ -16,5 +16,14 @@ unzip -q -o "$tmp/export.zip" -d "$out"
 rm -rf "$out/Start Docs.bat" "$out/Start Docs.command" "$out/serve.js" "$out/.gitignore" "$out/landing" "$out/scripts"
 cp landing/index.html landing/vercel.json "$out/"
 # mint export leaves out .json downloads such as manifest.json.
-rsync -a --include='*/' --include='*.json' --exclude='*' docs/downloads/ "$out/docs/downloads/"
+if [ -d docs/downloads ]; then
+  rsync -a --include='*/' --include='*.json' --exclude='*' docs/downloads/ "$out/docs/downloads/"
+fi
+# Markdown copy of every page at <page>.md, which each page advertises to AI agents.
+(cd docs && find . -name '*.mdx' | while read -r page; do
+  mkdir -p "$out/docs/$(dirname "$page")"
+  cp "$page" "$out/docs/${page%.mdx}.md"
+done)
+# Public brand kit (SVG, PNG, zip) at /brand.
+rsync -a brand/ "$out/brand/"
 echo "Built $out"
