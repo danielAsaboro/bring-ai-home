@@ -3,7 +3,8 @@ title: "How to upgrade Redact to a newer QVAC SDK"
 description: "Move Redact to a new @qvac/sdk version and prove it still works. Worked example: 0.17.1 to 0.22.0."
 ---
 
-This guide upgrades `@qvac/sdk` and verifies the result with real inference. It uses the 0.17.1 → 0.22.0 upgrade as the example; the current course branch `course/redact-qvac` already includes it.
+This guide upgrades `@qvac/sdk` and verifies the result with real inference.
+It uses the 0.17.1 → 0.22.0 upgrade as the example; the current course branch `course/redact-qvac` already includes it.
 
 Read the [QVAC release notes](https://docs.qvac.tether.io/sdk/reference/release-notes/) for every version you skip before you start.
 
@@ -13,7 +14,8 @@ Read the [QVAC release notes](https://docs.qvac.tether.io/sdk/reference/release-
 npm install --save-exact @qvac/sdk@0.22.0
 ```
 
-Commit `package.json` and `package-lock.json` together. On 0.22.0 `node_modules` shrinks from about 6.3 GB to about 2.8 GB.
+Commit `package.json` and `package-lock.json` together.
+On 0.22.0 `node_modules` shrinks from about 6.3 GB to about 2.8 GB.
 
 ## 2. Fix the compile errors
 
@@ -21,7 +23,8 @@ Commit `package.json` and `package-lock.json` together. On 0.22.0 `node_modules`
 npm run typecheck
 ```
 
-On 0.22.0, three files failed because the SDK's `Buffer` type isn't Node's `Buffer`. The fix is to wrap the runtime the same way the reasoner already was, instead of passing the SDK module directly:
+On 0.22.0, three files failed because the SDK's `Buffer` type isn't Node's `Buffer`.
+The fix is to wrap the runtime the same way the reasoner already was, instead of passing the SDK module directly:
 
 | File | Change |
 |---|---|
@@ -37,7 +40,8 @@ npm test
 npm run build
 ```
 
-These don't load a model. Passing them proves nothing about inference.
+These don't load a model.
+Passing them proves nothing about inference.
 
 ## 4. Run the evaluation several times
 
@@ -45,10 +49,16 @@ These don't load a model. Passing them proves nothing about inference.
 npm run qvac:evaluate
 ```
 
-Run it at least three times and compare the per-case F1. Two problems only showed up this way on 0.22.0:
+Run it at least three times and compare the per-case F1.
+Two problems only showed up this way on 0.22.0:
 
-- **Rotated pages regressed** (F1 0.29). 0.22's OCR reads sideways words in place, so the old "retry upright if it reads more characters" rule kept word fragments. `recoveredScore()` in `qvac-service/qvac-analyzer.ts` now multiplies characters by mean block length, so whole lines win. See [OCR boxes and rotation](/docs/qvac/ocr-geometry).
-- **Scores changed between runs**, and one run failed with `Local reasoning returned invalid candidates`. `qvac-service/reasoning.ts` now passes `generationParams: { temp: 0, seed: 42 }` to `completion()`, and the evaluation gives identical scores run after run. See [Structured output](/docs/qvac/structured-output).
+- **Rotated pages regressed** (F1 0.29).
+  0.22's OCR reads sideways words in place, so the old "retry upright if it reads more characters" rule kept word fragments.
+  `recoveredScore()` in `qvac-service/qvac-analyzer.ts` now multiplies characters by mean block length, so whole lines win.
+  See [OCR boxes and rotation](/docs/qvac/ocr-geometry).
+- **Scores changed between runs**, and one run failed with `Local reasoning returned invalid candidates`.
+  `qvac-service/reasoning.ts` now passes `generationParams: { temp: 0, seed: 42 }` to `completion()`, and the evaluation gives identical scores run after run.
+  See [Structured output](/docs/qvac/structured-output).
 
 Also update `EVALUATION_IDENTIFIERS.sdk` in `qvac-service/evaluation.ts` and its assertion in `evaluation.test.ts`, so receipts name the version they ran on.
 

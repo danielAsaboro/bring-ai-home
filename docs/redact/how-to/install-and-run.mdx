@@ -3,7 +3,8 @@ title: "How to install and run Redact with local AI"
 description: "Get the finished Redact app and its local QVAC service running on your machine."
 ---
 
-This guide gets the finished app running with local OCR and suggestions. If you want to build it lesson by lesson instead, start with [the tutorials](/docs/redact/tutorials/01-starter).
+This guide gets the finished app running with local OCR and suggestions.
+If you want to build it lesson by lesson instead, start with [the tutorials](/docs/redact/tutorials/01-starter).
 
 Check [requirements](/docs/redact/reference/requirements) first: Node 22.17 or newer, about 4 GB of free disk, and network access for the first run.
 
@@ -25,7 +26,8 @@ In one terminal:
 npm run qvac:service
 ```
 
-Wait for `Redact QVAC service listening on http://127.0.0.1:4317`. Models are not loaded yet; they load on the first analysis.
+Wait for `Redact QVAC service listening on http://127.0.0.1:4317`.
+Models are not loaded yet; they load on the first analysis.
 
 If port 4317 is taken, see [How to change the port](/docs/redact/how-to/change-the-port).
 
@@ -46,7 +48,8 @@ Open `http://localhost:3101`.
 3. Optionally fill **Additional direction**, for example `Redact direct identifiers, account numbers, and reference codes.` What you write here changes which fields are suggested.
 4. Select **Prepare for review**.
 
-The first analysis downloads about 550 MB of models into `.qvac/models` and can take a few minutes; a fresh download measured 3 minutes on a home connection. Later analyses reuse the cache; OCR then takes roughly 20–30 seconds per page.
+The first analysis downloads about 550 MB of models into `.qvac/models` and can take a few minutes; a fresh download measured 3 minutes on a home connection.
+Later analyses reuse the cache; OCR then takes roughly 20–30 seconds per page.
 
 If analysis fails or the service isn't running, the review screen still opens and you can mark the document by hand.
 

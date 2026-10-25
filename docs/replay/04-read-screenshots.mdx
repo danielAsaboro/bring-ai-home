@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 04. Read screenshots with a local vision model" />
 
-Narration says what you did. A screenshot shows where you were. Screens are also where private data lives: customer names, internal tools, messages. That is the strongest reason to read them locally.
+Narration says what you did.
+A screenshot shows where you were.
+Screens are also where private data lives: customer names, internal tools, messages.
+That is the strongest reason to read them locally.
 
-The vision model gets one image and a narrow prompt. Its answer is cleaned and bounded by plain code, then shown as a proposed description.
+The vision model gets one image and a narrow prompt.
+Its answer is cleaned and bounded by plain code, then shown as a proposed description.
 
 **Source checkpoint:** `41aaa15` · **Starting checkpoint:** `753544e`
 
@@ -18,7 +22,9 @@ The vision model gets one image and a narrow prompt. Its answer is cleaned and b
 - `public/test-files/replay/harbor-export.png`: a fictional screen of a made-up dashboard, pinned by SHA-256.
 - `src/features/replay/screen-notes.ts`: the prompt, `parseScreenNote` (strips a role prefix, refuses empty, truncates at 400 characters on a word), and allowed image types.
 - `qvac-service/qvac-models.ts`: `createQvacViewer` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with its `MMPROJ_…` projection model and reads `(await run.final).contentText`.
-- `qvac-service/server.ts`: `/v1/read-screenshot`. The image lives in a private temp file only for one call. Empty answers become `422 empty_note`.
+- `qvac-service/server.ts`: `/v1/read-screenshot`.
+  The image lives in a private temp file only for one call.
+  Empty answers become `422 empty_note`.
 - `qvac-service/screen-smoke.mjs` and `npm run qvac:screen-smoke`.
 - The Demonstration panel gains **Read screenshot locally** and a list of screen notes.
 
@@ -33,17 +39,23 @@ git checkout 41aaa15
 npm run qvac:screen-smoke
 ```
 
-The default input is `public/test-files/replay/harbor-export.png`. The first run downloads the model and its projection file. The output has `kind: "proposed-screen-note"`, the raw text, and the cleaned note.
+The default input is `public/test-files/replay/harbor-export.png`.
+The first run downloads the model and its projection file.
+The output has `kind: "proposed-screen-note"`, the raw text, and the cleaned note.
 
-Read the raw text carefully. A 500M model may misread a number or invent a label. That is why the note stays a note.
+Read the raw text carefully.
+A 500M model may misread a number or invent a label.
+That is why the note stays a note.
 
 ### 2. Use it from the app
 
-Restart `npm run qvac:service`, then in the editor choose the screenshot and click **Read screenshot locally**. The note appears with its file name, model, and the words "proposed description".
+Restart `npm run qvac:service`, then in the editor choose the screenshot and click **Read screenshot locally**.
+The note appears with its file name, model, and the words "proposed description".
 
 ### 3. Check the boundaries
 
-A `.pdf` is refused with `400` before any model runs. An empty answer is `422 empty_note`, not a blank note in the list.
+A `.pdf` is refused with `400` before any model runs.
+An empty answer is `422 empty_note`, not a blank note in the list.
 
 ## Read the checkpoint implementation
 
@@ -904,7 +916,9 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 8 passed (8)`, `Tests 23 passed (23)`. The sample screenshot digest is `757aaee0…aa34ea7e`. Vision tests use a fixture viewer that returns a fixed sentence; they test the door and the gate, not the model.
+Expected: `Test Files 8 passed (8)`, `Tests 23 passed (23)`.
+The sample screenshot digest is `757aaee0…aa34ea7e`.
+Vision tests use a fixture viewer that returns a fixed sentence; they test the door and the gate, not the model.
 
 ## Before continuing
 

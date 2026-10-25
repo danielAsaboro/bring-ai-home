@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 04. Turn descriptions into reviewed garment details" />
 
-A sentence is not a catalogue entry. We ask a small local language model to turn the description into fields, constrained by a JSON schema, and then Closet checks every field before a person sees it.
+A sentence is not a catalogue entry.
+We ask a small local language model to turn the description into fields, constrained by a JSON schema, and then Closet checks every field before a person sees it.
 
-The model fills a review card. The person edits it, copies it into the normal **Add garment** form, and saves. Nothing is added automatically.
+The model fills a review card.
+The person edits it, copies it into the normal **Add garment** form, and saves.
+Nothing is added automatically.
 
 **Source checkpoint:** `550c9c2` · **Starting checkpoint:** `6e855f3`
 
@@ -30,15 +33,20 @@ To compare with the previous checkpoint: `git diff 6e855f3 550c9c2`.
 
 ### 1. Shape is not meaning
 
-The engine calls `completion` with `responseFormat: { type: "json_schema", ... }` and returns `(await run.final).contentText`. The schema limits `category` to Closet's six categories. That constrains shape. It does not make the model right.
+The engine calls `completion` with `responseFormat: { type: "json_schema", ... }` and returns `(await run.final).contentText`.
+The schema limits `category` to Closet's six categories.
+That constrains shape.
+It does not make the model right.
 
 ### 2. Read the gate
 
-Open `garment-proposal.ts`. `parseGarmentProposal` runs in the browser:
+Open `garment-proposal.ts`.
+`parseGarmentProposal` runs in the browser:
 
 - not JSON: nothing is proposed, and the card says so;
 - a category outside the fixed list: dropped, never coerced to the nearest one;
-- a colour or material that does not appear in the description: dropped with an issue. The person can read the description, so every kept field has visible evidence.
+- a colour or material that does not appear in the description: dropped with an issue.
+  The person can read the description, so every kept field has visible evidence.
 
 ### 3. Try it
 
@@ -49,19 +57,28 @@ npm run qvac:service
 npm run dev
 ```
 
-Open **Garments**, choose **Add from photo**, and pick `public/garments/yellow-raincoat.png`. The card shows the description, the proposed fields, and any issues. Edit what is wrong, press **Copy into form**, then **Add garment with photo**. Only that last press changes the closet.
+Open **Garments**, choose **Add from photo**, and pick `public/garments/yellow-raincoat.png`.
+The card shows the description, the proposed fields, and any issues.
+Edit what is wrong, press **Copy into form**, then **Add garment with photo**.
+Only that last press changes the closet.
 
 ### 4. Stop the service and try again
 
-Stop `qvac:service` and upload again. The status line says the local service is not running and that you can add the garment by hand. The form still works.
+Stop `qvac:service` and upload again.
+The status line says the local service is not running and that you can add the garment by hand.
+The form still works.
 
 ### 5. A runtime bug the type checker did not catch
 
-The service runs `.ts` files directly in Node, and now imports `garment-proposal.ts` from `src`. Next.js resolves `./model` without an extension; Node does not. So `garment-proposal.ts` imports `./model.ts` explicitly. Start `qvac:service` after any change to shared files to catch this.
+The service runs `.ts` files directly in Node, and now imports `garment-proposal.ts` from `src`.
+Next.js resolves `./model` without an extension; Node does not.
+So `garment-proposal.ts` imports `./model.ts` explicitly.
+Start `qvac:service` after any change to shared files to catch this.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="src/features/closet/garment-proposal.ts">
@@ -642,7 +659,9 @@ export function createClosetServer(engine: ClosetEngine) {
 npm test -- src/features/closet/garment-proposal.test.ts src/features/closet/PhotoReview.test.tsx
 ```
 
-Expected result: 2 test files pass, 7 tests pass. The raw model strings and service replies in these tests are hand-written fixtures, labelled in the code. They do not prove live model inference.
+Expected result: 2 test files pass, 7 tests pass.
+The raw model strings and service replies in these tests are hand-written fixtures, labelled in the code.
+They do not prove live model inference.
 
 Run the broader checks from the app directory:
 

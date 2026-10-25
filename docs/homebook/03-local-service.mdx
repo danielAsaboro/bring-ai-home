@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 03. Add the local service boundary" />
 
-The browser cannot load native models. A small Node service on the same computer can. This chapter adds that service and a **Local assistant** panel on each asset.
+The browser cannot load native models.
+A small Node service on the same computer can.
+This chapter adds that service and a **Local assistant** panel on each asset.
 
-The rule for the whole course: the service proposes, the binder decides, and a person confirms. The service never writes to the binder.
+The rule for the whole course: the service proposes, the binder decides, and a person confirms.
+The service never writes to the binder.
 
 **Source checkpoint:** `fb2b93d` · **Starting checkpoint:** `d126ea1`
 
@@ -33,7 +36,8 @@ npm run qvac:service
 npm run dev
 ```
 
-The service prints `Homebook QVAC service on http://127.0.0.1:4319`. It binds to `127.0.0.1`, not `0.0.0.0`, so other machines on your network cannot reach it.
+The service prints `Homebook QVAC service on http://127.0.0.1:4319`.
+It binds to `127.0.0.1`, not `0.0.0.0`, so other machines on your network cannot reach it.
 
 ### 2. Check health before the model is ready
 
@@ -41,7 +45,11 @@ The service prints `Homebook QVAC service on http://127.0.0.1:4319`. It binds to
 curl -s http://127.0.0.1:4319/health
 ```
 
-While OCR loads, the service answers `{"ok":true,"capabilities":{"label":false}}`. Ask it to read the label now and it answers 503 `Label reading is not available`. We first wrote `serve.mjs` to load the model before listening. In a network that stalls the download, the service never started listening, and the browser could only say it was offline. Listening first gives the correct error.
+While OCR loads, the service answers `{"ok":true,"capabilities":{"label":false}}`.
+Ask it to read the label now and it answers 503 `Label reading is not available`.
+We first wrote `serve.mjs` to load the model before listening.
+In a network that stalls the download, the service never started listening, and the browser could only say it was offline.
+Listening first gives the correct error.
 
 ### 3. Check the origin rule
 
@@ -49,21 +57,30 @@ While OCR loads, the service answers `{"ok":true,"capabilities":{"label":false}}
 curl -s -H 'Origin: https://example.com' http://127.0.0.1:4319/health
 ```
 
-It answers 403. Only `http://localhost` and `http://127.0.0.1` pages may call the service.
+It answers 403.
+Only `http://localhost` and `http://127.0.0.1` pages may call the service.
 
 ### 4. Review a plate in the binder
 
-Register a second water heater by hand with only a name and a room. In its **Local assistant**, choose `public/test-files/homebook/water-heater-label.png`. Each proposed value shows the text it came from and its confidence. Nothing changes until you press **Use model** or **Use serial**.
+Register a second water heater by hand with only a name and a room.
+In its **Local assistant**, choose `public/test-files/homebook/water-heater-label.png`.
+Each proposed value shows the text it came from and its confidence.
+Nothing changes until you press **Use model** or **Use serial**.
 
-Stop the service and try again. The panel says `The local QVAC service is not running` and the binder is unchanged.
+Stop the service and try again.
+The panel says `The local QVAC service is not running` and the binder is unchanged.
 
 ### 5. A bug at the boundary
 
-The first `serve.mjs` run failed with `ERR_MODULE_NOT_FOUND ... label-facts`. Node loads TypeScript files directly but needs the real file extension. `server.ts` now imports `label-facts.ts`, and `tsconfig.json` sets `allowImportingTsExtensions`.
+The first `serve.mjs` run failed with `ERR_MODULE_NOT_FOUND ... label-facts`.
+Node loads TypeScript files directly but needs the real file extension.
+`server.ts` now imports `label-facts.ts`, and `tsconfig.json` sets `allowImportingTsExtensions`.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -916,7 +933,8 @@ export const serviceClient: AssistClient = {
 npm test -- qvac-service/server.test.ts src/features/homebook/AssistPanel.test.tsx
 ```
 
-Expected result: 2 test files pass, 6 tests pass. The OCR reader and the client in these tests are fixtures that return hand-written values.
+Expected result: 2 test files pass, 6 tests pass.
+The OCR reader and the client in these tests are fixtures that return hand-written values.
 
 Run the broader checks from the app directory:
 

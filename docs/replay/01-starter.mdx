@@ -7,19 +7,23 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 01. Build the Replay starter" />
 
-Replay is a tape library for repeatable work. A workflow is a tape, each step is a frame, and a guided run moves a playhead across the frames while you do the work yourself.
+Replay is a tape library for repeatable work.
+A workflow is a tape, each step is a frame, and a guided run moves a playhead across the frames while you do the work yourself.
 
-The starter you clone is only a heading. In this chapter we build the real product, with no AI in it at all, so every later chapter has something honest to improve.
+The starter you clone is only a heading.
+In this chapter we build the real product, with no AI in it at all, so every later chapter has something honest to improve.
 
 **Source checkpoint:** `4e275a0` · **Starting checkpoint:** `0e5385b` (untouched starter, first commit on `course/replay-qvac`)
 
 ## What changes
 
-- `src/features/replay/tape.ts`: pure tape editing and run logic. Done, skip, mark failed, retry, annotate, pause, resume, and stop safely with a reason.
+- `src/features/replay/tape.ts`: pure tape editing and run logic.
+  Done, skip, mark failed, retry, annotate, pause, resume, and stop safely with a reason.
 - `src/features/replay/sample-library.ts`: three fictional sample tapes, including the five-frame **Publish the weekly report** tape.
 - `src/features/replay/library-store.ts`: the one adapter that touches `localStorage`, with a corrupt-data fallback and **Reset demo data**.
 - `src/features/replay/replay-app.tsx`: the shelf, the editor, the player, and the run history.
-- `src/app/page.tsx` renders the app. Tests cover the logic, the store, and a full guided run in the UI.
+- `src/app/page.tsx` renders the app.
+  Tests cover the logic, the store, and a full guided run in the UI.
 - `tsconfig.json` allows `.ts` import extensions and `vitest.config.mts` gives the long UI test room, so later chapters can run the same files from Node.
 
 To compare with the previous checkpoint: `git diff 0e5385b 4e275a0`.
@@ -36,23 +40,38 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. You should see the **Replay** shelf with three tapes.
+Open `http://localhost:3000`.
+You should see the **Replay** shelf with three tapes.
 
 ### 2. Author a tape by hand
 
-Choose **Onboard a new contractor**. Type `Book the intro call` into **New frame title** and click **Add frame**. Use the arrows to move it, and edit any frame's text in place. The revision number on the shelf goes up with every change.
+Choose **Onboard a new contractor**.
+Type `Book the intro call` into **New frame title** and click **Add frame**.
+Use the arrows to move it, and edit any frame's text in place.
+The revision number on the shelf goes up with every change.
 
-At the bottom, parameters, preconditions, and stop conditions are plain text, one per line. They save when you leave the field.
+At the bottom, parameters, preconditions, and stop conditions are plain text, one per line.
+They save when you leave the field.
 
 ### 3. Play a guided run
 
-Click **play**. The amber cell is the playhead. Click **Done** to move it. Click **Mark failed** on the next frame, write a note, and click **Retry**. Try **Pause**: step buttons are disabled until **Resume**.
+Click **play**.
+The amber cell is the playhead.
+Click **Done** to move it.
+Click **Mark failed** on the next frame, write a note, and click **Retry**.
+Try **Pause**: step buttons are disabled until **Resume**.
 
-Notice what is missing. Replay never clicks anything for you. A run records what you say happened. That stays true for the whole course.
+Notice what is missing.
+Replay never clicks anything for you.
+A run records what you say happened.
+That stays true for the whole course.
 
 ### 4. Check the history
 
-Click **history**. Each run lists its outcome counts, the tape revision it played, and any notes. Reload the page: everything is still there. **Reset demo data** puts the sample tapes back.
+Click **history**.
+Each run lists its outcome counts, the tape revision it played, and any notes.
+Reload the page: everything is still there.
+**Reset demo data** puts the sample tapes back.
 
 ### 5. Know the rule before adding AI
 
@@ -1103,7 +1122,8 @@ npm run typecheck
 npm test
 ```
 
-Expected: lint and typecheck exit cleanly, and `Test Files 4 passed (4)`, `Tests 9 passed (9)`. The UI test authors a frame, plays a run with a failure, a note, a retry, and a skip, and finds the note in history.
+Expected: lint and typecheck exit cleanly, and `Test Files 4 passed (4)`, `Tests 9 passed (9)`.
+The UI test authors a frame, plays a run with a failure, a note, a retry, and a skip, and finds the note in history.
 
 ## Before continuing
 

@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 02. Describe one photo with a local vision model" />
 
-We will ask a local vision model to describe one fictional photo, entirely outside React. This separates installation, model download, and native runtime problems from app problems.
+We will ask a local vision model to describe one fictional photo, entirely outside React.
+This separates installation, model download, and native runtime problems from app problems.
 
-The result is a proposed description. It is not a caption. A person still writes or accepts the caption.
+The result is a proposed description.
+It is not a caption.
+A person still writes or accepts the caption.
 
 **Source checkpoint:** `25c5e52` · **Starting checkpoint:** `c723afb`
 
@@ -26,9 +29,11 @@ The result is a proposed description. It is not a caption. A person still writes
 
 ### Before you start on Linux
 
-Two install problems showed up on Linux. Apply each fix only if it applies to you.
+Two install problems showed up on Linux.
+Apply each fix only if it applies to you.
 
-- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`. This checkpoint already adds it.
+- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`.
+  This checkpoint already adds it.
 - If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x node_modules/bare-runtime-linux-x64/bin/bare`.
 
 Step 2 explains how we found both.
@@ -39,33 +44,48 @@ Step 2 explains how we found both.
 npm ci
 ```
 
-The lockfile pins `@qvac/sdk` 0.22.0. Do not run a floating `npm install @qvac/sdk`.
+The lockfile pins `@qvac/sdk` 0.22.0.
+Do not run a floating `npm install @qvac/sdk`.
 
 ### 2. Why `b4a` is a direct dependency
 
-QVAC runs inference in a separate worker on the Bare runtime. On our machine the worker failed to start. The SDK only said:
+QVAC runs inference in a separate worker on the Bare runtime.
+On our machine the worker failed to start.
+The SDK only said:
 
 ```text
 RPC initialization timed out after 30000ms — the worker process may have failed to start
 ```
 
-That message hides the real cause. Run the worker directly to see it:
+That message hides the real cause.
+Run the worker directly to see it:
 
 ```bash
 node_modules/bare-runtime-linux-x64/bin/bare node_modules/@qvac/sdk/dist/src/worker/index.js
 ```
 
-It printed `MODULE_NOT_FOUND: Cannot find module 'b4a' imported from .../node_modules/bogon/index.js`. A nested package uses `b4a` without declaring it, so npm did not place it at the top level. Adding `b4a` as a direct dependency fixes the install boundary. We did not change any QVAC code.
+It printed `MODULE_NOT_FOUND: Cannot find module 'b4a' imported from .../node_modules/bogon/index.js`.
+A nested package uses `b4a` without declaring it, so npm did not place it at the top level.
+Adding `b4a` as a direct dependency fixes the install boundary.
+We did not change any QVAC code.
 
-On Linux, check that the Bare binary is executable. If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x` on it. That is an install problem, not a model problem.
+On Linux, check that the Bare binary is executable.
+If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x` on it.
+That is an install problem, not a model problem.
 
 ### 3. Prepare configuration before importing QVAC
 
-Open `qvac-service/describe-photo-smoke.mjs`. It creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`. Only then does it import the SDK with `await import("@qvac/sdk")`. The SDK reads its config when it starts, so the order matters.
+Open `qvac-service/describe-photo-smoke.mjs`.
+It creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`.
+Only then does it import the SDK with `await import("@qvac/sdk")`.
+The SDK reads its config when it starts, so the order matters.
 
 ### 4. Read the model lifecycle
 
-`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with its projection model `MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model lets the language model read an image. `completion` takes a message with `attachments: [{ path }]` and streams tokens. The `finally` block calls `unloadModel` and `close`, even after an error.
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with its projection model `MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`.
+The projection model lets the language model read an image.
+`completion` takes a message with `attachments: [{ path }]` and streams tokens.
+The `finally` block calls `unloadModel` and `close`, even after an error.
 
 ### 5. Run it twice
 
@@ -74,15 +94,26 @@ npm run qvac:describe-smoke
 npm run qvac:describe-smoke
 ```
 
-The first run downloads model files into `.qvac/models`. The second reuses them. Read `kind`, `sourceDigest`, `description`, and `stats`. Compare the description with the photo. A small model may get details wrong. That is why it only proposes.
+The first run downloads model files into `.qvac/models`.
+The second reuses them.
+Read `kind`, `sourceDigest`, `description`, and `stats`.
+Compare the description with the photo.
+A small model may get details wrong.
+That is why it only proposes.
 
 ### 6. If the download stalls
 
-QVAC fetches models from its own registry, not from npm. In our build container the log reached `Downloading blob directly` and then stalled. The model files stayed at 0 bytes, because that network blocks the registry. That is a network failure. Fix it by running on a machine with normal internet, then rerun. Do not change the code.
+QVAC fetches models from its own registry, not from npm.
+In our build container the log reached `Downloading blob directly` and then stalled.
+The model files stayed at 0 bytes, because that network blocks the registry.
+That is a network failure.
+Fix it by running on a machine with normal internet, then rerun.
+Do not change the code.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/describe-photo-smoke.mjs">
@@ -280,7 +311,9 @@ npm test -- qvac-service/local-config.test.ts
 
 Expected result: 1 test file passes, 3 tests pass.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

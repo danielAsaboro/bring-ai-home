@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 06. Draft captions you can edit" />
 
-We will ask a small local language model to draft a caption from facts the family already wrote. The draft is text in a box. Nothing changes in the archive until a person edits and accepts it.
+We will ask a small local language model to draft a caption from facts the family already wrote.
+The draft is text in a box.
+Nothing changes in the archive until a person edits and accepts it.
 
-Generated captions can be wrong or insensitive. So the app decides what the model sees, checks what comes back, and keeps the old caption in history.
+Generated captions can be wrong or insensitive.
+So the app decides what the model sees, checks what comes back, and keeps the old caption in history.
 
 **Source checkpoint:** `d413c3a` · **Starting checkpoint:** `bc64970`
 
@@ -31,23 +34,34 @@ npm run qvac:caption-smoke
 npm run qvac:caption-smoke -- m-snow-2010
 ```
 
-The first run downloads the model. Read `currentCaption` and `draft` side by side. Look for any name, place, or event that is not in the facts. A 1B model can make things up.
+The first run downloads the model.
+Read `currentCaption` and `draft` side by side.
+Look for any name, place, or event that is not in the facts.
+A 1B model can make things up.
 
 ### 2. Read what the model is told
 
-Open `buildCaptionHistory`. The system message says to use only the given facts. The user message lists the title, date, people, and the family's caption. Text from Chapters 2 and 3 is marked "Unconfirmed", so the model knows it was not checked.
+Open `buildCaptionHistory`.
+The system message says to use only the given facts.
+The user message lists the title, date, people, and the family's caption.
+Text from Chapters 2 and 3 is marked "Unconfirmed", so the model knows it was not checked.
 
 ### 3. Read what the app accepts
 
-`parseCaptionDraft` removes a leading `Caption:` label, quotes, and extra spaces. It rejects an empty reply and anything over 160 characters. A rejected reply is an error, not a shorter caption.
+`parseCaptionDraft` removes a leading `Caption:` label, quotes, and extra spaces.
+It rejects an empty reply and anything over 160 characters.
+A rejected reply is an error, not a shorter caption.
 
 ### 4. Read who decides
 
-`acceptCaption` takes the text the person approved, not the raw draft. It refuses a draft that was already resolved or belongs to another memory. It returns a revision with the previous caption, so nothing is lost.
+`acceptCaption` takes the text the person approved, not the raw draft.
+It refuses a draft that was already resolved or belongs to another memory.
+It returns a revision with the previous caption, so nothing is lost.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/caption-draft.ts">
@@ -237,7 +251,9 @@ npm test -- qvac-service/caption-draft.test.ts src/features/chronicle/caption-re
 
 Expected result: 2 test files pass, 6 tests pass.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 03. Add the local service boundary" />
 
-The SDK runs native code and holds models in memory. That does not belong inside React. We give QVAC its own Node process on `127.0.0.1`, and the browser talks to it over a tiny, validated contract.
+The SDK runs native code and holds models in memory.
+That does not belong inside React.
+We give QVAC its own Node process on `127.0.0.1`, and the browser talks to it over a tiny, validated contract.
 
-React never imports `@qvac/sdk`. If the service is down, Replay says so and manual editing keeps working.
+React never imports `@qvac/sdk`.
+If the service is down, Replay says so and manual editing keeps working.
 
 **Source checkpoint:** `753544e` · **Starting checkpoint:** `986f94b`
 
@@ -17,8 +20,10 @@ React never imports `@qvac/sdk`. If the service is down, Replay says so and manu
 
 - `src/features/replay/service-contract.ts`: request and response shapes with hand-written runtime validation.
 - `src/features/replay/service-client.ts`: `postJson` separates three failures: service unreachable, a typed service error, and a malformed answer.
-- `qvac-service/server.ts`: routes registered only for models that were injected. Health, loopback-only origins, `413`, `400`, `422 no_speech`, `500 model_failed`.
-- `qvac-service/qvac-models.ts`: the only service file that imports QVAC. `lazyModel` loads on first use and reports state honestly.
+- `qvac-service/server.ts`: routes registered only for models that were injected.
+  Health, loopback-only origins, `413`, `400`, `422 no_speech`, `500 model_failed`.
+- `qvac-service/qvac-models.ts`: the only service file that imports QVAC.
+  `lazyModel` loads on first use and reports state honestly.
 - `qvac-service/main.ts`: starts the service with the Whisper transcriber.
 - `src/features/replay/demonstration-panel.tsx`: pick a `.wav`, click **Transcribe locally**, see timestamped narration labelled "not steps yet".
 
@@ -43,7 +48,9 @@ curl http://127.0.0.1:4319/health
 {"service":"ready","models":[{"kind":"transcription","id":"WHISPER_TINY","state":"not_loaded"}]}
 ```
 
-The process is ready. The model is not loaded yet. Those are different facts, and the health route reports both.
+The process is ready.
+The model is not loaded yet.
+Those are different facts, and the health route reports both.
 
 ### 2. Send a bad request on purpose
 
@@ -55,13 +62,20 @@ Expected: `{"error":{"code":"invalid_request","message":"Only .wav recordings ar
 
 ### 3. Use it from the app
 
-Run `npm run dev`, open a tape, and find **Draft from a demonstration**. Choose your `.wav` and click **Transcribe locally**. The narration appears with timestamps. The tape does not change.
+Run `npm run dev`, open a tape, and find **Draft from a demonstration**.
+Choose your `.wav` and click **Transcribe locally**.
+The narration appears with timestamps.
+The tape does not change.
 
-Now stop the service and try again. The panel shows "The local QVAC service is not running…" with the code `service_unreachable`. Nothing is invented.
+Now stop the service and try again.
+The panel shows "The local QVAC service is not running…" with the code `service_unreachable`.
+Nothing is invented.
 
 ### 4. Why Node can run the TypeScript
 
-`main.ts` imports files from `src/`. Node 22 strips types, but it cannot run TypeScript-only syntax such as constructor parameter properties, and it needs explicit `.ts` extensions on relative imports. That is why `RequestError` assigns its fields by hand and why `src/features/replay` imports end in `.ts`.
+`main.ts` imports files from `src/`.
+Node 22 strips types, but it cannot run TypeScript-only syntax such as constructor parameter properties, and it needs explicit `.ts` extensions on relative imports.
+That is why `RequestError` assigns its fields by hand and why `src/features/replay` imports end in `.ts`.
 
 ## Read the checkpoint implementation
 
@@ -1152,7 +1166,9 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 7 passed (7)`, `Tests 17 passed (17)`. The server tests start a real HTTP server on a random port with a fixture transcriber. They prove health, the digest of received bytes, `400`, `403`, `422 no_speech`, and `500 model_failed`.
+Expected: `Test Files 7 passed (7)`, `Tests 17 passed (17)`.
+The server tests start a real HTTP server on a random port with a fixture transcriber.
+They prove health, the digest of received bytes, `400`, `403`, `422 no_speech`, and `500 model_failed`.
 
 ## Before continuing
 

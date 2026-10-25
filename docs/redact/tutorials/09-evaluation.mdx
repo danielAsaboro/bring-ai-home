@@ -7,13 +7,15 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 09. Measure suggestions against labelled documents" />
 
-In this lesson we will stop judging suggestions by eye. We'll score them against four images where we already know which six regions are sensitive, and get a JSON receipt that says whether the models pass.
+In this lesson we will stop judging suggestions by eye.
+We'll score them against four images where we already know which six regions are sensitive, and get a JSON receipt that says whether the models pass.
 
 **Checkpoint:** [`ad636f7`](https://github.com/danielAsaboro/bring-ai-home/commit/ad636f7a01f814158a154aa51b9cf8bd70fbd353), starting from `2d16cd9`
 
 ## 1. Apply the lesson's changes
 
-Download [`09-evaluation.patch`](/docs/downloads/redact/09-evaluation.patch) into your Downloads folder. Stop the app and the service, then from the parent `redact-course` folder:
+Download [`09-evaluation.patch`](/docs/downloads/redact/09-evaluation.patch) into your Downloads folder.
+Stop the app and the service, then from the parent `redact-course` folder:
 
 ```bash
 git apply --check ~/Downloads/09-evaluation.patch
@@ -33,17 +35,22 @@ Open the four images in `public/test-files/redact/evaluation/`:
 - `chat-low-contrast.png`
 - `chat-partially-obscured.png`
 
-Then open `qvac-service/evaluation.ts` and find `EVALUATION_CASES`. Each case lists the six regions a person marked as sensitive: name, email, address, phone, account and reference. These answers are only used for scoring; the models never see them.
+Then open `qvac-service/evaluation.ts` and find `EVALUATION_CASES`.
+Each case lists the six regions a person marked as sensitive: name, email, address, phone, account and reference.
+These answers are only used for scoring; the models never see them.
 
 ## 3. Run the evaluation
 
-Both models must already be cached from earlier lessons, and the service must be stopped so the evaluation has the models to itself. Then:
+Both models must already be cached from earlier lessons, and the service must be stopped so the evaluation has the models to itself.
+Then:
 
 ```bash
 npm run --silent qvac:evaluate > evaluation-receipt.json
 ```
 
-`--silent` keeps npm's own banner out of the file. The terminal shows `Evaluating clear…` and the other cases as it goes, and takes about two minutes. When it ends, check the exit status:
+`--silent` keeps npm's own banner out of the file.
+The terminal shows `Evaluating clear…` and the other cases as it goes, and takes about two minutes.
+When it ends, check the exit status:
 
 ```bash
 echo $?
@@ -53,7 +60,10 @@ echo $?
 
 ## 4. Read the receipt
 
-Open `evaluation-receipt.json`. Near the top, `"passed": true`. Under `results`, each case has its own `result` with `precision`, `recall` and `f1`. You should see:
+Open `evaluation-receipt.json`.
+Near the top, `"passed": true`.
+Under `results`, each case has its own `result` with `precision`, `recall` and `f1`.
+You should see:
 
 | Case | F1 |
 |---|---|
@@ -62,7 +72,9 @@ Open `evaluation-receipt.json`. Near the top, `"passed": true`. Under `results`,
 | `chat-low-contrast` | 1.00 |
 | `chat-partially-obscured` | 0.91 |
 
-An F1 of 0.91 here means five of the six regions matched and nothing extra was proposed. A case passes when precision, recall and F1 are all at least 0.70, and a proposal only counts if its label matches and its box overlaps the answer by at least 0.45 (intersection over union). Look in `matches` to see which regions were found.
+An F1 of 0.91 here means five of the six regions matched and nothing extra was proposed.
+A case passes when precision, recall and F1 are all at least 0.70, and a proposal only counts if its label matches and its box overlaps the answer by at least 0.45 (intersection over union).
+Look in `matches` to see which regions were found.
 
 Run it again: the numbers are the same, because the model decodes with a fixed seed.
 
@@ -74,7 +86,8 @@ When one case fails, run it alone:
 REDACT_EVALUATION_CASE=chat-rotated npm run qvac:evaluate
 ```
 
-The rotated page takes longer than the others because OCR reads it twice: once as given and once turned upright. Its boxes are mapped back onto the original sideways page before scoring ([OCR boxes and rotation](/docs/qvac/ocr-geometry)).
+The rotated page takes longer than the others because OCR reads it twice: once as given and once turned upright.
+Its boxes are mapped back onto the original sideways page before scoring ([OCR boxes and rotation](/docs/qvac/ocr-geometry)).
 
 ## 6. Run the checks
 
@@ -86,7 +99,8 @@ npm test
 npm run build
 ```
 
-`npm test` should end with `Tests  85 passed (85)`. Delete `evaluation-receipt.json` or keep it outside the app, then record the checkpoint from the parent folder:
+`npm test` should end with `Tests  85 passed (85)`.
+Delete `evaluation-receipt.json` or keep it outside the app, then record the checkpoint from the parent folder:
 
 ```bash
 cd ..
@@ -96,10 +110,12 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 
 ## What we built
 
-A repeatable quality gate for the local models: four labelled images, a strict matching rule, and a receipt that fails the command when suggestions get worse. Four fictional images are a course gate, not proof of accuracy on your own documents.
+A repeatable quality gate for the local models: four labelled images, a strict matching rule, and a receipt that fails the command when suggestions get worse.
+Four fictional images are a course gate, not proof of accuracy on your own documents.
 
 - Every file in this checkpoint: [`redact/` at `ad636f7`](https://github.com/danielAsaboro/bring-ai-home/tree/ad636f7a01f814158a154aa51b9cf8bd70fbd353/redact)
 - What these numbers can and can't tell you: [About measuring suggestions](/docs/redact/concepts/measuring-suggestions)
 - Every field and threshold: [Evaluation](/docs/redact/reference/evaluation)
 
-Next: [10. Run Redact with the network off](/docs/redact/tutorials/10-offline)
+Next: [10.
+Run Redact with the network off](/docs/redact/tutorials/10-offline)

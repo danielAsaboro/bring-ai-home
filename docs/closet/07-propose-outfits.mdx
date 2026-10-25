@@ -7,9 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 07. Propose outfits under explicit constraints" />
 
-Packing is where a wardrobe app earns its place: an occasion, a bag limit, and only clean clothes. We ask the local model for a carousel, but Closet writes the constraints and checks the answer.
+Packing is where a wardrobe app earns its place: an occasion, a bag limit, and only clean clothes.
+We ask the local model for a carousel, but Closet writes the constraints and checks the answer.
 
-The model sees only garments that are clean and not yet packed, and only as many slots as are left. Its answer is validated again, then a person ticks what to pack.
+The model sees only garments that are clean and not yet packed, and only as many slots as are left.
+Its answer is validated again, then a person ticks what to pack.
 
 **Source checkpoint:** `e8906f1` · **Starting checkpoint:** `b43b940`
 
@@ -29,23 +31,32 @@ To compare with the previous checkpoint: `git diff b43b940 e8906f1`.
 
 ### 1. The app writes the constraints
 
-`buildOutfitConstraints` offers only clean, unpacked garments and sets `maxItems` to the slots left. With the sample trip (limit 6, two packed) that is four. A worn tee is never offered.
+`buildOutfitConstraints` offers only clean, unpacked garments and sets `maxItems` to the slots left.
+With the sample trip (limit 6, two packed) that is four.
+A worn tee is never offered.
 
 ### 2. The schema narrows, the validator decides
 
-`outfitSchema` puts the candidate ids in an `enum` and sets `maxItems`. That makes a bad answer less likely. `validateOutfitProposal` still checks every id and explains each rejection: not a clean, unpacked garment you own; proposed twice; over the packing limit.
+`outfitSchema` puts the candidate ids in an `enum` and sets `maxItems`.
+That makes a bad answer less likely.
+`validateOutfitProposal` still checks every id and explains each rejection: not a clean, unpacked garment you own; proposed twice; over the packing limit.
 
 ### 3. The person packs
 
-Run the service and the app, open **Packing**, enter `dinner in Lisbon`, and press **Propose outfit**. Untick anything you disagree with and press **Pack selected**. `packGarment` checks cleanliness and the limit again; it is the same rule a manual click uses.
+Run the service and the app, open **Packing**, enter `dinner in Lisbon`, and press **Propose outfit**.
+Untick anything you disagree with and press **Pack selected**.
+`packGarment` checks cleanliness and the limit again; it is the same rule a manual click uses.
 
 ### 4. Stop the service
 
-Press **Propose outfit** again. The status line says the service is not running and to pack by hand. The **Clean and ready** buttons still work.
+Press **Propose outfit** again.
+The status line says the service is not running and to pack by hand.
+The **Clean and ready** buttons still work.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="src/features/closet/outfit-proposal.ts">
@@ -811,7 +822,9 @@ export function proposeOutfit(constraints: OutfitConstraints, fetchFn?: Fetch) {
 npm test -- src/features/closet/outfit-proposal.test.ts src/features/closet/OutfitProposer.test.tsx
 ```
 
-Expected result: 2 test files pass, 5 tests pass. The model replies in these tests are hand-written fixtures, including a worn garment the app must refuse. They do not prove live generation.
+Expected result: 2 test files pass, 5 tests pass.
+The model replies in these tests are hand-written fixtures, including a worn garment the app must refuse.
+They do not prove live generation.
 
 Run the broader checks from the app directory:
 

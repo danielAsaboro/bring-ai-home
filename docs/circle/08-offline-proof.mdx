@@ -7,11 +7,15 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 08. Prove it offline" />
 
-We will turn the network off and show that every Circle route still answers from local models. The receipt refuses to say offline while the network is up.
+We will turn the network off and show that every Circle route still answers from local models.
+The receipt refuses to say offline while the network is up.
 
-Saying that inference is local is easy. Showing it is better. In this chapter we warm the models once, turn the network off, and run every route again.
+Saying that inference is local is easy.
+Showing it is better.
+In this chapter we warm the models once, turn the network off, and run every route again.
 
-Two tests back that up. The browser points only at loopback, and no app or service source file contains a remote URL.
+Two tests back that up.
+The browser points only at loopback, and no app or service source file contains a remote URL.
 
 **Source checkpoint:** `6300f68` · **Starting checkpoint:** `5161006`
 
@@ -29,11 +33,13 @@ Two tests back that up. The browser points only at loopback, and no app or servi
 
 ### 1. Warm the cache
 
-With the network on, run each feature once from the app, or run the proof once. This downloads every model into `.qvac/models`.
+With the network on, run each feature once from the app, or run the proof once.
+This downloads every model into `.qvac/models`.
 
 ### 2. Turn the network off
 
-Switch off Wi-Fi and unplug any cable. Restart the service:
+Switch off Wi-Fi and unplug any cable.
+Restart the service:
 
 ```bash
 npm run qvac:service
@@ -45,15 +51,20 @@ npm run qvac:service
 npm run qvac:offline-proof -- ~/Downloads/dev-recap.wav
 ```
 
-The script first checks whether it can resolve `registry.npmjs.org`. If it can, the verdict is `not-proven: the network was reachable during this run`. With the network off and warm models, each route should answer `200`, and the verdict is `offline: every route answered with the network off`.
+The script first checks whether it can resolve `registry.npmjs.org`.
+If it can, the verdict is `not-proven: the network was reachable during this run`.
+With the network off and warm models, each route should answer `200`, and the verdict is `offline: every route answered with the network off`.
 
 ### 4. Use the app offline
 
-Open `http://localhost:3000`. Speak a recap, confirm a proposal, gather context, and draft a follow-up. Your book, your voice, and the people in it stay on this computer.
+Open `http://localhost:3000`.
+Speak a recap, confirm a proposal, gather context, and draft a follow-up.
+Your book, your voice, and the people in it stay on this computer.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="README.md">
@@ -132,12 +143,7 @@ Relationship scoring and manipulative cadence are excluded. Users can keep captu
 ## 17. Run, test, and reset
 
 ```bash
-npm install
-npm run dev
-npm run lint
-npm run typecheck
-npm test
-npm run build
+npm install npm run dev npm run lint npm run typecheck npm test npm run build
 ```
 
 The complete starter will expose a visible **Reset demo data** action. Until its product wave is implemented, this directory contains the independently verified Next.js and test foundation.
@@ -342,7 +348,9 @@ export function summarizeProof(networkReachable: boolean, steps: ProofStep[]) {
 npm test -- qvac-service/offline.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. These tests check code and rules. Only your own offline run proves live inference.
+Expected result: 1 test file passes, 3 tests pass.
+These tests check code and rules.
+Only your own offline run proves live inference.
 
 Run the broader checks from the app directory:
 
@@ -365,4 +373,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] Your receipt says `offline`, not `not-proven`.
 - [ ] The full app worked with the network off.
 
-You finished the Circle course. Return to the [Circle overview](/docs/circle/overview).
+You finished the Circle course.
+Return to the [Circle overview](/docs/circle/overview).

@@ -7,11 +7,17 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 04. Extract promises and dates as structured output" />
 
-We will ask a local LLM for memories, promises, and important dates as JSON constrained by a schema. Then plain code checks every item against the recap and the people you know.
+We will ask a local LLM for memories, promises, and important dates as JSON constrained by a schema.
+Then plain code checks every item against the recap and the people you know.
 
-A transcript is still a wall of words. We want three kinds of items: a **memory** someone shared, a **promise** you made, and an important **date**.
+A transcript is still a wall of words.
+We want three kinds of items: a **memory** someone shared, a **promise** you made, and an important **date**.
 
-A small local model can propose these. It will also make mistakes. It may invent a detail, guess a name, or write February 30. So the model proposes and the app decides. Every item must quote the recap word for word, name a known person, and use a real date.
+A small local model can propose these.
+It will also make mistakes.
+It may invent a detail, guess a name, or write February 30.
+So the model proposes and the app decides.
+Every item must quote the recap word for word, name a known person, and use a real date.
 
 **Source checkpoint:** `f5faf8e` · **Starting checkpoint:** `97bc73a`
 
@@ -28,7 +34,9 @@ A small local model can propose these. It will also make mistakes. It may invent
 
 ### 1. Read the schema
 
-Open `extraction.ts`. `PROPOSAL_SCHEMA` allows only `memory`, `promise`, and `date`, with `person`, `text`, and `evidence`. The server passes it as `responseFormat`, so the model's output is constrained to that shape.
+Open `extraction.ts`.
+`PROPOSAL_SCHEMA` allows only `memory`, `promise`, and `date`, with `person`, `text`, and `evidence`.
+The server passes it as `responseFormat`, so the model's output is constrained to that shape.
 
 ### 2. Run an extraction
 
@@ -42,19 +50,26 @@ curl -X POST -H 'content-type: application/json' http://127.0.0.1:4327/recap/ext
 }'
 ```
 
-The first call downloads the model. Read `proposals` and `rejected`. Each proposal carries the `evidence` it was based on.
+The first call downloads the model.
+Read `proposals` and `rejected`.
+Each proposal carries the `evidence` it was based on.
 
 ### 3. Read what the app refuses
 
-A schema controls shape, not truth. `parseExtraction` checks meaning. It rejects evidence that is not in the recap, unknown people, impossible dates, date items without a date, and promises due in the past. A first name matches only when exactly one known person has it.
+A schema controls shape, not truth.
+`parseExtraction` checks meaning.
+It rejects evidence that is not in the recap, unknown people, impossible dates, date items without a date, and promises due in the past.
+A first name matches only when exactly one known person has it.
 
 ### 4. See that nothing is saved
 
-The result has `status: "proposed"`. No function in this chapter writes to the book.
+The result has `status: "proposed"`.
+No function in this chapter writes to the book.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/server.mjs">
@@ -694,7 +709,10 @@ export type ServiceClient = ReturnType<typeof createServiceClient>;
 npm test -- src/features/circle/extraction.test.ts qvac-service/service.test.ts
 ```
 
-Expected result: 2 test files pass, 9 tests pass. The extraction test feeds a hand-written fixture reply with deliberate mistakes. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+Expected result: 2 test files pass, 9 tests pass.
+The extraction test feeds a hand-written fixture reply with deliberate mistakes.
+These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code.
+They prove the app's rules, not live model inference.
 
 Run the broader checks from the app directory:
 

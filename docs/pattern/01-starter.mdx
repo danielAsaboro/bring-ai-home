@@ -9,11 +9,18 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will build Pattern, a small reversible transformation workbench, and finish its manual job before any AI arrives.
 
-People clean the same messy exports every week: names typed backwards, invoice codes with stray spaces, vendor names in capitals. Spreadsheet formulas and scripts feel like too much for the job, so it gets done by hand, again.
+People clean the same messy exports every week: names typed backwards, invoice codes with stray spaces, vendor names in capitals.
+Spreadsheet formulas and scripts feel like too much for the job, so it gets done by hand, again.
 
-Pattern is a workbench for that job, built like a weaver's loom. **Examples** are threads: a before value and the after value you want. **Rules** are the weave: ordered, deterministic steps (trim, split, case, replace, format). **Outputs** are swatches you compare against the examples. Every saved weave becomes a **revision** you can restore.
+Pattern is a workbench for that job, built like a weaver's loom.
+**Examples** are threads: a before value and the after value you want.
+**Rules** are the weave: ordered, deterministic steps (trim, split, case, replace, format).
+**Outputs** are swatches you compare against the examples.
+Every saved weave becomes a **revision** you can restore.
 
-This chapter builds the whole manual product. There is no AI in it, on purpose. Later chapters add local AI one step at a time, and the app must keep working without it.
+This chapter builds the whole manual product.
+There is no AI in it, on purpose.
+Later chapters add local AI one step at a time, and the app must keep working without it.
 
 **Source checkpoint:** `8f86531` · **Starting checkpoint:** `3395d80`
 
@@ -44,15 +51,22 @@ Open `http://localhost:3000`.
 
 ### 2. Finish a weave by hand
 
-Select **Invoice codes**. The heading reads **0 of 3 match**: the weave trims and upper-cases, but `" inv 0042 "` becomes `INV 0042`, not `INV-0042`. Add a **replace** rule with find set to one space and with set to `-`. The heading changes to **3 of 3 match**.
+Select **Invoice codes**.
+The heading reads **0 of 3 match**: the weave trims and upper-cases, but `" inv 0042 "` becomes `INV 0042`, not `INV-0042`.
+Add a **replace** rule with find set to one space and with set to `-`.
+The heading changes to **3 of 3 match**.
 
 ### 3. Watch each step
 
-Type `inv 7` into **Try a sample**. Each rule's before and after is listed, ending in `INV-7`. The sample is never changed in place; the weave produces a new value.
+Type `inv 7` into **Try a sample**.
+Each rule's before and after is listed, ending in `INV-7`.
+The sample is never changed in place; the weave produces a new value.
 
 ### 4. Save and restore
 
-Save a revision with a note, remove a rule, then press **Restore** on your revision. The weave comes back exactly. **Reset demo data** returns the three fictional patterns.
+Save a revision with a note, remove a rule, then press **Restore** on your revision.
+The weave comes back exactly.
+**Reset demo data** returns the three fictional patterns.
 
 ### 5. Write down the rule for this course
 
@@ -60,7 +74,8 @@ Save a revision with a note, remove a rule, then press **Restore** on your revis
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="src/app/layout.tsx">
@@ -685,7 +700,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `8f86531`, lint and typecheck pass and the full suite passes 9 tests. All names, codes, and vendors are invented. No model is involved in this checkpoint.
+**Receipt:** at `8f86531`, lint and typecheck pass and the full suite passes 9 tests.
+All names, codes, and vendors are invented.
+No model is involved in this checkpoint.
 
 Then record your checkpoint:
 

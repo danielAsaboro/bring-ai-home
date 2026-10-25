@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 05. Find reusable evidence cards" />
 
-Evidence you already wrote for one deck is often what another deck needs. This chapter ranks existing evidence cards against a claim with local embeddings. The app sets the similarity floor; reusing a card is your choice.
+Evidence you already wrote for one deck is often what another deck needs.
+This chapter ranks existing evidence cards against a claim with local embeddings.
+The app sets the similarity floor; reusing a card is your choice.
 
 **Source checkpoint:** `593df7d` · **Starting checkpoint:** `65c2447`
 
@@ -24,19 +26,26 @@ Evidence you already wrote for one deck is often what another deck needs. This c
 
 ### 1. Find evidence for a claim
 
-Open **Riverside library hours** and select the claim **Two late nights cost little**. Press **Find evidence cards**. Each match names the deck it came from and its similarity.
+Open **Riverside library hours** and select the claim **Two late nights cost little**.
+Press **Find evidence cards**.
+Each match names the deck it came from and its similarity.
 
 ### 2. Reuse one
 
-Press **Reuse** on a match. A copy joins the claim's round. The original card in the other deck is untouched, and the copy is no longer offered because the deck now holds a card with that title.
+Press **Reuse** on a match.
+A copy joins the claim's round.
+The original card in the other deck is untouched, and the copy is no longer offered because the deck now holds a card with that title.
 
 ### 3. Where ranking happens
 
-The service only turns text into vectors. Ranking, the floor, and the exclusion of cards already present all run in the app, where the test can pin them with fixture vectors.
+The service only turns text into vectors.
+Ranking, the floor, and the exclusion of cards already present all run in the app, where the test can pin them with fixture vectors.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="qvac-service/serve.mjs">
@@ -982,7 +991,8 @@ export function rankEvidence(
 npm test -- src/features/deck/evidence-pool.test.ts src/features/deck/EvidencePanel.test.tsx
 ```
 
-Expected result: 2 test files pass, 3 tests pass. The vectors are fixtures, not model output.
+Expected result: 2 test files pass, 3 tests pass.
+The vectors are fixtures, not model output.
 
 Run the broader checks from the app directory:
 

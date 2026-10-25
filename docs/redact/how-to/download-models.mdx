@@ -3,7 +3,8 @@ title: "How to download the models before going offline"
 description: "Fill Redact's local model cache while you still have a network connection."
 ---
 
-This guide fills `.qvac/models` with both models Redact needs, so later runs work without a network. Do it once per checkout, online.
+This guide fills `.qvac/models` with both models Redact needs, so later runs work without a network.
+Do it once per checkout, online.
 
 ## Download the OCR model
 
@@ -13,11 +14,13 @@ From the `redact` directory:
 npm run qvac:ocr-smoke
 ```
 
-This reads `public/test-files/redact/chat-private.png` and prints JSON with `blocks` and `stats`. The OCR files (about 95 MB) land in `.qvac/models`.
+This reads `public/test-files/redact/chat-private.png` and prints JSON with `blocks` and `stats`.
+The OCR files (about 95 MB) land in `.qvac/models`.
 
 ## Download the reasoning model
 
-The decision model, Laya (`laya-Q8_0.gguf`, 450 MB), loads on the first full analysis. Run one:
+The decision model, Laya (`laya-Q8_0.gguf`, 450 MB), loads on the first full analysis.
+Run one:
 
 1. Start the service: `npm run qvac:service`.
 2. Start the app: `npm run dev -- --port 3101`.
@@ -37,7 +40,9 @@ This loads both models and runs the four labelled cases.
 ls .qvac/models
 ```
 
-You should see three files: one containing `craft`, one containing `latin`, and one containing `laya`. If you run with `REDACT_REASONER=qwen`, the third is `Qwen3` instead. The offline commands refuse to start until all three are present.
+You should see three files: one containing `craft`, one containing `latin`, and one containing `laya`.
+If you run with `REDACT_REASONER=qwen`, the third is `Qwen3` instead.
+The offline commands refuse to start until all three are present.
 
 ## Next
 

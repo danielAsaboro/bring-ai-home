@@ -14,11 +14,15 @@ Defined in `src/features/redact/analysis-contract.ts` (`redactionLabelSchema`) a
 
 ## Additional direction
 
-Free text, up to 500 characters, whitespace collapsed. Sent to the reasoning model as policy data. It can't change the labels or the output schema.
+Free text, up to 500 characters, whitespace collapsed.
+Sent to the reasoning model as policy data.
+It can't change the labels or the output schema.
 
 ## Labels
 
-A candidate is kept only if its OCR text passes the label's evidence rule. When the rule matches a different label than the model proposed, the rule's label wins. The explanation shown in the app is fixed per label.
+A candidate is kept only if its OCR text passes the label's evidence rule.
+When the rule matches a different label than the model proposed, the rule's label wins.
+The explanation shown in the app is fixed per label.
 
 | Label | Evidence rule (on the block's OCR text) | Explanation shown |
 |---|---|---|
@@ -34,7 +38,8 @@ A candidate is kept only if its OCR text passes the label's evidence rule. When 
 | `name` | Model proposed `name`, and the text is 2–4 capitalised words | The block contains a person name. |
 | `other` | Model proposed `other` (with Laya: the typed-direction question) and no rule above matched | The block contains other potentially sensitive information. |
 
-Rules are checked top to bottom; the first match wins. Text containing "controlled test document" or "no real personal information" is never suggested.
+Rules are checked top to bottom; the first match wins.
+Text containing "controlled test document" or "no real personal information" is never suggested.
 
 ## Related
 

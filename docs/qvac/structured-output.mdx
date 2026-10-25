@@ -4,10 +4,13 @@ description: "How QVAC forces a local model to answer in a JSON shape you define
 ---
 
 <Note>
-QVAC has no documentation page for this yet. This page was checked against `@qvac/sdk` **0.22.0** and the SDK's own example, `llamacpp-structured-output`. The nearest official page is [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/).
+QVAC has no documentation page for this yet.
+This page was checked against `@qvac/sdk` **0.22.0** and the SDK's own example, `llamacpp-structured-output`.
+The nearest official page is [Text generation](https://docs.qvac.tether.io/sdk/ai-capabilities/text-generation/).
 </Note>
 
-A small language model asked for JSON will often answer with prose, with JSON wrapped in a code fence, or with JSON that is missing a key. Structured output removes that class of failure: QVAC turns a JSON Schema into a grammar and lets the model sample only tokens that keep the output valid against it.
+A small language model asked for JSON will often answer with prose, with JSON wrapped in a code fence, or with JSON that is missing a key.
+Structured output removes that class of failure: QVAC turns a JSON Schema into a grammar and lets the model sample only tokens that keep the output valid against it.
 
 ## Three response formats
 
@@ -19,7 +22,9 @@ A small language model asked for JSON will often answer with prose, with JSON wr
 | `json_object` | Some valid JSON object, with any keys. |
 | `json_schema` | An object matching the schema you pass, with no extra keys. |
 
-`json_object` is weaker than it looks. With a small model such as Qwen3 0.6B, the shortest valid answer is `{}`, and the model often takes it. If you need particular keys, use `json_schema`.
+`json_object` is weaker than it looks.
+With a small model such as Qwen3 0.6B, the shortest valid answer is `{}`, and the model often takes it.
+If you need particular keys, use `json_schema`.
 
 ```ts
 const run = completion({
@@ -38,13 +43,20 @@ const parsed = JSON.parse(contentText);
 
 ## What the grammar guarantees, and what it doesn't
 
-The grammar guarantees **shape**: the right keys, the right types, enum values from your list, numbers inside `minimum` and `maximum`. It does not guarantee **truth**. A schema-valid answer can still point at the wrong block, pick the wrong label, or invent an explanation.
+The grammar guarantees **shape**: the right keys, the right types, enum values from your list, numbers inside `minimum` and `maximum`.
+It does not guarantee **truth**.
+A schema-valid answer can still point at the wrong block, pick the wrong label, or invent an explanation.
 
-So an application should treat structured output as a well-formed claim and check it against evidence it already holds. Redact does this in three steps: it parses the output with Zod, fails the run if a `blockIndex` doesn't exist or repeats, and then re-derives each label from the OCR text itself, dropping candidates the text doesn't support. See [About grounded suggestions](/docs/redact/concepts/grounded-suggestions).
+So an application should treat structured output as a well-formed claim and check it against evidence it already holds.
+Redact does this in three steps: it parses the output with Zod, fails the run if a `blockIndex` doesn't exist or repeats, and then re-derives each label from the OCR text itself, dropping candidates the text doesn't support.
+See [About grounded suggestions](/docs/redact/concepts/grounded-suggestions).
 
 ## Repeatable answers
 
-Sampling is random by default, so the same page can produce different candidates on different runs. For anything you evaluate or compare, set `generationParams: { temp: 0, seed: 42 }`. Temperature 0 picks the most likely token each step; the seed fixes any remaining randomness. On Redact's labelled cases this turned a gate that failed one run in three into one that gave the same scores four runs out of four.
+Sampling is random by default, so the same page can produce different candidates on different runs.
+For anything you evaluate or compare, set `generationParams: { temp: 0, seed: 42 }`.
+Temperature 0 picks the most likely token each step; the seed fixes any remaining randomness.
+On Redact's labelled cases this turned a gate that failed one run in three into one that gave the same scores four runs out of four.
 
 ## Related
 

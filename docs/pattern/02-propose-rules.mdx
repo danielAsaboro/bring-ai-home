@@ -9,9 +9,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will add the pinned QVAC SDK and ask a local model to propose a weave from three examples, outside the app.
 
-Typing rules works, but you already know what you want: you have the before and after values. A local language model can read those examples and propose rules.
+Typing rules works, but you already know what you want: you have the before and after values.
+A local language model can read those examples and propose rules.
 
-We start beside the app, not inside it. A standalone script loads `LLAMA_3_2_1B_INST_Q4_0`, sends one pattern's examples, and prints the raw reply. Downloads, the native runtime, and the prompt are easier to diagnose here than behind React.
+We start beside the app, not inside it.
+A standalone script loads `LLAMA_3_2_1B_INST_Q4_0`, sends one pattern's examples, and prints the raw reply.
+Downloads, the native runtime, and the prompt are easier to diagnose here than behind React.
 
 **Source checkpoint:** `f06cb75` · **Starting checkpoint:** `8f86531`
 
@@ -42,21 +45,28 @@ On Linux, if the native runtime will not start, run `chmod +x node_modules/bare-
 npm run qvac:propose-smoke -- p-contacts
 ```
 
-The first run downloads the model into `.qvac/models` inside the app (ignored by git). The output has `raw` (exactly what the model said), `candidate` (the JSON array found in it, still untrusted), and `parseError` if there was none.
+The first run downloads the model into `.qvac/models` inside the app (ignored by git).
+The output has `raw` (exactly what the model said), `candidate` (the JSON array found in it, still untrusted), and `parseError` if there was none.
 
 ### 3. Classify the failure before fixing it
 
-If the script stalls with no `Downloading` lines, or leaves a zero-byte `.gguf` in `.qvac/models`, that is a network or download failure, not a code or model failure. Fix the network and run it again.
+If the script stalls with no `Downloading` lines, or leaves a zero-byte `.gguf` in `.qvac/models`, that is a network or download failure, not a code or model failure.
+Fix the network and run it again.
 
-Our build container blocks model downloads. There the script left a zero-byte Llama file and never reached inference, so this lesson shows no model output. Your own run is the receipt.
+Our build container blocks model downloads.
+There the script left a zero-byte Llama file and never reached inference, so this lesson shows no model output.
+Your own run is the receipt.
 
 ### 4. Read what the model is told
 
-Open `qvac-service/proposal.ts`. The system prompt lists the five rule shapes and asks for JSON only. Notice what we have not done yet: nothing checks that the reply is a valid rule.
+Open `qvac-service/proposal.ts`.
+The system prompt lists the five rule shapes and asks for JSON only.
+Notice what we have not done yet: nothing checks that the reply is a valid rule.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title=".gitignore">
@@ -447,7 +457,8 @@ export const samplePatterns: Pattern[] = [
 npm test -- qvac-service/proposal.test.ts
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -457,7 +468,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `f06cb75`, lint and typecheck pass and the full suite passes 11 tests. Live receipt: run `npm run qvac:propose-smoke` on your machine and keep its JSON output. It was not run successfully in the course build environment (model download blocked).
+**Receipt:** at `f06cb75`, lint and typecheck pass and the full suite passes 11 tests.
+Live receipt: run `npm run qvac:propose-smoke` on your machine and keep its JSON output.
+It was not run successfully in the course build environment (model download blocked).
 
 Then record your checkpoint:
 

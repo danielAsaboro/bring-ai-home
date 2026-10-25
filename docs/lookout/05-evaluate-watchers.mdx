@@ -7,7 +7,10 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 05. Evaluate watchers on the event tape" />
 
-We will run each active watcher over the stored frames. Ordinary prefilters run first: source, hours, and motion. Only frames that pass are sent to the local vision model. Only a clear YES becomes a hit, and every hit waits for a person to confirm or dismiss it.
+We will run each active watcher over the stored frames.
+Ordinary prefilters run first: source, hours, and motion.
+Only frames that pass are sent to the local vision model.
+Only a clear YES becomes a hit, and every hit waits for a person to confirm or dismiss it.
 
 **Source checkpoint:** `5c3b3ce` · **Starting checkpoint:** `f15f98d`
 
@@ -26,7 +29,11 @@ To compare with the starting checkpoint: `git diff f15f98d 5c3b3ce`.
 
 ### 1. Read the decision
 
-Open `watch-eval.ts`. `passesPrefilter` is ordinary code: it needs no model. `evaluateWatcher` asks the injected `check` for each remaining frame. An `unclear` or `no` is not a hit. A service that is unavailable stops the run with a message; it does not turn into "no alerts".
+Open `watch-eval.ts`.
+`passesPrefilter` is ordinary code: it needs no model.
+`evaluateWatcher` asks the injected `check` for each remaining frame.
+An `unclear` or `no` is not a hit.
+A service that is unavailable stops the run with a message; it does not turn into "no alerts".
 
 ### 2. Run the watchers
 
@@ -36,17 +43,24 @@ npm run qvac:service
 npm run dev
 ```
 
-Accept the parcel watcher from chapter 04, then click **Check watchers on stored frames**. The status line reports how many frames were checked and how many hits the model proposed. Each hit shows the frame, the model name, and the model's reason.
+Accept the parcel watcher from chapter 04, then click **Check watchers on stored frames**.
+The status line reports how many frames were checked and how many hits the model proposed.
+Each hit shows the frame, the model name, and the model's reason.
 
-Click **Confirm** on a hit that really shows a parcel. Click **Dismiss** on anything else. Run the check again: your decisions stay, because `mergeHits` keeps them by watcher and frame.
+Click **Confirm** on a hit that really shows a parcel.
+Click **Dismiss** on anything else.
+Run the check again: your decisions stay, because `mergeHits` keeps them by watcher and frame.
 
 ### 3. When the service is down
 
-Stop the service and run the check. The status line says it stopped and why. No hit is invented and the event tape still works.
+Stop the service and run the check.
+The status line says it stopped and why.
+No hit is invented and the event tape still works.
 
 ## Read the checkpoint implementation
 
-These are complete files from `5c3b3ce`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `5c3b3ce`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="src/features/lookout/ControlRoom.tsx">
@@ -665,9 +679,11 @@ Run the focused tests for this chapter:
 npm test -- src/features/lookout/watch-eval.test.ts
 ```
 
-Expected result: 1 test file passes, 4 tests pass. Verdicts are hand-written fixtures, not model output.
+Expected result: 1 test file passes, 4 tests pass.
+Verdicts are hand-written fixtures, not model output.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -690,4 +706,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] Hits appeared only for frames the prefilter allowed.
 - [ ] A dismissed hit stayed dismissed after a re-run.
 
-Next: [06. Measure and tune false positives](/docs/lookout/06-tune-false-positives)
+Next: [06.
+Measure and tune false positives](/docs/lookout/06-tune-false-positives)

@@ -3,33 +3,49 @@ title: "About choosing a model size"
 description: "Why Redact uses a 0.6-billion-parameter model, and when a larger one would be worth it."
 ---
 
-Redact's generative model is Qwen3 0.6B in 4-bit quantization, the `QWEN3_600M_INST_Q4` constant in QVAC. It is about 382 MB on disk and runs with a 4,096-token context. Choosing it was deliberate. Since lesson 11 the default is a different kind of model altogether, Laya, a 421-million-parameter decision model (450 MB); the same size argument applies to it, and [About decision models and generative models](/docs/redact/concepts/decision-models) covers why the kind of model mattered more than its size.
+Redact's generative model is Qwen3 0.6B in 4-bit quantization, the `QWEN3_600M_INST_Q4` constant in QVAC.
+It is about 382 MB on disk and runs with a 4,096-token context.
+Choosing it was deliberate.
+Since lesson 11 the default is a different kind of model altogether, Laya, a 421-million-parameter decision model (450 MB); the same size argument applies to it, and [About decision models and generative models](/docs/redact/concepts/decision-models) covers why the kind of model mattered more than its size.
 
 ## What the model actually has to do
 
-The model's job in Redact is narrow. It reads at most a page's worth of short OCR lines and points at the sensitive ones. It doesn't write prose, doesn't need world knowledge, and doesn't decide labels on its own: deterministic rules re-derive the label from the text and drop anything they can't support ([About grounded suggestions](/docs/redact/concepts/grounded-suggestions)). Structured output guarantees the reply's shape.
+The model's job in Redact is narrow.
+It reads at most a page's worth of short OCR lines and points at the sensitive ones.
+It doesn't write prose, doesn't need world knowledge, and doesn't decide labels on its own: deterministic rules re-derive the label from the text and drop anything they can't support ([About grounded suggestions](/docs/redact/concepts/grounded-suggestions)).
+Structured output guarantees the reply's shape.
 
-With that much scaffolding, a small model is enough to pass Redact's labelled evaluation, scoring 0.91 to 1.0 F1 on all four test pages. Where it falls short of 1.0, a larger model might help, but so might better OCR; the evaluation output shows which field was missed and why.
+With that much scaffolding, a small model is enough to pass Redact's labelled evaluation, scoring 0.91 to 1.0 F1 on all four test pages.
+Where it falls short of 1.0, a larger model might help, but so might better OCR; the evaluation output shows which field was missed and why.
 
 ## What small buys
 
 Size shows up everywhere on a local machine:
 
-- **Download**: 382 MB is a minute on a decent connection. An 8-billion-parameter model is several gigabytes.
+- **Download**: 382 MB is a minute on a decent connection.
+  An 8-billion-parameter model is several gigabytes.
 - **Memory**: a small model leaves room for the OCR engine, the browser and the reader's other work.
-- **Latency**: reasoning took 2 to 9 seconds per page in testing. OCR already takes 20 to 30, so a slower model would make each page noticeably worse.
+- **Latency**: reasoning took 2 to 9 seconds per page in testing.
+  OCR already takes 20 to 30, so a slower model would make each page noticeably worse.
 
 ## When a larger model is worth it
 
-A bigger model helps when the task needs judgement the rules can't encode. Examples are documents where sensitivity depends on context ("the second name is the patient"), long free-text letters rather than labelled fields, or languages and formats the rules don't cover. Qwen3 1.7B or 4B would understand more of a page at once and follow a nuanced direction better.
+A bigger model helps when the task needs judgement the rules can't encode.
+Examples are documents where sensitivity depends on context ("the second name is the patient"), long free-text letters rather than labelled fields, or languages and formats the rules don't cover.
+Qwen3 1.7B or 4B would understand more of a page at once and follow a nuanced direction better.
 
-It won't help with text OCR misread, with fields the grounding rules then drop, or with speed. And it changes the evaluation baseline, so the labelled gate should be re-run before trusting it ([About measuring suggestions](/docs/redact/concepts/measuring-suggestions)).
+It won't help with text OCR misread, with fields the grounding rules then drop, or with speed.
+And it changes the evaluation baseline, so the labelled gate should be re-run before trusting it ([About measuring suggestions](/docs/redact/concepts/measuring-suggestions)).
 
-QVAC can estimate whether a model fits a device before you download it: [Assess model fit](https://docs.qvac.tether.io/sdk/models/assess-model-fit/) compares candidates against the machine's memory. That is a better first step than trial and error with multi-gigabyte downloads.
+QVAC can estimate whether a model fits a device before you download it: [Assess model fit](https://docs.qvac.tether.io/sdk/models/assess-model-fit/) compares candidates against the machine's memory.
+That is a better first step than trial and error with multi-gigabyte downloads.
 
 ## The general point
 
-Model size is a product decision, not a quality knob to turn up. Redact gets accuracy from the system around the model: OCR evidence, schema-constrained output, rule-based grounding and human review. A system built that way can use a small model and stay predictable. A system that relies on the model alone needs a large one and still can't be sure.
+Model size is a product decision, not a quality knob to turn up.
+Redact gets accuracy from the system around the model: OCR evidence, schema-constrained output, rule-based grounding and human review.
+A system built that way can use a small model and stay predictable.
+A system that relies on the model alone needs a large one and still can't be sure.
 
 ## Related
 

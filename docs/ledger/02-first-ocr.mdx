@@ -7,9 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 02. Read one receipt with QVAC" />
 
-We will read the fictional receipt with a local OCR model, entirely outside React. If something breaks here, it is an install, download, or runtime problem, not an app problem.
+We will read the fictional receipt with a local OCR model, entirely outside React.
+If something breaks here, it is an install, download, or runtime problem, not an app problem.
 
-The result is text evidence with boxes. It is not a transaction.
+The result is text evidence with boxes.
+It is not a transaction.
 
 **Source checkpoint:** `90a8494` · **Starting checkpoint:** `d5d540a`
 
@@ -18,7 +20,8 @@ The result is text evidence with boxes. It is not a transaction.
 - Add `@qvac/sdk` pinned to exactly **0.22.0**.
 - Add `b4a` pinned to **1.9.0** (explained below).
 - Record the SDK's Node range in `engines`: `^22.22.2 || ^24.15.0 || >=26.0.0`.
-- Add `.qvac/` to `.gitignore`. Models and config are local runtime data.
+- Add `.qvac/` to `.gitignore`.
+  Models and config are local runtime data.
 - Add `qvac-service/ocr-smoke.mjs` and the `qvac:ocr-smoke` script.
 - Add `qvac-service/local-config.ts` with a focused test.
 
@@ -32,26 +35,33 @@ To compare with the checkpoint: `git diff d5d540a 90a8494`.
 npm install --save-exact @qvac/sdk@0.22.0
 ```
 
-Do not use a floating version. The course was written against 0.22.0.
+Do not use a floating version.
+The course was written against 0.22.0.
 
 ### 2. Set the config path before importing QVAC
 
-Open `qvac-service/ocr-smoke.mjs`. It hashes the receipt, creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`. Only then does it import the SDK with `await import("@qvac/sdk")`.
+Open `qvac-service/ocr-smoke.mjs`.
+It hashes the receipt, creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`.
+Only then does it import the SDK with `await import("@qvac/sdk")`.
 
-The order matters. The SDK reads the config when it starts.
+The order matters.
+The SDK reads the config when it starts.
 
 ### 3. Read the model lifecycle
 
 Find the four calls:
 
 - `loadModel({ modelSrc: sdk.OCR_LATIN, modelConfig: { langList: ["en"] } })` returns a model ID.
-- `sdk.ocr({ modelId, image, options: { paragraph: false } })` returns `blocks` and `stats` promises. We await both.
+- `sdk.ocr({ modelId, image, options: { paragraph: false } })` returns `blocks` and `stats` promises.
+  We await both.
 - `unloadModel({ modelId, clearStorage: false })` frees memory but keeps the downloaded files.
 - `close()` shuts the SDK down.
 
 The last two run in `finally`, so they run even after an error.
 
-`paragraph: false` keeps each text region separate. On a receipt, that means a label like `TOTAL` and its amount `10.53` often come back as two blocks. Chapter 4 deals with that.
+`paragraph: false` keeps each text region separate.
+On a receipt, that means a label like `TOTAL` and its amount `10.53` often come back as two blocks.
+Chapter 4 deals with that.
 
 ### 4. Run it
 
@@ -59,31 +69,50 @@ The last two run in `finally`, so they run even after an error.
 npm run qvac:ocr-smoke
 ```
 
-The first successful run downloads the OCR model into `.qvac/models`. A second run should reuse it. Read `sourceDigest`, `blockCount`, `blocks`, and `stats`. Compare a few strings with the image. Expect some imperfect reads.
+The first successful run downloads the OCR model into `.qvac/models`.
+A second run should reuse it.
+Read `sourceDigest`, `blockCount`, `blocks`, and `stats`.
+Compare a few strings with the image.
+Expect some imperfect reads.
 
 ### 5. Classify failures before changing code
 
-These are the failures we hit while building this chapter. Each one has a different cause. None of them is "QVAC failed".
+These are the failures we hit while building this chapter.
+Each one has a different cause.
+None of them is "QVAC failed".
 
-**Worker did not start.** The first run said:
+**Worker did not start.**
+The first run said:
 
 ```text
 QVAC OCR smoke failed: RPC initialization timed out after 30000ms — the worker process may have failed to start
 ```
 
-The worker's stderr showed the real cause: `Cannot find module 'b4a' imported from .../node_modules/bogon/index.js`. A transitive package uses `b4a` without declaring it, and npm did not hoist a copy to the top level. This is a dependency problem. The fix is in `package.json`: depend on `b4a@1.9.0` directly so it lands in `node_modules/b4a`.
+The worker's stderr showed the real cause: `Cannot find module 'b4a' imported from .../node_modules/bogon/index.js`.
+A transitive package uses `b4a` without declaring it, and npm did not hoist a copy to the top level.
+This is a dependency problem.
+The fix is in `package.json`: depend on `b4a@1.9.0` directly so it lands in `node_modules/b4a`.
 
-**Model download could not lock its store.** The next run said:
+**Model download could not lock its store.**
+The next run said:
 
 ```text
 Could not download "latin_g2.gguf" from the registry on this network (File descriptor could not be locked).
 ```
 
-Another QVAC process on the same machine was using the shared registry store under the home directory. This is an environment problem. Stop the other process, or run with a separate `HOME` for this test.
+Another QVAC process on the same machine was using the shared registry store under the home directory.
+This is an environment problem.
+Stop the other process, or run with a separate `HOME` for this test.
 
-**Download stalled.** With its own `HOME`, the download started and then stopped making progress in our build container. That is a network problem in that container. We stopped there.
+**Download stalled.**
+With its own `HOME`, the download started and then stopped making progress in our build container.
+That is a network problem in that container.
+We stopped there.
 
-So, plainly: **we did not see live OCR output while writing this chapter.** The script is complete and the steps above are the ones to run on your machine. When it works, you will see real blocks from your own run. Do not compare them with any numbers in this course, because we have none from a live run.
+So, plainly: **we did not see live OCR output while writing this chapter.**
+The script is complete and the steps above are the ones to run on your machine.
+When it works, you will see real blocks from your own run.
+Do not compare them with any numbers in this course, because we have none from a live run.
 
 ## Read the checkpoint implementation
 
@@ -238,7 +267,10 @@ describe("local QVAC configuration", () => {
 npm test -- qvac-service/local-config.test.ts
 ```
 
-Expected: 2 tests pass. They check the cache path and the receipt shape with hand-written blocks. They do **not** prove live inference. Only a successful `npm run qvac:ocr-smoke` does.
+Expected: 2 tests pass.
+They check the cache path and the receipt shape with hand-written blocks.
+They do **not** prove live inference.
+Only a successful `npm run qvac:ocr-smoke` does.
 
 Then run the full set:
 

@@ -18,7 +18,9 @@ Defined in `src/features/redact/file-policy.ts`, `rasterize.ts` and `safe-copy.t
 
 ## Prepared pages
 
-Every page is rasterized to a PNG whose long edge is at most 2400 px. OCR boxes, marks and the saved copy all use these pixels. Each page is one request to the local service.
+Every page is rasterized to a PNG whose long edge is at most 2400 px.
+OCR boxes, marks and the saved copy all use these pixels.
+Each page is one request to the local service.
 
 ## Output
 
@@ -27,7 +29,8 @@ Every page is rasterized to a PNG whose long edge is at most 2400 px. OCR boxes,
 | PNG or JPEG | PNG | `<name>.redacted.png` |
 | PDF | PDF with one image per page, no text layer | `<name>.redacted.pdf` |
 
-The uploaded file is never modified. A single-page result can also be copied to the clipboard as PNG.
+The uploaded file is never modified.
+A single-page result can also be copied to the clipboard as PNG.
 
 ## Related
 

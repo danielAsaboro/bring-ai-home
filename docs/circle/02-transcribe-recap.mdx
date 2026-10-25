@@ -7,11 +7,16 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 02. Transcribe a voice recap locally" />
 
-We will add the QVAC SDK and turn a recorded voice recap into text with a local Whisper model. The result is a proposed recap, never a saved timeline entry.
+We will add the QVAC SDK and turn a recorded voice recap into text with a local Whisper model.
+The result is a proposed recap, never a saved timeline entry.
 
-After a call, it is easier to talk for twenty seconds than to type. A transcript keeps that context on your own computer. The recap also describes someone else's life, which is why it should not leave the machine.
+After a call, it is easier to talk for twenty seconds than to type.
+A transcript keeps that context on your own computer.
+The recap also describes someone else's life, which is why it should not leave the machine.
 
-Whisper can mishear names. So the transcript is a proposal. Nothing is written to a person's card in this chapter.
+Whisper can mishear names.
+So the transcript is a proposal.
+Nothing is written to a person's card in this chapter.
 
 **Source checkpoint:** `e35ad0b` · **Starting checkpoint:** `7a37170`
 
@@ -32,7 +37,8 @@ Whisper can mishear names. So the transcript is a proposal. Nothing is written t
 npm install --save-exact @qvac/sdk@0.22.0 b4a@1.9.0
 ```
 
-On Linux, if the native runtime will not start, make it executable. This is a local fix and is not committed:
+On Linux, if the native runtime will not start, make it executable.
+This is a local fix and is not committed:
 
 ```bash
 chmod +x node_modules/bare-runtime-linux-x64/bin/bare
@@ -40,11 +46,14 @@ chmod +x node_modules/bare-runtime-linux-x64/bin/bare
 
 ### 2. Record your own recap
 
-We do not ship a voice recording. Record about fifteen seconds and save it as WAV. Read this fictional line:
+We do not ship a voice recording.
+Record about fifteen seconds and save it as WAV.
+Read this fictional line:
 
 > Coffee with Dev today. He is nervous about the meetup on the twenty-eighth. I said I would send him my slide template by Friday.
 
-Keep the file outside the repository. A voice is personal data, and `.gitignore` now ignores `*.wav`.
+Keep the file outside the repository.
+A voice is personal data, and `.gitignore` now ignores `*.wav`.
 
 ### 3. Run the transcription
 
@@ -52,15 +61,21 @@ Keep the file outside the repository. A voice is personal data, and `.gitignore`
 npm run qvac:transcribe-smoke -- ~/Downloads/dev-recap.wav
 ```
 
-The first run downloads the Whisper model into `.qvac/models`. Later runs reuse that cache. Compare `transcript` with what you said, especially the names.
+The first run downloads the Whisper model into `.qvac/models`.
+Later runs reuse that cache.
+Compare `transcript` with what you said, especially the names.
 
 ### 4. Read the lifecycle
 
-The script writes the config, then imports the SDK, then calls `loadModel`, `transcribe`, `unloadModel`, and `close`, in that order. `metadata: true` returns segments with `startMs` and `endMs`. `buildRecapDraft` throws `No speech was recognised in this recap` when every segment is empty. It never invents text.
+The script writes the config, then imports the SDK, then calls `loadModel`, `transcribe`, `unloadModel`, and `close`, in that order.
+`metadata: true` returns segments with `startMs` and `endMs`.
+`buildRecapDraft` throws `No speech was recognised in this recap` when every segment is empty.
+It never invents text.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title=".gitignore">
@@ -303,7 +318,9 @@ try {
 npm test -- qvac-service/recap.test.ts
 ```
 
-Expected result: 1 test file passes, 2 tests pass. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+Expected result: 1 test file passes, 2 tests pass.
+These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code.
+They prove the app's rules, not live model inference.
 
 Run the broader checks from the app directory:
 

@@ -3,18 +3,22 @@ title: "How to ask Laya your own questions"
 description: "Add, reword or tune the yes/no questions Redact asks Laya about each line, and check the effect."
 ---
 
-This guide changes what Redact's decision model looks for. It assumes the code at lesson 11 or later (`course/redact-qvac`). For the current questions and threshold, see [Decision questions](/docs/redact/reference/decision-questions).
+This guide changes what Redact's decision model looks for.
+It assumes the code at lesson 11 or later (`course/redact-qvac`).
+For the current questions and threshold, see [Decision questions](/docs/redact/reference/decision-questions).
 
 ## Add a question for a new kind of field
 
 1. Open `qvac-service/decision-reasoner.ts`.
-2. Add an entry to `privateQuestions` (asked at both levels) or `confidentialQuestions` (Confidential only). Write it as a statement that is true or false about one line of text:
+2. Add an entry to `privateQuestions` (asked at both levels) or `confidentialQuestions` (Confidential only).
+   Write it as a statement that is true or false about one line of text:
 
    ```ts
    iban: "This text contains an IBAN bank account number.",
    ```
 
-3. If the ID isn't one of Redact's labels, add the label too: follow [How to add a sensitive-field label](/docs/redact/how-to/add-a-label). Otherwise the suggestion is dropped by the evidence rules.
+3. If the ID isn't one of Redact's labels, add the label too: follow [How to add a sensitive-field label](/docs/redact/how-to/add-a-label).
+   Otherwise the suggestion is dropped by the evidence rules.
 4. Run `npm test`, then [measure the change](#measure-the-change).
 
 ## Reword a question that misfires
@@ -22,8 +26,10 @@ This guide changes what Redact's decision model looks for. It assumes the code a
 If Laya flags ordinary lines for a field, or misses obvious ones:
 
 - Make the statement concrete: "This text contains a street address" works better than "This is location information".
-- Ask one thing per question. Two fields in one statement blur the probability.
-- Don't turn the questions into one multiple-choice question with a "none" option. In testing, Laya then answered "none" for real names, emails and addresses.
+- Ask one thing per question.
+  Two fields in one statement blur the probability.
+- Don't turn the questions into one multiple-choice question with a "none" option.
+  In testing, Laya then answered "none" for real names, emails and addresses.
 
 ## Change how sure Laya must be
 
@@ -52,7 +58,9 @@ Stop the service, then run the labelled evaluation for the model you changed:
 REDACT_REASONER=laya npm run --silent qvac:evaluate > after.json
 ```
 
-Compare each case's `f1`, `precision` and `recall` with your previous run. The gate requires all three at 0.70 or above. See [Evaluation](/docs/redact/reference/evaluation).
+Compare each case's `f1`, `precision` and `recall` with your previous run.
+The gate requires all three at 0.70 or above.
+See [Evaluation](/docs/redact/reference/evaluation).
 
 ## Related
 

@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 07. Review, accept, and keep the arithmetic deterministic" />
 
-We will let a person accept or reject a draft. Only an accepted draft becomes a ledger entry. Totals are recomputed by code, and every acceptance leaves an audit record.
+We will let a person accept or reject a draft.
+Only an accepted draft becomes a ledger entry.
+Totals are recomputed by code, and every acceptance leaves an audit record.
 
 **Source checkpoint:** `1532ea0` · **Starting checkpoint:** `7ee6547`
 
@@ -24,13 +26,18 @@ To compare with the checkpoint: `git diff 7ee6547 1532ea0`.
 
 ### 1. Start from suggestions, not decisions
 
-`suggestedValues` fills the form. Merchant and category come from a valid proposal if there is one. Otherwise the raw OCR merchant text and `Other`. The amount comes from the OCR total in cents.
+`suggestedValues` fills the form.
+Merchant and category come from a valid proposal if there is one.
+Otherwise the raw OCR merchant text and `Other`.
+The amount comes from the OCR total in cents.
 
-The person can change any field. The category is a select box built from `CATEGORIES`, so it can only hold a listed value.
+The person can change any field.
+The category is a select box built from `CATEGORIES`, so it can only hold a listed value.
 
 ### 2. Accept in one place
 
-`acceptDraft` is the only way a receipt reaches the book. It checks:
+`acceptDraft` is the only way a receipt reaches the book.
+It checks:
 
 - the draft was not already decided;
 - the amount is a positive whole number of cents;
@@ -38,25 +45,34 @@ The person can change any field. The category is a select box built from `CATEGO
 - the merchant is not empty;
 - the category is on the list.
 
-It returns a new book. It does not change the old one.
+It returns a new book.
+It does not change the old one.
 
-The amount field is text. On submit, `parseAmountCents` turns `"10.50"` into `1050`. If that fails, the form says so and nothing is added.
+The amount field is text.
+On submit, `parseAmountCents` turns `"10.50"` into `1050`.
+If that fails, the form says so and nothing is added.
 
 ### 3. Record what the person changed
 
-Each acceptance adds an audit record: the entry ID, the draft ID, the source digest, the time, the OCR total, the model's proposal, and `changedByReviewer`. That last field lists every value the person changed from the suggestion.
+Each acceptance adds an audit record: the entry ID, the draft ID, the source digest, the time, the OCR total, the model's proposal, and `changedByReviewer`.
+That last field lists every value the person changed from the suggestion.
 
 ### 4. Recompute totals in code
 
-`totals` adds whole cents. It returns a grand total and a total for each category. The model is not involved.
+`totals` adds whole cents.
+It returns a grand total and a total for each category.
+The model is not involved.
 
-The sample book starts at **160.04**. Accept the course receipt at 10.53 and it becomes **170.57**. Change the amount to 10.50 first and it becomes **170.54**, and the audit shows `amountCents` as changed, next to the OCR total of 10.53.
+The sample book starts at **160.04**.
+Accept the course receipt at 10.53 and it becomes **170.57**.
+Change the amount to 10.50 first and it becomes **170.54**, and the audit shows `amountCents` as changed, next to the OCR total of 10.53.
 
 Reject the draft instead and the total stays at 160.04.
 
 ### 5. Try it
 
-With the service and app running, read the sample receipt, optionally propose a category, then accept or reject. A decided draft cannot be accepted again: the form is replaced by **This draft has been decided.**
+With the service and app running, read the sample receipt, optionally propose a category, then accept or reject.
+A decided draft cannot be accepted again: the form is replaced by **This draft has been decided.**
 
 ## Read the checkpoint implementation
 
@@ -682,7 +698,9 @@ describe("Ledger review", () => {
 npm test -- src/features/ledger/book.test.ts src/features/ledger/ledger-app.test.tsx
 ```
 
-Expected: 8 tests pass. They prove the sample book total, that only the reviewed amount is added, the audit record, duplicate refusal, rejection leaving totals alone, invalid values refused, and the same rules in the UI. They use the hand-written OCR fixture and hand-written model text.
+Expected: 8 tests pass.
+They prove the sample book total, that only the reviewed amount is added, the audit record, duplicate refusal, rejection leaving totals alone, invalid values refused, and the same rules in the UI.
+They use the hand-written OCR fixture and hand-written model text.
 
 Full set:
 

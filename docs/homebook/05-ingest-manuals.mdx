@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 05. Ingest manuals for retrieval" />
 
-An answer is only trustworthy if you can open the page it came from. So we index manuals by printed page before we generate anything. Each chunk keeps its document id, title, file, and page number.
+An answer is only trustworthy if you can open the page it came from.
+So we index manuals by printed page before we generate anything.
+Each chunk keeps its document id, title, file, and page number.
 
 **Source checkpoint:** `4633a20` · **Starting checkpoint:** `097e56d`
 
@@ -23,7 +25,10 @@ An answer is only trustworthy if you can open the page it came from. So we index
 
 ### 1. Look at a manual
 
-Open `public/test-files/homebook/aquaterra-at50g-manual.txt`. It is fictional. Lines like `=== page 7 ===` mark printed pages. The preamble before page 1 is skipped.
+Open `public/test-files/homebook/aquaterra-at50g-manual.txt`.
+It is fictional.
+Lines like `=== page 7 ===` mark printed pages.
+The preamble before page 1 is skipped.
 
 ### 2. Build the index
 
@@ -31,19 +36,29 @@ Open `public/test-files/homebook/aquaterra-at50g-manual.txt`. It is fictional. L
 npm run qvac:ingest-manuals
 ```
 
-The command loads `GTE_LARGE_FP16` with `modelType: "embeddings"` and calls `embed({ modelId, text: texts })` once for all chunks. It prints the model, vector dimensions, the number of manuals and chunks, and where it wrote the index.
+The command loads `GTE_LARGE_FP16` with `modelType: "embeddings"` and calls `embed({ modelId, text: texts })` once for all chunks.
+It prints the model, vector dimensions, the number of manuals and chunks, and where it wrote the index.
 
 ### 3. Read what each chunk embeds
 
-`buildManualIndex` embeds `"<title>, page <n>: <text>"`, not the bare text. A question that names the appliance can then match the right manual.
+`buildManualIndex` embeds `"<title>, page <n>: <text>"`, not the bare text.
+A question that names the appliance can then match the right manual.
 
 ### 4. Why a fixture embedder
 
-Tests must not need a downloaded model. `fixture-embedder.ts` counts words into 64 buckets. It proves the plumbing: pages split correctly, vectors line up with chunks, and search returns a page. Its scores say nothing about real retrieval quality. Our first fixture test asked about "flush sediment" and the warranty page (12) won, because it also mentions sediment and the tank. A word counter is not a meaning model. The test now uses wording from page 7.
+Tests must not need a downloaded model.
+`fixture-embedder.ts` counts words into 64 buckets.
+It proves the plumbing: pages split correctly, vectors line up with chunks, and search returns a page.
+Its scores say nothing about real retrieval quality.
+Our first fixture test asked about "flush sediment" and the warranty page (12) won, because it also mentions sediment and the tank.
+A word counter is not a meaning model.
+The test now uses wording from page 7.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="package.json">

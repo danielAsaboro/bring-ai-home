@@ -7,16 +7,22 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 08. Export a tape as an agent skill" />
 
-A good tape is useful beyond Replay. Agent skills are Markdown files with a small frontmatter header. A tape already has everything a skill needs: a name, a description, inputs, preconditions, steps, and stop conditions.
+A good tape is useful beyond Replay.
+Agent skills are Markdown files with a small frontmatter header.
+A tape already has everything a skill needs: a name, a description, inputs, preconditions, steps, and stop conditions.
 
-This chapter uses no model at all. The same tape revision always produces the same bytes, so the export can be reviewed, diffed, and trusted.
+This chapter uses no model at all.
+The same tape revision always produces the same bytes, so the export can be reviewed, diffed, and trusted.
 
 **Source checkpoint:** `18f5755` · **Starting checkpoint:** `0d88b0b`
 
 ## What changes
 
-- `src/features/replay/skill-export.ts`: `skillName` (a safe slug of at most 64 characters) and `tapeToSkill`. The description is written as a JSON string, which is a valid YAML scalar, so quotes cannot break the frontmatter. Pipes are escaped in the inputs table.
-- The editor gains **Export as agent skill**. It downloads `SKILL.md` and shows a preview captioned "written by Replay, not by a model".
+- `src/features/replay/skill-export.ts`: `skillName` (a safe slug of at most 64 characters) and `tapeToSkill`.
+  The description is written as a JSON string, which is a valid YAML scalar, so quotes cannot break the frontmatter.
+  Pipes are escaped in the inputs table.
+- The editor gains **Export as agent skill**.
+  It downloads `SKILL.md` and shows a preview captioned "written by Replay, not by a model".
 - The exported rules tell an agent to confirm before anything that sends, publishes, deletes, or pays, and to stop when a stop condition is met.
 
 To compare with the previous checkpoint: `git diff 0d88b0b 18f5755`.
@@ -30,7 +36,8 @@ git checkout 18f5755
 npm run dev
 ```
 
-Open **Publish the weekly report** and click **Export as agent skill**. No service is needed.
+Open **Publish the weekly report** and click **Export as agent skill**.
+No service is needed.
 
 ### 2. Read the result
 
@@ -84,7 +91,9 @@ Ask the person for each value before starting. Do not guess.
 
 ### 3. Install it for an agent
 
-Put the file at `.claude/skills/publish-the-weekly-report/SKILL.md` in a project, or wherever your agent reads skills. The agent can now follow your procedure, ask for `week_start`, and stop when the export is empty. Replay itself still executes nothing.
+Put the file at `.claude/skills/publish-the-weekly-report/SKILL.md` in a project, or wherever your agent reads skills.
+The agent can now follow your procedure, ask for `week_start`, and stop when the export is empty.
+Replay itself still executes nothing.
 
 ## Read the checkpoint implementation
 
@@ -877,7 +886,9 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 13 passed (13)`, `Tests 42 passed (42)`. The UI test proves export makes zero `fetch` calls. The exported weekly report has SHA-256 `76cfecf827fc5d5fc620072ef0f51779ba3e370fda04c875c816a376d5574b0f`.
+Expected: `Test Files 13 passed (13)`, `Tests 42 passed (42)`.
+The UI test proves export makes zero `fetch` calls.
+The exported weekly report has SHA-256 `76cfecf827fc5d5fc620072ef0f51779ba3e370fda04c875c816a376d5574b0f`.
 
 ## Before continuing
 

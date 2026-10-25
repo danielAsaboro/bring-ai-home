@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 05. Retrieve moments from an imperfect recollection" />
 
-We will search the archive with a vague, half-remembered sentence and get back ranked memories. The model supplies vectors. The app ranks them, drops weak matches, and shows its scores.
+We will search the archive with a vague, half-remembered sentence and get back ranked memories.
+The model supplies vectors.
+The app ranks them, drops weak matches, and shows its scores.
 
-People rarely remember the title of a memory. They remember a red blanket or a kite that would not fly. Retrieval should meet them there, and admit when nothing matches.
+People rarely remember the title of a memory.
+They remember a red blanket or a kite that would not fly.
+Retrieval should meet them there, and admit when nothing matches.
 
 **Source checkpoint:** `bc64970` · **Starting checkpoint:** `9faae9c`
 
@@ -33,7 +37,9 @@ npm run qvac:retrieve-smoke
 npm run qvac:retrieve-smoke -- "snow on the roof and the lights still on"
 ```
 
-The default sentence never says "Gull Point" or "picnic". Check whether "Picnic at Gull Point" ranks first anyway. Read each `score`.
+The default sentence never says "Gull Point" or "picnic".
+Check whether "Picnic at Gull Point" ranks first anyway.
+Read each `score`.
 
 ### 2. Try a sentence about nothing in the archive
 
@@ -41,15 +47,21 @@ The default sentence never says "Gull Point" or "picnic". Check whether "Picnic 
 npm run qvac:retrieve-smoke -- "my first day at a new job in an office"
 ```
 
-Fewer results, or none, is the right answer. `minScore` is 0.3. The app decides this floor, not the model. Tune it on your own archive and write down why.
+Fewer results, or none, is the right answer.
+`minScore` is 0.3.
+The app decides this floor, not the model.
+Tune it on your own archive and write down why.
 
 ### 3. Catch a model mismatch
 
-`retrieveMoments` throws when the query vector has a different size from the index. That happens when the index was built with another model. Rebuild the index; do not pad or trim vectors.
+`retrieveMoments` throws when the query vector has a different size from the index.
+That happens when the index was built with another model.
+Rebuild the index; do not pad or trim vectors.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="src/features/chronicle/retrieve.ts">
@@ -225,7 +237,9 @@ npm test -- src/features/chronicle/retrieve.test.ts
 
 Expected result: 1 test file passes, 4 tests pass.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

@@ -7,9 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Your first QVAC app" />
 
-In fifteen minutes you will run two models on your own machine: a small language model that answers a question, and an OCR model that reads an image. Nothing you send leaves the computer, and there is no key to paste.
+In fifteen minutes you will run two models on your own machine: a small language model that answers a question, and an OCR model that reads an image.
+Nothing you send leaves the computer, and there is no key to paste.
 
-This is the smallest possible QVAC program. Every project on this site grows from the same four calls: `loadModel`, an inference call, `unloadModel`, and `close`.
+This is the smallest possible QVAC program.
+Every project on this site grows from the same four calls: `loadModel`, an inference call, `unloadModel`, and `close`.
 
 ## What you need
 
@@ -72,10 +74,13 @@ node chat.mjs
 node chat.mjs
 ```
 
-The first run downloads the model, so it is slow. The second reuses the cached file and starts much faster. That difference is the lifecycle from [AI is not one box](/docs/start-here/ai-is-not-one-box): downloaded is not loaded.
+The first run downloads the model, so it is slow.
+The second reuses the cached file and starts much faster.
+That difference is the lifecycle from [AI is not one box](/docs/start-here/ai-is-not-one-box): downloaded is not loaded.
 
 <Tip>
-Turn off Wi-Fi and run it a third time. It still answers.
+Turn off Wi-Fi and run it a third time.
+It still answers.
 </Tip>
 
 ## 3. Read text from an image
@@ -106,7 +111,9 @@ try {
 node read.mjs
 ```
 
-Each block carries the recognised text, where it sits in the image, and a confidence score. Compare a few of them with the image. Some will be imperfect, and that is the point: model output is **evidence**, and your application decides what to do with it.
+Each block carries the recognised text, where it sits in the image, and a confidence score.
+Compare a few of them with the image.
+Some will be imperfect, and that is the point: model output is **evidence**, and your application decides what to do with it.
 
 ## What just happened
 
@@ -117,7 +124,8 @@ Each block carries the recognised text, where it sits in the image, and a confid
 | `unloadModel` | Frees memory; the file stays cached on disk |
 | `close` | Shuts the SDK down cleanly, even after an error |
 
-The `finally` block matters. A model left loaded keeps its memory until the process exits.
+The `finally` block matters.
+A model left loaded keeps its memory until the process exits.
 
 ## Where to go next
 

@@ -8,7 +8,8 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 <LessonVideo title="Redact · 10. Run Redact with the network off" />
 
 <Note>
-This lesson needs **macOS**: it uses the built-in `sandbox-exec` tool to deny network access. On Linux or Windows, see [How to run Redact offline](/docs/redact/how-to/run-offline) instead.
+This lesson needs **macOS**: it uses the built-in `sandbox-exec` tool to deny network access.
+On Linux or Windows, see [How to run Redact offline](/docs/redact/how-to/run-offline) instead.
 </Note>
 
 In this lesson we will prove that Redact's analysis needs no network once its models are cached: first with one analysis inside a sandbox that blocks remote connections, then with the full app driven by a browser test.
@@ -17,7 +18,8 @@ In this lesson we will prove that Redact's analysis needs no network once its mo
 
 ## 1. Apply the lesson's changes
 
-Download [`10-offline-proof.patch`](/docs/downloads/redact/10-offline-proof.patch) into your Downloads folder. Stop the app and the service, then from the parent `redact-course` folder:
+Download [`10-offline-proof.patch`](/docs/downloads/redact/10-offline-proof.patch) into your Downloads folder.
+Stop the app and the service, then from the parent `redact-course` folder:
 
 ```bash
 git apply --check ~/Downloads/10-offline-proof.patch
@@ -34,7 +36,9 @@ If `--check` reports an error, your folder doesn't match lesson 09's checkpoint;
 ls .qvac/models
 ```
 
-You should see three files: one containing `craft`, one containing `latin`, and `…_Qwen3-0.6B-Q4_0.gguf`. If any is missing, run one analysis in the app with the network on first. The offline commands refuse to start with `QVAC cache is incomplete` otherwise.
+You should see three files: one containing `craft`, one containing `latin`, and `…_Qwen3-0.6B-Q4_0.gguf`.
+If any is missing, run one analysis in the app with the network on first.
+The offline commands refuse to start with `QVAC cache is incomplete` otherwise.
 
 ## 3. Run one analysis with the network denied
 
@@ -44,7 +48,9 @@ With the service stopped:
 npm run --silent qvac:offline > offline-receipt.json
 ```
 
-It takes about half a minute. Open `offline-receipt.json`. You should see:
+It takes about half a minute.
+Open `offline-receipt.json`.
+You should see:
 
 ```json
 "mode": "macos-process-network-denied",
@@ -54,7 +60,8 @@ It takes about half a minute. Open `offline-receipt.json`. You should see:
 "labels": ["name", "email", "address", "phone", "account", "reference"],
 ```
 
-and under `run`, `"status": "ready"` with `ocrMs` and `reasoningMs` timings. Those six labels are the same suggestions you saw in the app, produced while the process couldn't reach anything beyond `localhost`.
+and under `run`, `"status": "ready"` with `ocrMs` and `reasoningMs` timings.
+Those six labels are the same suggestions you saw in the app, produced while the process couldn't reach anything beyond `localhost`.
 
 ## 4. Run the app with a sandboxed service
 
@@ -90,7 +97,8 @@ Then run the live test:
 REDACT_LIVE_QVAC=1 npx playwright test e2e/offline-qvac-workflow.spec.ts --project=desktop
 ```
 
-After a minute or so it prints `1 passed`. In that time the test uploaded the chat, waited for local suggestions, accepted the name, rejected the email, accepted the rest, added a manual mark, saved the copy, checked that a pixel inside the name is black, checked that the source file's SHA-256 didn't change, and checked that the browser made no request to any host other than `localhost` or `127.0.0.1`.
+After a minute or so it prints `1 passed`.
+In that time the test uploaded the chat, waited for local suggestions, accepted the name, rejected the email, accepted the rest, added a manual mark, saved the copy, checked that a pixel inside the name is black, checked that the source file's SHA-256 didn't change, and checked that the browser made no request to any host other than `localhost` or `127.0.0.1`.
 
 Without `REDACT_LIVE_QVAC=1` the test is skipped, not passed.
 
@@ -105,7 +113,8 @@ npm run typecheck
 npm test
 ```
 
-`npm test` should end with `Tests  88 passed (88)`. Keep `offline-receipt.json` outside the app or delete it, then record the final checkpoint from the parent folder:
+`npm test` should end with `Tests  88 passed (88)`.
+Keep `offline-receipt.json` outside the app or delete it, then record the final checkpoint from the parent folder:
 
 ```bash
 cd ..
@@ -115,10 +124,12 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 
 ## What we built
 
-The finished Redact: local OCR and a local model propose, a person decides, and a new flattened copy is saved, with a receipt that the analysis ran with remote networking denied. The sandbox proves what the QVAC process could reach; it doesn't prove the copy caught every sensitive field.
+The finished Redact: local OCR and a local model propose, a person decides, and a new flattened copy is saved, with a receipt that the analysis ran with remote networking denied.
+The sandbox proves what the QVAC process could reach; it doesn't prove the copy caught every sensitive field.
 
 - Every file in this checkpoint: [`redact/` at `1d432a2`](https://github.com/danielAsaboro/bring-ai-home/tree/1d432a28deef8ce15e32f1f1b45a2d86d833d591/redact)
 - What "offline" covers here: [About model downloads, caching and offline use](/docs/redact/concepts/models-and-offline)
 - What Redact doesn't protect against: [About what Redact does not protect](/docs/redact/concepts/threat-model)
 
-Next: [11. Swap the generator for a decision model](/docs/redact/tutorials/11-laya-decisions)
+Next: [11.
+Swap the generator for a decision model](/docs/redact/tutorials/11-laya-decisions)

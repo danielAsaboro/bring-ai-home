@@ -7,9 +7,14 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 01. Build the Deck starter" />
 
-Slide tools make it easy to format a slide before you know what it argues. The hard part of a talk is the argument: the claim, the evidence that backs it, the order, and how long each beat takes.
+Slide tools make it easy to format a slide before you know what it argues.
+The hard part of a talk is the argument: the claim, the evidence that backs it, the order, and how long each beat takes.
 
-Deck treats an argument as a playable set of cards. Cards are claims or evidence. Rounds are the narrative sections. Playing the deck is the match. This chapter builds the whole non-AI product first, so every later chapter adds local AI to an app that already does its job by hand.
+Deck treats an argument as a playable set of cards.
+Cards are claims or evidence.
+Rounds are the narrative sections.
+Playing the deck is the match.
+This chapter builds the whole non-AI product first, so every later chapter adds local AI to an app that already does its job by hand.
 
 **Source checkpoint:** `fbc58e0` · **Starting checkpoint:** `3b21931`
 
@@ -43,25 +48,35 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Deck opens on **Lumen Kettle launch**: three rounds (The problem, The product, The ask) and eight cards. The pacing view shows 5:35 in total, with The product round the longest at 2:40.
+Open http://localhost:3000. Deck opens on **Lumen Kettle launch**: three rounds (The problem, The product, The ask) and eight cards.
+The pacing view shows 5:35 in total, with The product round the longest at 2:40.
 
 ### 3. Do the manual job once
 
 1. In **The ask**, type `Pilot results date` into **New card** and press **Add**.
-2. Press the left arrow on **The ask** to move the round earlier. The pacing bars reorder with it.
+2. Press the left arrow on **The ask** to move the round earlier.
+   The pacing bars reorder with it.
 3. Click **Mornings are rushed**, change its title in the editor, and press **Save card**.
-4. Press **Play the match**. Use **Next** or the arrow keys; **Escape** leaves the match.
-5. Reload. Your changes are still there. Press **Reset demo data** to return to the sample decks.
+4. Press **Play the match**.
+   Use **Next** or the arrow keys; **Escape** leaves the match.
+5. Reload.
+   Your changes are still there.
+   Press **Reset demo data** to return to the sample decks.
 
 ### 4. Read the boundary
 
-`storage.ts` is the only code that touches `localStorage`. It catches blocked or corrupt storage, so a private window still opens. Tests pass `createMemoryStore()` instead.
+`storage.ts` is the only code that touches `localStorage`.
+It catches blocked or corrupt storage, so a private window still opens.
+Tests pass `createMemoryStore()` instead.
 
-`moveCard` swaps a card only with its neighbour in the same round. Moving a card to another round is an explicit edit in the card editor, so a reorder can never silently change the narrative.
+`moveCard` swaps a card only with its neighbour in the same round.
+Moving a card to another round is an explicit edit in the card editor, so a reorder can never silently change the narrative.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="src/app/layout.tsx">

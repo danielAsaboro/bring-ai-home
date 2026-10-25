@@ -7,7 +7,10 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 07. Draft maintenance summaries" />
 
-When a home changes hands, the next person needs a short history: what was serviced, when, and what is due. A local model can draft that. It can also invent a date. Homebook checks every date in the draft against the records it was given.
+When a home changes hands, the next person needs a short history: what was serviced, when, and what is due.
+A local model can draft that.
+It can also invent a date.
+Homebook checks every date in the draft against the records it was given.
 
 **Source checkpoint:** `9e876d0` · **Starting checkpoint:** `4f6641a`
 
@@ -23,21 +26,31 @@ When a home changes hands, the next person needs a short history: what was servi
 
 ### 1. Draft a summary
 
-With `npm run qvac:service` running, open the water heater and press **Draft maintenance summary**. The prompt holds only this asset's history and schedule. It asks the model to copy dates exactly.
+With `npm run qvac:service` running, open the water heater and press **Draft maintenance summary**.
+The prompt holds only this asset's history and schedule.
+It asks the model to copy dates exactly.
 
 ### 2. Check the dates
 
-`parseSummaryDraft` collects every `YYYY-MM-DD` in the draft and compares it with the history dates, the next due dates, and the install date. Any date not found appears in red: `Not in your records: ...`. That is how you catch an invented service visit.
+`parseSummaryDraft` collects every `YYYY-MM-DD` in the draft and compares it with the history dates, the next due dates, and the install date.
+Any date not found appears in red: `Not in your records: ...`.
+That is how you catch an invented service visit.
 
 ### 3. Edit and save
 
-The draft is a text box. Correct it, then press **Save to notes**. Only that press writes to the binder, through `updateAsset`. **Discard** throws it away.
+The draft is a text box.
+Correct it, then press **Save to notes**.
+Only that press writes to the binder, through `updateAsset`.
+**Discard** throws it away.
 
-The LLM download stalled in our build container. We have no live draft to show.
+The LLM download stalled in our build container.
+We have no live draft to show.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="qvac-service/serve.mjs">
@@ -1270,7 +1283,8 @@ export function parseSummaryRequest(value: unknown): SummaryRequest {
 npm test -- src/features/homebook/maintenance-summary.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. The drafts are hand-written fixtures.
+Expected result: 1 test file passes, 3 tests pass.
+The drafts are hand-written fixtures.
 
 Run the broader checks from the app directory:
 

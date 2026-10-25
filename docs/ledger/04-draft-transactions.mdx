@@ -7,13 +7,16 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 04. Turn OCR into draft transactions" />
 
-We will connect the real OCR reader to the service and turn its blocks into a draft transaction. Every field in the draft points back to the OCR blocks it came from. The draft never touches a balance.
+We will connect the real OCR reader to the service and turn its blocks into a draft transaction.
+Every field in the draft points back to the OCR blocks it came from.
+The draft never touches a balance.
 
 **Source checkpoint:** `5eae853` · **Starting checkpoint:** `e7a734b`
 
 ## What changes
 
-- `qvac-service/qvac-reader.ts`: a `ReceiptReader` backed by QVAC. It loads `OCR_LATIN` once, on the first request, and keeps it warm.
+- `qvac-service/qvac-reader.ts`: a `ReceiptReader` backed by QVAC.
+  It loads `OCR_LATIN` once, on the first request, and keeps it warm.
 - `qvac-service/main.ts`: uses the QVAC reader and unloads it on shutdown.
 - `src/features/ledger/draft-transactions.ts`: deterministic code that groups blocks into printed lines and pulls out merchant text, date, line items, subtotal, tax, and total.
 - `src/features/ledger/receipt-inbox.tsx`: the "Receipt pocket" panel on the home page.
@@ -25,9 +28,13 @@ To compare with the checkpoint: `git diff e7a734b 5eae853`.
 
 ### 1. Connect the reader
 
-Open `qvac-reader.ts`. It follows the same order as the smoke script: write the config, set `QVAC_CONFIG_PATH`, then import the SDK. `loadModel` runs once. If two receipts arrive while it loads, both wait for the same promise.
+Open `qvac-reader.ts`.
+It follows the same order as the smoke script: write the config, set `QVAC_CONFIG_PATH`, then import the SDK.
+`loadModel` runs once.
+If two receipts arrive while it loads, both wait for the same promise.
 
-For each receipt, the reader writes the bytes to a private temporary folder, calls `ocr` with that path, and deletes the folder in `finally`. The receipt is never sent anywhere else.
+For each receipt, the reader writes the bytes to a private temporary folder, calls `ocr` with that path, and deletes the folder in `finally`.
+The receipt is never sent anywhere else.
 
 Restart the service and check health:
 
@@ -36,23 +43,34 @@ npm run qvac:service
 curl http://127.0.0.1:4318/health
 ```
 
-The model ID is now `OCR_LATIN` and the state is `not_loaded`. It changes to `loading`, then `ready`, after the first receipt.
+The model ID is now `OCR_LATIN` and the state is `not_loaded`.
+It changes to `loading`, then `ready`, after the first receipt.
 
 ### 2. Group blocks into printed lines
 
-With `paragraph: false`, OCR often returns `TOTAL` and `10.53` as two blocks. `groupRows` puts blocks on the same line together by comparing the vertical centre of their boxes. Then it sorts each line left to right.
+With `paragraph: false`, OCR often returns `TOTAL` and `10.53` as two blocks.
+`groupRows` puts blocks on the same line together by comparing the vertical centre of their boxes.
+Then it sorts each line left to right.
 
 Each grouped line keeps the indexes of the blocks it used, and the lowest confidence among them.
 
 ### 3. Parse money as cents, and refuse to guess
 
-`parseAmountCents("TOTAL 10.53")` returns `1053`. Text without a clear two-decimal amount at the end returns `null`. We never use floating point for money.
+`parseAmountCents("TOTAL 10.53")` returns `1053`.
+Text without a clear two-decimal amount at the end returns `null`.
+We never use floating point for money.
 
-`draftFromOcr` then labels lines: a date, the `TOTAL`, `Subtotal`, `Tax`, and the remaining priced lines as items. The first unpriced text line becomes the merchant text. It is raw OCR text, not a cleaned-up merchant name. Naming merchants is Chapter 5.
+`draftFromOcr` then labels lines: a date, the `TOTAL`, `Subtotal`, `Tax`, and the remaining priced lines as items.
+The first unpriced text line becomes the merchant text.
+It is raw OCR text, not a cleaned-up merchant name.
+Naming merchants is Chapter 5.
 
 ### 4. Let code check the receipt's own arithmetic
 
-The draft records `totalMatchesSubtotalPlusTax`. For the course receipt, 975 + 78 = 1053, so it is `true`. If OCR misreads the total as `10.58`, it becomes `false`, and the panel says so. A model never does this sum.
+The draft records `totalMatchesSubtotalPlusTax`.
+For the course receipt, 975 + 78 = 1053, so it is `true`.
+If OCR misreads the total as `10.58`, it becomes `false`, and the panel says so.
+A model never does this sum.
 
 ### 5. Read a receipt in the app
 
@@ -67,13 +85,19 @@ Open `http://localhost:3000` and select **Read sample receipt**.
 
 If the model is available on your machine, you will see a panel titled **Draft transaction (not in the ledger)**, with the block count, timing, the first 12 characters of the source digest, and evidence beside each field.
 
-If the service is not running, or the model cannot load, you will see **Could not read receipt** and the real error. That is the intended behaviour.
+If the service is not running, or the model cannot load, you will see **Could not read receipt** and the real error.
+That is the intended behaviour.
 
-We could not complete a live model download while writing this course (see Chapter 2). So the screenshots and numbers in our tests come from the hand-written fixture, not from QVAC.
+We could not complete a live model download while writing this course (see Chapter 2).
+So the screenshots and numbers in our tests come from the hand-written fixture, not from QVAC.
 
 ### 6. Know what the fixture is
 
-`corner-cafe-ocr.fixture.ts` is marked **HAND-WRITTEN FIXTURE**. It copies the shape of real OCR blocks. It splits amounts from labels and includes one bad read, `Croissamt` at confidence 0.62, so the tests do not assume perfect text. The draft keeps `Croissamt` as it was read. Correcting it is the reviewer's job, later.
+`corner-cafe-ocr.fixture.ts` is marked **HAND-WRITTEN FIXTURE**.
+It copies the shape of real OCR blocks.
+It splits amounts from labels and includes one bad read, `Croissamt` at confidence 0.62, so the tests do not assume perfect text.
+The draft keeps `Croissamt` as it was read.
+Correcting it is the reviewer's job, later.
 
 ## Read the checkpoint implementation
 
@@ -572,7 +596,10 @@ describe("draft transactions from OCR evidence (hand-written fixture)", () => {
 npm test -- src/features/ledger/draft-transactions.test.ts src/features/ledger/receipt-inbox.test.tsx
 ```
 
-Expected: 8 tests pass. They prove line grouping, cents parsing, provenance on every field, the arithmetic check, that empty OCR gives empty fields, and that a service error shows an alert instead of a draft. They use the hand-written fixture. They do not prove live inference.
+Expected: 8 tests pass.
+They prove line grouping, cents parsing, provenance on every field, the arithmetic check, that empty OCR gives empty fields, and that a service error shows an alert instead of a draft.
+They use the hand-written fixture.
+They do not prove live inference.
 
 Full set:
 

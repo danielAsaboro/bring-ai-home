@@ -5,7 +5,9 @@ description: "The private, offline personal AI that won QVAC Hackathon I: Unleas
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
-Leash is a private, offline personal AI that lives across devices you own. Every inference, embedding, retrieval, vision, speech, delegation, and fine-tuning path runs through QVAC on local hardware. There is no setting that swaps in a cloud model.
+Leash is a private, offline personal AI that lives across devices you own.
+Every inference, embedding, retrieval, vision, speech, delegation, and fine-tuning path runs through QVAC on local hardware.
+There is no setting that swaps in a cloud model.
 
 Leash won **first place overall** and the **Build in Public** prize at QVAC Hackathon I, "Unleash Edge AI" (July 2026).
 
@@ -25,7 +27,8 @@ Leash won **first place overall** and the **Build in Public** prize at QVAC Hack
 
 ## Five layers, one organism
 
-Leash is the product you talk to. Mycelium is the runtime underneath it.
+Leash is the product you talk to.
+Mycelium is the runtime underneath it.
 
 ```mermaid
 flowchart LR
@@ -56,10 +59,16 @@ These numbers come from the committed evidence bundle in the repository, on the 
 
 ## Lessons you can take without building Leash
 
-1. **Give the model a bounded job.** A local model does not need to beat frontier models. It needs a clear responsibility, private context, deterministic guardrails, and review.
-2. **Make privacy a routing rule, not a promise.** Leash's router never sends a private prompt to a public peer, and nothing can override that.
-3. **Ship receipts.** Every claim in the README links to a log, a smoke script, or a JSON summary. If you say it runs offline, prove it.
-4. **Contribute upstream.** Building Leash surfaced a gap in the SDK, which became a contribution to QVAC itself: [tetherto/qvac#2459](https://github.com/tetherto/qvac/pull/2459), `image_url` content in chat completions.
+1. **Give the model a bounded job.**
+   A local model does not need to beat frontier models.
+   It needs a clear responsibility, private context, deterministic guardrails, and review.
+2. **Make privacy a routing rule, not a promise.**
+   Leash's router never sends a private prompt to a public peer, and nothing can override that.
+3. **Ship receipts.**
+   Every claim in the README links to a log, a smoke script, or a JSON summary.
+   If you say it runs offline, prove it.
+4. **Contribute upstream.**
+   Building Leash surfaced a gap in the SDK, which became a contribution to QVAC itself: [tetherto/qvac#2459](https://github.com/tetherto/qvac/pull/2459), `image_url` content in chat completions.
 
 <Card title="Build these ideas yourself" icon="arrow-right" href="/docs/apps">
   Every Bring AI Home project applies the same principles to one everyday app.

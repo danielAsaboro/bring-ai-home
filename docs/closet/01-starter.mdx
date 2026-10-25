@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 01. Build the Closet starter" />
 
-Most people own more outfits than they remember. The shirt that only works with one pair of trousers, the jacket that is always in the wash on the morning you need it, the weekend bag that ends up with three pairs of shoes. Closet is a private fashion feed built from clothes you actually own.
+Most people own more outfits than they remember.
+The shirt that only works with one pair of trousers, the jacket that is always in the wash on the morning you need it, the weekend bag that ends up with three pairs of shoes.
+Closet is a private fashion feed built from clothes you actually own.
 
-This chapter builds the whole product without AI. That is on purpose. Every later chapter adds one local capability, and the app must keep working when that capability is missing.
+This chapter builds the whole product without AI.
+That is on purpose.
+Every later chapter adds one local capability, and the app must keep working when that capability is missing.
 
 **Source checkpoint:** `807dd99` · **Starting checkpoint:** `24c8b36`
 
@@ -40,27 +44,45 @@ npm ci
 npm run dev
 ```
 
-Each lesson checkpoint holds the app at the repository root. The finished app is the tip of branch `course/closet-qvac`.
+Each lesson checkpoint holds the app at the repository root.
+The finished app is the tip of branch `course/closet-qvac`.
 
-Use Node 22.22.2 or newer. Open `http://localhost:3000`.
+Use Node 22.22.2 or newer.
+Open `http://localhost:3000`.
 
 ### 2. Read the feed
 
-The Feed tab shows four outfit posts, newest first, and a row of stories counting garments that are worn, washing, or in repair. Every garment and image is invented. The drawings in `public/garments` are simple shapes, safe to share and easy to judge by eye.
+The Feed tab shows four outfit posts, newest first, and a row of stories counting garments that are worn, washing, or in repair.
+Every garment and image is invented.
+The drawings in `public/garments` are simple shapes, safe to share and easy to judge by eye.
 
 ### 3. Move a garment through its states
 
-Open **Garments**. The grey tee is `worn`. Its buttons only offer `washing`, `clean`, and `repair`. Open `model.ts` and find `TRANSITIONS`. A clean shirt cannot jump straight into the wash; it has to be worn first. Repair is reachable from anywhere.
+Open **Garments**.
+The grey tee is `worn`.
+Its buttons only offer `washing`, `clean`, and `repair`.
+Open `model.ts` and find `TRANSITIONS`.
+A clean shirt cannot jump straight into the wash; it has to be worn first.
+Repair is reachable from anywhere.
 
-Mark the grey tee `washing` and reload the page. It stays `washing`. `closet-store.ts` saved it. That file is the only one that knows about `localStorage`; swap it and the rest of the app does not change.
+Mark the grey tee `washing` and reload the page.
+It stays `washing`.
+`closet-store.ts` saved it.
+That file is the only one that knows about `localStorage`; swap it and the rest of the app does not change.
 
 ### 4. Assemble a look
 
-Open **Assemble**, give the look a title, tick two garments, and press **Post look**. It appears at the top of the feed. `createLook` refuses a look with fewer than two garments, and refuses ids that are not in your closet. Keep that rule in mind; a later chapter relies on it when a model proposes garment ids.
+Open **Assemble**, give the look a title, tick two garments, and press **Post look**.
+It appears at the top of the feed.
+`createLook` refuses a look with fewer than two garments, and refuses ids that are not in your closet.
+Keep that rule in mind; a later chapter relies on it when a model proposes garment ids.
 
 ### 5. Pack the carousel
 
-Open **Packing**. The Lisbon weekend has a limit of six. Only clean garments appear under **Clean and ready**. Mark a packed garment `worn` in the Garments tab and it leaves the carousel, because you would not pack it.
+Open **Packing**.
+The Lisbon weekend has a limit of six.
+Only clean garments appear under **Clean and ready**.
+Mark a packed garment `worn` in the Garments tab and it leaves the carousel, because you would not pack it.
 
 ### 6. Reset
 
@@ -74,7 +96,8 @@ We will test this rule in every chapter.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="src/features/closet/model.ts">
@@ -885,7 +908,8 @@ afterEach(() => cleanup());
 npm test -- src/features/closet/model.test.ts src/app/page.test.tsx
 ```
 
-Expected result: 2 test files pass, 12 tests pass. They use the fictional sample wardrobe and an in-memory storage stand-in.
+Expected result: 2 test files pass, 12 tests pass.
+They use the fictional sample wardrobe and an in-memory storage stand-in.
 
 Run the broader checks from the app directory:
 

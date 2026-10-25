@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 03. Add the local service boundary" />
 
-We will put a small HTTP service between the browser and QVAC. At the end of this chapter, health works, bad requests are rejected, and reading a receipt deliberately returns "unavailable". That is the correct result. OCR is not connected yet.
+We will put a small HTTP service between the browser and QVAC.
+At the end of this chapter, health works, bad requests are rejected, and reading a receipt deliberately returns "unavailable".
+That is the correct result.
+OCR is not connected yet.
 
-React never imports QVAC. The native runtime lives in its own Node process on `127.0.0.1`.
+React never imports QVAC.
+The native runtime lives in its own Node process on `127.0.0.1`.
 
 **Source checkpoint:** `e7a734b` · **Starting checkpoint:** `90a8494`
 
@@ -17,7 +21,8 @@ React never imports QVAC. The native runtime lives in its own Node process on `1
 
 - `src/features/ledger/receipt-contract.ts`: the request and response shapes, with hand-written runtime validation.
 - `src/features/ledger/receipt-client.ts`: the browser-side client.
-- `qvac-service/server.ts`: the HTTP server. It takes a `ReceiptReader` as a parameter.
+- `qvac-service/server.ts`: the HTTP server.
+  It takes a `ReceiptReader` as a parameter.
 - `qvac-service/main.ts`: starts the server with a reader that always refuses.
 - `qvac-service/package.json`: marks the service folder as ES modules.
 - `tsconfig.json`: `allowImportingTsExtensions`, so Node can run the `.ts` files directly.
@@ -29,21 +34,30 @@ To compare with the checkpoint: `git diff 90a8494 e7a734b`.
 
 ### 1. Define the contract first
 
-Read `receipt-contract.ts`. A request carries a receipt ID, a file name, and the PNG as base64. It never carries a file path.
+Read `receipt-contract.ts`.
+A request carries a receipt ID, a file name, and the PNG as base64.
+It never carries a file path.
 
 A response carries the receipt ID, the SHA-256 of the bytes the service actually received, the OCR model name, the time taken, and the raw blocks.
 
-TypeScript types vanish at runtime. JSON from another process can be anything. So both sides validate with plain functions that return `{ ok: true, value }` or `{ ok: false, message }`.
+TypeScript types vanish at runtime.
+JSON from another process can be anything.
+So both sides validate with plain functions that return `{ ok: true, value }` or `{ ok: false, message }`.
 
 ### 2. Inject the reader
 
-Open `server.ts`. The server does not know about QVAC. It calls `reader.read(png)`. In this chapter, `main.ts` passes `unavailableReader`, which throws `ReaderUnavailableError`. The server turns that into a typed `503`:
+Open `server.ts`.
+The server does not know about QVAC.
+It calls `reader.read(png)`.
+In this chapter, `main.ts` passes `unavailableReader`, which throws `ReaderUnavailableError`.
+The server turns that into a typed `503`:
 
 ```json
 { "error": { "code": "ocr_unavailable", "message": "OCR is not connected yet" } }
 ```
 
-The UI can show that honestly. It never needs to invent a result.
+The UI can show that honestly.
+It never needs to invent a result.
 
 ### 3. Start the service
 
@@ -63,7 +77,9 @@ You should see:
 {"service":"ready","models":[{"kind":"ocr","id":"not-configured","state":"not_loaded"}]}
 ```
 
-The process is ready. The model is not. Those are different things.
+The process is ready.
+The model is not.
+Those are different things.
 
 Now try a read:
 
@@ -76,11 +92,17 @@ Expected: the `ocr_unavailable` error above.
 
 ### 4. Check the local boundary
 
-The service binds to `127.0.0.1` only. Browser requests from any origin other than `localhost`, `127.0.0.1`, or `[::1]` get `403`. This stops a random website from calling your receipt reader.
+The service binds to `127.0.0.1` only.
+Browser requests from any origin other than `localhost`, `127.0.0.1`, or `[::1]` get `403`.
+This stops a random website from calling your receipt reader.
 
-This is not authentication. Other software on your own machine can still call it. Keep it on your development machine.
+This is not authentication.
+Other software on your own machine can still call it.
+Keep it on your development machine.
 
-You may see a Node warning about module type for `receipt-contract.ts`. It is harmless. Node reparses the file as an ES module.
+You may see a Node warning about module type for `receipt-contract.ts`.
+It is harmless.
+Node reparses the file as an ES module.
 
 ## Read the checkpoint implementation
 
@@ -512,7 +534,9 @@ describe("local receipt service", () => {
 npm test -- qvac-service/server.test.ts src/features/ledger/receipt-client.test.ts
 ```
 
-Expected: 7 tests pass. The server tests prove health, typed unavailability, request rejection before the reader is called, and origin rejection. These use a real HTTP server on a random port and no model.
+Expected: 7 tests pass.
+The server tests prove health, typed unavailability, request rejection before the reader is called, and origin rejection.
+These use a real HTTP server on a random port and no model.
 
 Full set:
 

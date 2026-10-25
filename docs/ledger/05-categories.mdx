@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 05. Propose merchants and categories" />
 
-We will ask a small local language model to propose a clean merchant name and one category for a draft. Code owns the category list and checks every answer. The model never sees an amount and never does a sum.
+We will ask a small local language model to propose a clean merchant name and one category for a draft.
+Code owns the category list and checks every answer.
+The model never sees an amount and never does a sum.
 
 **Source checkpoint:** `57829cc` · **Starting checkpoint:** `5eae853`
 
@@ -15,7 +17,8 @@ We will ask a small local language model to propose a clean merchant name and on
 
 - `src/features/ledger/categories.ts`: the fixed category list, the prompt, a JSON schema, and `parseProposal`.
 - `qvac-service/qvac-proposer.ts`: loads `LLAMA_3_2_1B_INST_Q4_0` with `modelType: "llm"` on first use and runs `completion`.
-- `qvac-service/server.ts`: a new `POST /v1/propose` route. Health now lists the LLM too.
+- `qvac-service/server.ts`: a new `POST /v1/propose` route.
+  Health now lists the LLM too.
 - `src/features/ledger/receipt-client.ts`: a `propose` call.
 - `src/features/ledger/receipt-inbox.tsx`: a **Propose merchant and category** button.
 
@@ -25,13 +28,20 @@ To compare with the checkpoint: `git diff 5eae853 57829cc`.
 
 ### 1. Fix the list in code
 
-Open `categories.ts`. `CATEGORIES` has nine entries, ending with `Other`. The model may pick one of them. It may not add one.
+Open `categories.ts`.
+`CATEGORIES` has nine entries, ending with `Other`.
+The model may pick one of them.
+It may not add one.
 
 ### 2. Send words, not money
 
-`proposalInputFromDraft` takes the raw merchant text and the item descriptions. That is all. No date, no amounts, no total. The model cannot get the arithmetic wrong if it never sees it.
+`proposalInputFromDraft` takes the raw merchant text and the item descriptions.
+That is all.
+No date, no amounts, no total.
+The model cannot get the arithmetic wrong if it never sees it.
 
-`buildProposalHistory` turns that into a system message and a user message. The system message asks for JSON with `merchant` and `category`.
+`buildProposalHistory` turns that into a system message and a user message.
+The system message asks for JSON with `merchant` and `category`.
 
 ### 3. Constrain, then still validate
 
@@ -48,7 +58,15 @@ sdk.completion({
 
 and reads `(await run.final).contentText`.
 
-The schema limits what the model can produce. We do not trust it alone. The server runs `parseProposal` on the raw text. Not JSON? Rejected. Category not on the list? Rejected, with the reason. We never map "Coffee" to "Eating out" for the model. Extra fields, like a `total`, are dropped.
+The schema limits what the model can produce.
+We do not trust it alone.
+The server runs `parseProposal` on the raw text.
+Not JSON?
+Rejected.
+Category not on the list?
+Rejected, with the reason.
+We never map "Coffee" to "Eating out" for the model.
+Extra fields, like a `total`, are dropped.
 
 The response carries the raw text and the result, so the UI can show exactly what the model said when it is wrong.
 
@@ -59,11 +77,17 @@ npm run qvac:service
 npm run dev
 ```
 
-Read the sample receipt, then select **Propose merchant and category**. The first call downloads and loads the LLM. On success you see **Proposal (not applied)** with the merchant, the category, and the model name. On a bad answer you see **Proposal rejected** and the raw output.
+Read the sample receipt, then select **Propose merchant and category**.
+The first call downloads and loads the LLM.
+On success you see **Proposal (not applied)** with the merchant, the category, and the model name.
+On a bad answer you see **Proposal rejected** and the raw output.
 
-Nothing is applied. The draft and the book are unchanged. Accepting is Chapter 7.
+Nothing is applied.
+The draft and the book are unchanged.
+Accepting is Chapter 7.
 
-We could not download models in the environment used to write this course (see Chapter 2). Every model answer in the tests below is hand-written and labelled as such.
+We could not download models in the environment used to write this course (see Chapter 2).
+Every model answer in the tests below is hand-written and labelled as such.
 
 ## Read the checkpoint implementation
 
@@ -432,7 +456,8 @@ describe("merchant and category proposals", () => {
 npm test -- src/features/ledger/categories.test.ts
 ```
 
-Expected: 5 tests pass. They prove the prompt holds no amounts, a good answer passes, an off-list category is rejected, prose is rejected, and an extra `total` is ignored.
+Expected: 5 tests pass.
+They prove the prompt holds no amounts, a good answer passes, an off-list category is rejected, prose is rejected, and an extra `total` is ignored.
 
 Full set:
 

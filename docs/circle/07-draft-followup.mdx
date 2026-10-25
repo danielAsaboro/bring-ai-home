@@ -7,11 +7,16 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 07. Draft an optional follow-up" />
 
-We will let a local LLM draft a short message from notes you already saved. The draft is editable, can be copied or discarded, and Circle never sends it.
+We will let a local LLM draft a short message from notes you already saved.
+The draft is editable, can be copied or discarded, and Circle never sends it.
 
-Sometimes you know what you want to say but not how to start. A local model can draft a few warm lines from the notes you saved.
+Sometimes you know what you want to say but not how to start.
+A local model can draft a few warm lines from the notes you saved.
 
-The draft is optional and hidden behind a disclosure. It is labelled as not sent and shows which notes it was based on. There is no send button. You copy it, change it, or throw it away.
+The draft is optional and hidden behind a disclosure.
+It is labelled as not sent and shows which notes it was based on.
+There is no send button.
+You copy it, change it, or throw it away.
 
 **Source checkpoint:** `5161006` · **Starting checkpoint:** `8072ad1`
 
@@ -32,15 +37,21 @@ Open Dev Raman, expand **Draft a follow-up (optional)**, type `good luck with th
 
 ### 2. Check it against the notes
 
-The label shows the model and how many saved notes it used. The prompt tells the model not to add facts, plans, or dates. A small model can still drift. You are the check: read it before you copy it.
+The label shows the model and how many saved notes it used.
+The prompt tells the model not to add facts, plans, or dates.
+A small model can still drift.
+You are the check: read it before you copy it.
 
 ### 3. Edit, copy, or discard
 
-Change the text. Select **Copy**, then send it yourself from your own messaging app if it still feels right. Or select **Discard**.
+Change the text.
+Select **Copy**, then send it yourself from your own messaging app if it still feels right.
+Or select **Discard**.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/server.mjs">
@@ -1111,7 +1122,9 @@ export type ServiceClient = ReturnType<typeof createServiceClient>;
 npm test -- src/features/circle/followup.test.ts src/features/circle/FollowUp.test.tsx
 ```
 
-Expected result: 2 test files pass, 4 tests pass. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+Expected result: 2 test files pass, 4 tests pass.
+These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code.
+They prove the app's rules, not live model inference.
 
 Run the broader checks from the app directory:
 

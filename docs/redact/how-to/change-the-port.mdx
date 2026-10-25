@@ -3,7 +3,8 @@ title: "How to change the service port or URL"
 description: "Run Redact's local QVAC service on a port other than 4317."
 ---
 
-This guide moves the local service to another port and points the app at it. Use it when 4317 is taken or you run two checkouts side by side.
+This guide moves the local service to another port and points the app at it.
+Use it when 4317 is taken or you run two checkouts side by side.
 
 ## Move the service
 
@@ -13,7 +14,8 @@ Set `REDACT_QVAC_PORT` when you start it:
 REDACT_QVAC_PORT=4417 npm run qvac:service
 ```
 
-The service always binds to `127.0.0.1`. It can't be reached from other machines.
+The service always binds to `127.0.0.1`.
+It can't be reached from other machines.
 
 For the sandboxed service, the same variable works:
 
@@ -23,7 +25,8 @@ REDACT_QVAC_PORT=4417 npm run qvac:service:offline
 
 ## Point the app at it
 
-The browser reads the service URL from `NEXT_PUBLIC_REDACT_QVAC_URL`. Next.js inlines `NEXT_PUBLIC_*` variables when it compiles, so set it on the command that builds or serves the app:
+The browser reads the service URL from `NEXT_PUBLIC_REDACT_QVAC_URL`.
+Next.js inlines `NEXT_PUBLIC_*` variables when it compiles, so set it on the command that builds or serves the app:
 
 ```bash
 NEXT_PUBLIC_REDACT_QVAC_URL=http://127.0.0.1:4417 npm run dev -- --port 3101

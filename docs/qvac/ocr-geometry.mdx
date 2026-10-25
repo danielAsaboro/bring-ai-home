@@ -4,24 +4,34 @@ description: "What QVAC's OCR bounding boxes mean, and what happens when a page 
 ---
 
 <Note>
-QVAC's OCR page says each block "may include `bbox`" but doesn't define it. This page was checked against `@qvac/sdk` **0.22.0** with the `OCR_LATIN` model on Redact's test images. Nearest official page: [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/).
+QVAC's OCR page says each block "may include `bbox`" but doesn't define it.
+This page was checked against `@qvac/sdk` **0.22.0** with the `OCR_LATIN` model on Redact's test images.
+Nearest official page: [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/).
 </Note>
 
 ## What a block is
 
-`ocr()` returns `blocks`, a list of `{ text, bbox?, confidence? }`. With `options: { paragraph: false }` each block is one detected text region, usually a line or a phrase. With `paragraph: true` nearby regions are merged.
+`ocr()` returns `blocks`, a list of `{ text, bbox?, confidence? }`.
+With `options: { paragraph: false }` each block is one detected text region, usually a line or a phrase.
+With `paragraph: true` nearby regions are merged.
 
-`confidence` is the recognizer's certainty about the **characters**, from 0 to 1. It says nothing about whether the text is sensitive. A clean name can read at 0.93 while a smudged email reads at 0.46.
+`confidence` is the recognizer's certainty about the **characters**, from 0 to 1.
+It says nothing about whether the text is sensitive.
+A clean name can read at 0.93 while a smudged email reads at 0.46.
 
 ## What `bbox` means
 
-`bbox` is `[x1, y1, x2, y2]` in **pixels of the image you passed in**: top-left corner, then bottom-right corner, with the origin at the image's top-left. It is not normalized to 0–1 and it is not in PDF points.
+`bbox` is `[x1, y1, x2, y2]` in **pixels of the image you passed in**: top-left corner, then bottom-right corner, with the origin at the image's top-left.
+It is not normalized to 0–1 and it is not in PDF points.
 
-So boxes are only meaningful against the exact raster OCR read. If your app shows a page at a different size, or OCR read a rotated copy, you must convert. Redact keeps one conversion function for this, `ocr-geometry.ts`, which puts each box's corners in order, clips it to the page, and drops it if it has a non-finite number or no area left (a box entirely off the page ends up with none).
+So boxes are only meaningful against the exact raster OCR read.
+If your app shows a page at a different size, or OCR read a rotated copy, you must convert.
+Redact keeps one conversion function for this, `ocr-geometry.ts`, which puts each box's corners in order, clips it to the page, and drops it if it has a non-finite number or no area left (a box entirely off the page ends up with none).
 
 ## Sideways pages
 
-`modelConfig.defaultRotationAngles: [90, 180, 270]` lets the recognizer try rotated crops. On SDK 0.22 that means a page scanned sideways often comes back as **many short vertical blocks**, one per word, each correctly read:
+`modelConfig.defaultRotationAngles: [90, 180, 270]` lets the recognizer try rotated crops.
+On SDK 0.22 that means a page scanned sideways often comes back as **many short vertical blocks**, one per word, each correctly read:
 
 ```text
 'Maya' [1441, 210, 1484, 303]
@@ -39,7 +49,8 @@ Rotating the image upright first and running OCR again gives whole lines instead
 'Please send the contract to 18 Willow Road.'
 ```
 
-That is why Redact detects a landscape page whose blocks are mostly taller than wide, retries it rotated 270°, maps the retry's boxes back into the original page's pixels, and keeps whichever result reads as fewer, longer lines. SDK 0.17 produced unreadable fragments in the same situation, so a simple "more characters wins" rule worked there and stopped working on 0.22.
+That is why Redact detects a landscape page whose blocks are mostly taller than wide, retries it rotated 270°, maps the retry's boxes back into the original page's pixels, and keeps whichever result reads as fewer, longer lines.
+SDK 0.17 produced unreadable fragments in the same situation, so a simple "more characters wins" rule worked there and stopped working on 0.22.
 
 ## Related
 

@@ -4,28 +4,36 @@ description: "The model cache, the worker home, and how to keep both inside your
 ---
 
 <Note>
-QVAC documents `cacheDirectory` but not the worker home. This page was checked against `@qvac/sdk` **0.22.0** source and a real Redact run on macOS. Nearest official pages: [Configuration](https://docs.qvac.tether.io/sdk/configuration/) and [Download lifecycle](https://docs.qvac.tether.io/sdk/models/download-lifecycle/).
+QVAC documents `cacheDirectory` but not the worker home.
+This page was checked against `@qvac/sdk` **0.22.0** source and a real Redact run on macOS.
+Nearest official pages: [Configuration](https://docs.qvac.tether.io/sdk/configuration/) and [Download lifecycle](https://docs.qvac.tether.io/sdk/models/download-lifecycle/).
 </Note>
 
-A QVAC app writes to two places on disk. Knowing which is which explains most "it worked yesterday" problems.
+A QVAC app writes to two places on disk.
+Knowing which is which explains most "it worked yesterday" problems.
 
 ## The model cache
 
-Model weights go to `cacheDirectory`. You set it in a QVAC config file, and point the SDK at that file with `QVAC_CONFIG_PATH` **before the first `import("@qvac/sdk")`**, because the configuration is read once when the SDK starts.
+Model weights go to `cacheDirectory`.
+You set it in a QVAC config file, and point the SDK at that file with `QVAC_CONFIG_PATH` **before the first `import("@qvac/sdk")`**, because the configuration is read once when the SDK starts.
 
 ```json title=".qvac/config.json"
 { "cacheDirectory": "/absolute/path/to/your-app/.qvac/models" }
 ```
 
-Each file is named by a content hash and the original file name, for example `5b8aae816570a09d_Qwen3-0.6B-Q4_0.gguf`. A later `loadModel()` with the same model constant checks this directory first and loads from disk without contacting the registry.
+Each file is named by a content hash and the original file name, for example `5b8aae816570a09d_Qwen3-0.6B-Q4_0.gguf`.
+A later `loadModel()` with the same model constant checks this directory first and loads from disk without contacting the registry.
 
 ## The worker home
 
-The SDK runs inference in a separate worker process. That worker keeps its own state under `<home>/.qvac/`: a `registry-corestore` database of model metadata, and a `tmp` directory for transient files such as decoded images.
+The SDK runs inference in a separate worker process.
+That worker keeps its own state under `<home>/.qvac/`: a `registry-corestore` database of model metadata, and a `tmp` directory for transient files such as decoded images.
 
-`<home>` is `SNAP_USER_COMMON` if that variable is set, otherwise `HOME`. So by default every QVAC app on your machine shares `~/.qvac`.
+`<home>` is `SNAP_USER_COMMON` if that variable is set, otherwise `HOME`.
+So by default every QVAC app on your machine shares `~/.qvac`.
 
-Setting `SNAP_USER_COMMON` to a directory inside the project gives each app its own worker home. Redact does this, so a broken or missing `~/.qvac` (for example a symlink to an unmounted drive) can't stop it:
+Setting `SNAP_USER_COMMON` to a directory inside the project gives each app its own worker home.
+Redact does this, so a broken or missing `~/.qvac` (for example a symlink to an unmounted drive) can't stop it:
 
 ```text
 redact/.qvac/
@@ -37,11 +45,14 @@ redact/.qvac/
         └── tmp/
 ```
 
-Both variables are environment settings for one process. Nothing is written to your shell profile.
+Both variables are environment settings for one process.
+Nothing is written to your shell profile.
 
 ## Clearing it
 
-Deleting `models/` forces a fresh download on the next load. Deleting `runtime-home/` resets registry metadata and temporary files. Neither touches your source code or documents.
+Deleting `models/` forces a fresh download on the next load.
+Deleting `runtime-home/` resets registry metadata and temporary files.
+Neither touches your source code or documents.
 
 ## Related
 

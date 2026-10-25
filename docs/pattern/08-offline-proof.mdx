@@ -9,9 +9,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will run proposal, gate, and similarity with the process denied network access by the operating system.
 
-A warm cache is not an offline proof. The proof needs three things: the cache really holds the models (not zero-byte leftovers from a blocked download), the operating system really denies this process the network, and the full path (propose, gate, replay, rank) still completes.
+A warm cache is not an offline proof.
+The proof needs three things: the cache really holds the models (not zero-byte leftovers from a blocked download), the operating system really denies this process the network, and the full path (propose, gate, replay, rank) still completes.
 
-On macOS, `sandbox-exec` with `qvac-service/offline.sb` denies all outbound connections except loopback. The check probes a public host first and only continues if the connection is denied; a DNS failure does not count.
+On macOS, `sandbox-exec` with `qvac-service/offline.sb` denies all outbound connections except loopback.
+The check probes a public host first and only continues if the connection is denied; a DNS failure does not count.
 
 **Source checkpoint:** `55ff2f6` · **Starting checkpoint:** `675f040`
 
@@ -48,15 +50,19 @@ The JSON shows `"network": "network-denied"`, the raw proposal, the gate result,
 npm run qvac:service:offline
 ```
 
-With `npm run dev` in another terminal, propose, apply, restore, and find similar patterns. The browser reaches the service over loopback, which the profile allows.
+With `npm run dev` in another terminal, propose, apply, restore, and find similar patterns.
+The browser reaches the service over loopback, which the profile allows.
 
 ### 4. On Linux
 
-`sandbox-exec` is macOS only. On Linux, a network namespace such as `unshare -rn` gives the same process-level denial, but it also removes loopback, so run the proof script rather than the service there. This variant was not verified in the course build.
+`sandbox-exec` is macOS only.
+On Linux, a network namespace such as `unshare -rn` gives the same process-level denial, but it also removes loopback, so run the proof script rather than the service there.
+This variant was not verified in the course build.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -232,7 +238,8 @@ export function classifyProbe(result: { ok: true } | { ok: false; code: string |
 npm test -- qvac-service/offline-proof.test.ts
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -242,7 +249,10 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `55ff2f6`, lint and typecheck pass and the full suite passes 36 tests. The guard tests are deterministic. Our build environment left a zero-byte Llama file after a blocked download; the cache check refuses exactly that. The sandbox proof itself must run on your macOS machine with a warmed cache.
+**Receipt:** at `55ff2f6`, lint and typecheck pass and the full suite passes 36 tests.
+The guard tests are deterministic.
+Our build environment left a zero-byte Llama file after a blocked download; the cache check refuses exactly that.
+The sandbox proof itself must run on your macOS machine with a warmed cache.
 
 Then record your checkpoint:
 
@@ -257,4 +267,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] Your proof printed `network-denied` and a gated proposal.
 - [ ] You can explain why a DNS failure is not a network-denial proof.
 
-This completes the Pattern course. Every proposal stayed a proposal: the app checked it, and a person applied it.
+This completes the Pattern course.
+Every proposal stayed a proposal: the app checked it, and a person applied it.

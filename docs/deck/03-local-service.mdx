@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 03. Add the local service boundary" />
 
-The browser cannot load native models. A small Node service on the same computer can. This chapter adds that service and a **Local assistant** panel that searches your notes.
+The browser cannot load native models.
+A small Node service on the same computer can.
+This chapter adds that service and a **Local assistant** panel that searches your notes.
 
-The rule for the whole course: the model proposes, the app decides, and a person confirms. The service never writes to a deck.
+The rule for the whole course: the model proposes, the app decides, and a person confirms.
+The service never writes to a deck.
 
 **Source checkpoint:** `0b27861` · **Starting checkpoint:** `16fa854`
 
@@ -32,7 +35,8 @@ npm run qvac:service
 npm run dev
 ```
 
-The service prints `Deck QVAC service on http://127.0.0.1:4321`. It binds to `127.0.0.1`, so other machines cannot reach it.
+The service prints `Deck QVAC service on http://127.0.0.1:4321`.
+It binds to `127.0.0.1`, so other machines cannot reach it.
 
 ### 2. Check health before the models are ready
 
@@ -60,11 +64,15 @@ It prints `403`.
 
 ### 4. Search from the deck
 
-With the index from chapter 02, type `unattended kettles` into **Search notes**. Each passage shows its note, section, and score. Stop the service and search again: the panel says `The local QVAC service is not running`, and the deck is unchanged.
+With the index from chapter 02, type `unattended kettles` into **Search notes**.
+Each passage shows its note, section, and score.
+Stop the service and search again: the panel says `The local QVAC service is not running`, and the deck is unchanged.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -872,7 +880,8 @@ export function createAssistClient(baseUrl = SERVICE_URL, fetchImpl: typeof fetc
 npm test -- qvac-service/server.test.ts src/features/deck/NotesPanel.test.tsx
 ```
 
-Expected result: 2 test files pass, 6 tests pass. The retriever and client in these tests are fixtures that return hand-written values.
+Expected result: 2 test files pass, 6 tests pass.
+The retriever and client in these tests are fixtures that return hand-written values.
 
 Run the broader checks from the app directory:
 

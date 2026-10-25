@@ -7,7 +7,10 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 06. Measure and tune false positives" />
 
-We will stop guessing whether a watcher is good. A person labelled each of the twelve sample frames for "a parcel left by the gate". Lookout scores a watcher against those labels: true positives, false positives, false negatives, precision, and recall. Then we tune one ordinary knob and measure again.
+We will stop guessing whether a watcher is good.
+A person labelled each of the twelve sample frames for "a parcel left by the gate".
+Lookout scores a watcher against those labels: true positives, false positives, false negatives, precision, and recall.
+Then we tune one ordinary knob and measure again.
 
 **Source checkpoint:** `3cb1fa6` · **Starting checkpoint:** `5c3b3ce`
 
@@ -28,7 +31,10 @@ To compare with the starting checkpoint: `git diff 5c3b3ce 3cb1fa6`.
 
 ### 1. Read the answer key
 
-Open `measure.ts`. Only `front-gate-3` is labelled true. The courier frame is false: the box is still in their hands. A missing or unclear verdict counts as no alert, so a silent model cannot score well by saying nothing.
+Open `measure.ts`.
+Only `front-gate-3` is labelled true.
+The courier frame is false: the box is still in their hands.
+A missing or unclear verdict counts as no alert, so a silent model cannot score well by saying nothing.
 
 ### 2. Measure the real model
 
@@ -37,27 +43,38 @@ git checkout 3cb1fa6
 npm run qvac:measure
 ```
 
-The script checks every frame, prints the score, and writes `.qvac/measure-<time>.json` with each raw reply. That file is your receipt. We could not record one in our build container because the model registry is blocked there, so this page shows no measured numbers.
+The script checks every frame, prints the score, and writes `.qvac/measure-<time>.json` with each raw reply.
+That file is your receipt.
+We could not record one in our build container because the model registry is blocked there, so this page shows no measured numbers.
 
 ### 3. Tune one knob
 
-A parcel that has been left does not move. The courier and the cat do. Run again with a still-scene limit:
+A parcel that has been left does not move.
+The courier and the cat do.
+Run again with a still-scene limit:
 
 ```bash
 npm run qvac:measure -- 0.2
 ```
 
-Compare the two receipts. In the app, the same knob is **Skip frames with motion above (%)** on each active watcher.
+Compare the two receipts.
+In the app, the same knob is **Skip frames with motion above (%)** on each active watcher.
 
 ### 4. Know what tuning costs
 
-Read `measure.test.ts`. With fixture verdicts that say yes to the courier, the parcel, and the cat, a 20% limit removes both false positives and keeps the parcel. A 5% limit also removes the parcel: recall drops to 0. Over-tuning hides real events. False negatives can matter more than false alarms, so always read both columns.
+Read `measure.test.ts`.
+With fixture verdicts that say yes to the courier, the parcel, and the cat, a 20% limit removes both false positives and keeps the parcel.
+A 5% limit also removes the parcel: recall drops to 0.
+Over-tuning hides real events.
+False negatives can matter more than false alarms, so always read both columns.
 
-The **Reviewed** line on each watcher counts your Confirm and Dismiss decisions. That is a second, live measurement from real use.
+The **Reviewed** line on each watcher counts your Confirm and Dismiss decisions.
+That is a second, live measurement from real use.
 
 ## Read the checkpoint implementation
 
-These are complete files from `3cb1fa6`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `3cb1fa6`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -904,9 +921,11 @@ Run the focused tests for this chapter:
 npm test -- src/features/lookout/measure.test.ts
 ```
 
-Expected result: 1 test file passes, 4 tests pass. The verdicts are hand-written fixtures and say so in the code; they are not a recorded model run.
+Expected result: 1 test file passes, 4 tests pass.
+The verdicts are hand-written fixtures and say so in the code; they are not a recorded model run.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -929,4 +948,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] You have at least two `.qvac/measure-*.json` receipts to compare.
 - [ ] You can name one false positive the motion limit removed, and the limit at which recall fell.
 
-Next: [07. Hand inference to a stronger device](/docs/lookout/07-delegated-inference)
+Next: [07.
+Hand inference to a stronger device](/docs/lookout/07-delegated-inference)

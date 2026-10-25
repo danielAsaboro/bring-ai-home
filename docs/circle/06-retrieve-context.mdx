@@ -7,11 +7,15 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 06. Retrieve context before a meeting" />
 
-We will embed what you already saved about a person and rank it against what the meeting is about. Open promises always show, with or without a model.
+We will embed what you already saved about a person and rank it against what the meeting is about.
+Open promises always show, with or without a model.
 
 Before you see someone, you want the few notes that matter today, not their whole timeline.
 
-`GTE_LARGE_FP16` turns the meeting topic and each saved note into vectors. Plain code ranks them by cosine similarity and drops weak matches. Only confirmed notes are searchable. Open reminders always show first, because they need no model at all.
+`GTE_LARGE_FP16` turns the meeting topic and each saved note into vectors.
+Plain code ranks them by cosine similarity and drops weak matches.
+Only confirmed notes are searchable.
+Open reminders always show first, because they need no model at all.
 
 **Source checkpoint:** `8072ad1` · **Starting checkpoint:** `f0e0c0c`
 
@@ -28,23 +32,31 @@ Before you see someone, you want the few notes that matter today, not their whol
 
 ### 1. Open a card
 
-With the service and app running, open Dev Raman. **Before we meet** shows `Still open: Ask how the meetup talk went`. That line came from the reminders list, not from a model.
+With the service and app running, open Dev Raman.
+**Before we meet** shows `Still open: Ask how the meetup talk went`.
+That line came from the reminders list, not from a model.
 
 ### 2. Gather context
 
-Type `his talk` and select **Gather context**. The first call downloads the embedding model. Each result shows its score and the model name.
+Type `his talk` and select **Gather context**.
+The first call downloads the embedding model.
+Each result shows its score and the model name.
 
 ### 3. Read the ranking
 
-`rankContext` keeps at most three passages with a score of at least `0.3`. A low score means nothing close enough. The card then says so, instead of showing a weak guess.
+`rankContext` keeps at most three passages with a score of at least `0.3`.
+A low score means nothing close enough.
+The card then says so, instead of showing a weak guess.
 
 ### 4. Try someone new
 
-Inès Moreau has no timeline entries. The service returns no matches with `model: "none"` and never loads a model.
+Inès Moreau has no timeline entries.
+The service returns no matches with `model: "none"` and never loads a model.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/server.mjs">
@@ -1075,7 +1087,10 @@ export type ServiceClient = ReturnType<typeof createServiceClient>;
 npm test -- src/features/circle/context.test.ts src/features/circle/BeforeWeMeet.test.tsx
 ```
 
-Expected result: 2 test files pass, 5 tests pass. The ranking test uses tiny hand-made 3-d vectors, not GTE embeddings. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+Expected result: 2 test files pass, 5 tests pass.
+The ranking test uses tiny hand-made 3-d vectors, not GTE embeddings.
+These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code.
+They prove the app's rules, not live model inference.
 
 Run the broader checks from the app directory:
 

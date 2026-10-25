@@ -3,39 +3,62 @@ title: "About local OCR"
 description: "How Redact turns a page image into text with positions, and why the positions matter more than the text."
 ---
 
-A redaction is a rectangle. To suggest one, Redact needs to know not just *what* a page says but *where* it says it. That is the job OCR does in Redact, and it explains most of the design around it.
+A redaction is a rectangle.
+To suggest one, Redact needs to know not just *what* a page says but *where* it says it.
+That is the job OCR does in Redact, and it explains most of the design around it.
 
 ## Two stages, two models
 
-QVAC's OCR runs a two-stage pipeline. A **detector** (CRAFT) finds regions that look like text. A **recognizer** (`latin_g2` for Latin scripts) reads the characters inside each region.
+QVAC's OCR runs a two-stage pipeline.
+A **detector** (CRAFT) finds regions that look like text.
+A **recognizer** (`latin_g2` for Latin scripts) reads the characters inside each region.
 
-Redact loads both through one constant, `OCR_LATIN`, about 98 MB on disk. See [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/) for QVAC's overview.
+Redact loads both through one constant, `OCR_LATIN`, about 98 MB on disk.
+See [OCR](https://docs.qvac.tether.io/sdk/ai-capabilities/ocr/) for QVAC's overview.
 
-Detection dominates the cost. On an Apple Silicon Mac, detection took about 19 seconds and recognition about 1 second for one chat screenshot. That is why a multi-page PDF feels slow and why Redact shows "Reading page N of M" while it works.
+Detection dominates the cost.
+On an Apple Silicon Mac, detection took about 19 seconds and recognition about 1 second for one chat screenshot.
+That is why a multi-page PDF feels slow and why Redact shows "Reading page N of M" while it works.
 
 ## Evidence, not answers
 
-Each result block has text, a box, and a recognition confidence. Redact calls `ocr()` with `paragraph: false` so blocks stay small, one line or phrase each. Smaller blocks give tighter rectangles and let a reviewer accept the phone line without also covering the sentence above it.
+Each result block has text, a box, and a recognition confidence.
+Redact calls `ocr()` with `paragraph: false` so blocks stay small, one line or phrase each.
+Smaller blocks give tighter rectangles and let a reviewer accept the phone line without also covering the sentence above it.
 
-Recognition confidence is easy to misread. It measures how clearly the characters were read, not whether they matter. The fictional test email comes back as `maya.chen@example com` with confidence 0.46: low confidence, high sensitivity. Redact keeps the two ideas apart and never uses OCR confidence to decide what to hide.
+Recognition confidence is easy to misread.
+It measures how clearly the characters were read, not whether they matter.
+The fictional test email comes back as `maya.chen@example com` with confidence 0.46: low confidence, high sensitivity.
+Redact keeps the two ideas apart and never uses OCR confidence to decide what to hide.
 
-OCR is also imperfect in ways the reviewer must see. Missing punctuation, merged words and garbled fragments are shown as they are, because a cleaned-up version would hide the evidence a person needs to judge.
+OCR is also imperfect in ways the reviewer must see.
+Missing punctuation, merged words and garbled fragments are shown as they are, because a cleaned-up version would hide the evidence a person needs to judge.
 
 ## Boxes belong to an exact image
 
-A box is `[x1, y1, x2, y2]` in pixels of the image OCR read ([OCR boxes and rotation](/docs/qvac/ocr-geometry)). The browser shows the page at a different size, and marks are stored as percentages of the page. So Redact converts once, in `ocr-geometry.ts`, against the width and height of the exact raster it sent; the service refuses a request whose PNG doesn't match those dimensions.
+A box is `[x1, y1, x2, y2]` in pixels of the image OCR read ([OCR boxes and rotation](/docs/qvac/ocr-geometry)).
+The browser shows the page at a different size, and marks are stored as percentages of the page.
+So Redact converts once, in `ocr-geometry.ts`, against the width and height of the exact raster it sent; the service refuses a request whose PNG doesn't match those dimensions.
 
-The conversion orders the corners, clips the box to the page, and drops any box that has non-finite numbers or ends up with no area. A wrong outline is worse than none, because a reviewer would trust it.
+The conversion orders the corners, clips the box to the page, and drops any box that has non-finite numbers or ends up with no area.
+A wrong outline is worse than none, because a reviewer would trust it.
 
 ## Sideways pages
 
-Phones and scanners produce rotated pages. With rotation angles enabled, QVAC 0.22's recognizer reads sideways words in place, but returns one tall block per word. A name or account number is then spread across several blocks, which the language model can't reason about well.
+Phones and scanners produce rotated pages.
+With rotation angles enabled, QVAC 0.22's recognizer reads sideways words in place, but returns one tall block per word.
+A name or account number is then spread across several blocks, which the language model can't reason about well.
 
-Redact detects this case (a landscape page whose blocks are mostly taller than wide), runs OCR again on an upright copy, maps the new boxes back, and keeps whichever result reads as fewer, longer lines. On 0.17 the sideways read was poor, so "more readable characters wins" was enough; on 0.22 that rule kept the fragments and the rotated test case fell to 0.29 F1. Weighting characters by average block length restored it. The episode is a good example of why a model upgrade is a migration that needs its evaluation re-run ([How to upgrade the SDK](/docs/redact/how-to/upgrade-the-sdk)).
+Redact detects this case (a landscape page whose blocks are mostly taller than wide), runs OCR again on an upright copy, maps the new boxes back, and keeps whichever result reads as fewer, longer lines.
+On 0.17 the sideways read was poor, so "more readable characters wins" was enough; on 0.22 that rule kept the fragments and the rotated test case fell to 0.29 F1.
+Weighting characters by average block length restored it.
+The episode is a good example of why a model upgrade is a migration that needs its evaluation re-run ([How to upgrade the SDK](/docs/redact/how-to/upgrade-the-sdk)).
 
 ## The alternative
 
-A vision-language model could, in principle, read the page and name sensitive fields in one step. It would also make it harder to show *why* a box is where it is. Separate OCR keeps a plain chain: these pixels produced this text, this text produced this suggestion.
+A vision-language model could, in principle, read the page and name sensitive fields in one step.
+It would also make it harder to show *why* a box is where it is.
+Separate OCR keeps a plain chain: these pixels produced this text, this text produced this suggestion.
 
 ## Related
 

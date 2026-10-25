@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 02. Ingest private notes for retrieval" />
 
-The facts behind a launch deck live in private notes: a strategy memo, a diary study, a trial log. They are exactly what you should not paste into a public deck generator.
+The facts behind a launch deck live in private notes: a strategy memo, a diary study, a trial log.
+They are exactly what you should not paste into a public deck generator.
 
-This chapter adds QVAC for the first time, in a standalone script. It splits each note into sections, embeds them with `GTE_LARGE_FP16` on your machine, and writes a small index. Nothing in the app uses it yet.
+This chapter adds QVAC for the first time, in a standalone script.
+It splits each note into sections, embeds them with `GTE_LARGE_FP16` on your machine, and writes a small index.
+Nothing in the app uses it yet.
 
 **Source checkpoint:** `16fa854` · **Starting checkpoint:** `fbc58e0`
 
@@ -40,7 +43,9 @@ chmod +x node_modules/bare-runtime-linux-x64/bin/bare
 
 ### 2. Look at the sections
 
-Open `public/test-files/deck/diary-study-notes.md`. Each `##` heading becomes one chunk with a stable id such as `diary-study-notes#unattended-boiling`. That id is what every later citation points to.
+Open `public/test-files/deck/diary-study-notes.md`.
+Each `##` heading becomes one chunk with a stable id such as `diary-study-notes#unattended-boiling`.
+That id is what every later citation points to.
 
 ### 3. Ingest the notes
 
@@ -48,15 +53,20 @@ Open `public/test-files/deck/diary-study-notes.md`. Each `##` heading becomes on
 npm run qvac:ingest-notes
 ```
 
-The first run downloads `GTE_LARGE_FP16` into `.qvac/models`. It then prints the model, the vector dimensions, `notes: 3`, `chunks: 9`, the elapsed time, and the index path. Record those numbers from your own machine.
+The first run downloads `GTE_LARGE_FP16` into `.qvac/models`.
+It then prints the model, the vector dimensions, `notes: 3`, `chunks: 9`, the elapsed time, and the index path.
+Record those numbers from your own machine.
 
 ### 4. Know which boundary failed
 
-If the command sits at download, that is a network problem, not a code problem. If it fails with a vector count message, the embedder returned the wrong batch size and `buildNotesIndex` refused to write a misaligned index.
+If the command sits at download, that is a network problem, not a code problem.
+If it fails with a vector count message, the embedder returned the wrong batch size and `buildNotesIndex` refused to write a misaligned index.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title=".gitignore">
@@ -473,7 +483,8 @@ export function searchNotes(
 npm test -- src/features/deck/notes-index.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. The vectors in this test are three-dimensional fixtures written by hand, not model output.
+Expected result: 1 test file passes, 3 tests pass.
+The vectors in this test are three-dimensional fixtures written by hand, not model output.
 
 Run the broader checks from the app directory:
 

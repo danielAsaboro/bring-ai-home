@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 01. Run the Chronicle starter" />
 
-We will run the Chronicle starter, look at a small fictional family archive, and record a clean baseline. Every later chapter starts from this commit.
+We will run the Chronicle starter, look at a small fictional family archive, and record a clean baseline.
+Every later chapter starts from this commit.
 
-Chronicle is a private family archive shaped like a flip magazine. The starter has no AI in it. That is on purpose. We add local AI one step at a time, and the app must keep working without it.
+Chronicle is a private family archive shaped like a flip magazine.
+The starter has no AI in it.
+That is on purpose.
+We add local AI one step at a time, and the app must keep working without it.
 
 **Source checkpoint:** `c723afb` · **Starting checkpoint:** `c082ba9`
 
@@ -23,7 +27,8 @@ This chapter adds a fictional sample archive and lists it on the home page.
 | `src/app/page.tsx` | Render the archive as an ordered list |
 | `public/test-files/chronicle/*.png` | Three fictional drawn photos used in later chapters |
 
-Every name, place, and photo is invented. Keep real family media out of the repository.
+Every name, place, and photo is invented.
+Keep real family media out of the repository.
 
 ## Build and observe
 
@@ -38,19 +43,29 @@ npm ci
 npm run dev
 ```
 
-Each lesson checkpoint holds the app at the repository root. The finished app is the tip of branch `course/chronicle-qvac`.
+Each lesson checkpoint holds the app at the repository root.
+The finished app is the tip of branch `course/chronicle-qvac`.
 
-Use Node 22.22.2 or newer. Open `http://localhost:3000`.
+Use Node 22.22.2 or newer.
+Open `http://localhost:3000`.
 
 ### 2. Read the archive
 
-You should see six memories, oldest first. "First tomatoes" (1995) is at the top. "School band concert" (2013) is at the bottom.
+You should see six memories, oldest first.
+"First tomatoes" (1995) is at the top.
+"School band concert" (2013) is at the bottom.
 
-Open `src/features/chronicle/archive.ts`. Each memory has a title, a date, people, and a caption. A person wrote each of these. Later chapters may propose new text, but they never overwrite these fields.
+Open `src/features/chronicle/archive.ts`.
+Each memory has a title, a date, people, and a caption.
+A person wrote each of these.
+Later chapters may propose new text, but they never overwrite these fields.
 
 ### 3. Look at the sample photos
 
-Open the three PNG files in `public/test-files/chronicle`. They are simple drawings: a beach picnic, a birthday cake, and a snowy house. They are fictional test media. We use them because they are safe to share and easy to judge by eye.
+Open the three PNG files in `public/test-files/chronicle`.
+They are simple drawings: a beach picnic, a birthday cake, and a snowy house.
+They are fictional test media.
+We use them because they are safe to share and easy to judge by eye.
 
 ### 4. Write down the rule for this course
 
@@ -60,7 +75,8 @@ We will test this rule in every chapter.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="src/features/chronicle/archive.ts">
@@ -199,7 +215,9 @@ npm test -- src/features/chronicle/archive.test.ts src/app/page.test.tsx
 
 Expected result: 2 test files pass, 4 tests pass.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 03. Transcribe a spoken memory" />
 
-We will record a short spoken memory and turn it into text with a local Whisper model. The result is a proposed memory draft, never a saved memory.
+We will record a short spoken memory and turn it into text with a local Whisper model.
+The result is a proposed memory draft, never a saved memory.
 
-Families often remember out loud. A transcript keeps that context. It can also mishear names, so a person checks it before anything enters the archive.
+Families often remember out loud.
+A transcript keeps that context.
+It can also mishear names, so a person checks it before anything enters the archive.
 
 **Source checkpoint:** `e401734` · **Starting checkpoint:** `25c5e52`
 
@@ -25,11 +28,14 @@ Families often remember out loud. A transcript keeps that context. It can also m
 
 ### 1. Record your own memory
 
-We do not ship a voice recording. Record about ten seconds with any recorder and save it as WAV or MP3. Read this fictional line:
+We do not ship a voice recording.
+Record about ten seconds with any recorder and save it as WAV or MP3.
+Read this fictional line:
 
 > We took the night train north and played cards until the conductor came.
 
-Keep the file outside the repository, or add it to `.gitignore`. A voice is personal data.
+Keep the file outside the repository, or add it to `.gitignore`.
+A voice is personal data.
 
 ### 2. Run the transcription
 
@@ -37,19 +43,28 @@ Keep the file outside the repository, or add it to `.gitignore`. A voice is pers
 npm run qvac:transcribe-smoke -- ~/Downloads/my-memory.wav
 ```
 
-The first run downloads the Whisper model. Read `transcript` and `segments`. Each segment has `startMs` and `endMs`. Check whether the model heard the words you said.
+The first run downloads the Whisper model.
+Read `transcript` and `segments`.
+Each segment has `startMs` and `endMs`.
+Check whether the model heard the words you said.
 
 ### 3. Read the lifecycle
 
-The script uses the same order as Chapter 2: config, then import, then `loadModel`, `transcribe`, `unloadModel`, and `close`. `metadata: true` makes `transcribe` return segments instead of one string. We keep the segments so a person can find where a word was said.
+The script uses the same order as Chapter 2: config, then import, then `loadModel`, `transcribe`, `unloadModel`, and `close`.
+`metadata: true` makes `transcribe` return segments instead of one string.
+We keep the segments so a person can find where a word was said.
 
 ### 4. See why silence is an error
 
-Open `qvac-service/transcript.ts`. `buildMemoryDraft` throws `No speech was recognised in this recording` when every segment is empty. It never invents text to fill a draft. The draft always has `status: "proposed"`.
+Open `qvac-service/transcript.ts`.
+`buildMemoryDraft` throws `No speech was recognised in this recording` when every segment is empty.
+It never invents text to fill a draft.
+The draft always has `status: "proposed"`.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/transcribe-memory-smoke.mjs">
@@ -243,7 +258,9 @@ npm test -- qvac-service/transcript.test.ts
 
 Expected result: 1 test file passes, 3 tests pass.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

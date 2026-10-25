@@ -7,13 +7,17 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 03. Start the local QVAC service" />
 
-In this lesson we will start the service that sits between the browser and QVAC. The browser can't run the native OCR engine itself, so it will send each page to this process on your own machine. At this checkpoint the service answers, checks its input, and admits honestly that it can't analyse anything yet.
+In this lesson we will start the service that sits between the browser and QVAC.
+The browser can't run the native OCR engine itself, so it will send each page to this process on your own machine.
+At this checkpoint the service answers, checks its input, and admits honestly that it can't analyse anything yet.
 
 **Checkpoint:** [`242f480`](https://github.com/danielAsaboro/bring-ai-home/commit/242f4808c8d7122c920d59962c293d352e5722a3), starting from `731eb40`
 
 ## 1. Apply the lesson patch
 
-Stop any running app or script. Download [`03-local-service.patch`](/docs/downloads/redact/03-local-service.patch) into your Downloads folder. From the parent `redact-course` folder:
+Stop any running app or script.
+Download [`03-local-service.patch`](/docs/downloads/redact/03-local-service.patch) into your Downloads folder.
+From the parent `redact-course` folder:
 
 ```bash
 git apply --check ~/Downloads/03-local-service.patch
@@ -50,7 +54,8 @@ curl http://127.0.0.1:4317/health
 {"service":"ready","models":[{"kind":"ocr","id":"qvac-ocr-latin","state":"not_loaded"},{"kind":"reasoning","id":"not-configured","state":"not_loaded"}],"busy":false}
 ```
 
-Notice that the service is `ready` while the OCR model is `not_loaded` and there is no reasoning model at all. A running process and a loaded model are different things, and the service reports them separately.
+Notice that the service is `ready` while the OCR model is `not_loaded` and there is no reasoning model at all.
+A running process and a loaded model are different things, and the service reports them separately.
 
 ## 4. Send a bad request
 
@@ -78,7 +83,9 @@ curl -X POST http://127.0.0.1:4317/v1/analyze-page \
 {"error":{"code":"analyzer_unavailable","message":"Local analysis is unavailable"}}
 ```
 
-This request passes validation and reaches the analyzer, which at this checkpoint is a deliberate placeholder. Instead of inventing OCR results, it says it's unavailable. We connect the real model in the next lesson.
+This request passes validation and reaches the analyzer, which at this checkpoint is a deliberate placeholder.
+Instead of inventing OCR results, it says it's unavailable.
+We connect the real model in the next lesson.
 
 ## 6. Try a request from a website
 
@@ -90,7 +97,8 @@ curl -H "Origin: https://example.com" http://127.0.0.1:4317/health
 {"error":{"code":"origin_forbidden","message":"Origin is not allowed"}}
 ```
 
-Only pages served from `localhost` or `127.0.0.1` may call the service from a browser. A website you happen to have open can't use it.
+Only pages served from `localhost` or `127.0.0.1` may call the service from a browser.
+A website you happen to have open can't use it.
 
 Stop the service with `Ctrl+C`.
 
@@ -116,10 +124,12 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 
 ## What we built
 
-A local boundary with clear rules: it listens only on your machine, accepts only localhost pages, validates every request, and says "unavailable" rather than guessing. The app now has somewhere safe to send its pages.
+A local boundary with clear rules: it listens only on your machine, accepts only localhost pages, validates every request, and says "unavailable" rather than guessing.
+The app now has somewhere safe to send its pages.
 
 - Every file in this checkpoint: [`redact/` at `242f480`](https://github.com/danielAsaboro/bring-ai-home/tree/242f4808c8d7122c920d59962c293d352e5722a3/redact)
 - [About the local service](/docs/redact/concepts/local-service)
 - All routes and errors: [Local service API](/docs/redact/reference/service-api)
 
-Next: [04. Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr)
+Next: [04.
+Send uploaded pages to local OCR](/docs/redact/tutorials/04-connect-ocr)

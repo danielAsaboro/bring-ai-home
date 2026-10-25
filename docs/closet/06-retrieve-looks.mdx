@@ -7,9 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 06. Retrieve looks by occasion" />
 
-You remember the occasion, not the title you gave the look. "Something for a wet office day" should find **Rainy commute** even though no word matches.
+You remember the occasion, not the title you gave the look.
+"Something for a wet office day" should find **Rainy commute** even though no word matches.
 
-We embed each look and the query with `GTE_LARGE_FP16` and rank by cosine similarity. The threshold and the number of results are Closet's decision.
+We embed each look and the query with `GTE_LARGE_FP16` and rank by cosine similarity.
+The threshold and the number of results are Closet's decision.
 
 **Source checkpoint:** `b43b940` · **Starting checkpoint:** `f3fee74`
 
@@ -29,11 +31,14 @@ To compare with the previous checkpoint: `git diff f3fee74 b43b940`.
 
 ### 1. Decide what a look means
 
-`lookText` builds the embedded text from fields a person wrote: the title, the occasion, and the colours and names of the garments. Nothing a model proposed earlier goes in unless a person saved it.
+`lookText` builds the embedded text from fields a person wrote: the title, the occasion, and the colours and names of the garments.
+Nothing a model proposed earlier goes in unless a person saved it.
 
 ### 2. Rank under the app's rules
 
-`rankLooks` drops anything below `minScore` (0.35) and returns at most three. Mismatched vector lengths throw instead of producing a wrong score. The client also refuses a response with the wrong number of vectors.
+`rankLooks` drops anything below `minScore` (0.35) and returns at most three.
+Mismatched vector lengths throw instead of producing a wrong score.
+The client also refuses a response with the wrong number of vectors.
 
 ### 3. Try it
 
@@ -42,15 +47,20 @@ npm run qvac:service
 npm run dev
 ```
 
-On the feed, search `wet office day`. The result line says `GTE_LARGE_FP16 · local embeddings` and shows scores. Try a query that matches nothing; the app says no saved look is close enough instead of returning the least-bad one.
+On the feed, search `wet office day`.
+The result line says `GTE_LARGE_FP16 · local embeddings` and shows scores.
+Try a query that matches nothing; the app says no saved look is close enough instead of returning the least-bad one.
 
 ### 4. Stop the service
 
-Search again. The line says `keyword match` and why. The fallback is plain word overlap, and it is labelled so you never mistake it for semantic search.
+Search again.
+The line says `keyword match` and why.
+The fallback is plain word overlap, and it is labelled so you never mistake it for semantic search.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="src/features/closet/look-search.ts">
@@ -295,7 +305,9 @@ describe("look search", () => {
 npm test -- src/features/closet/look-search.test.ts src/features/closet/LookSearch.test.tsx
 ```
 
-Expected result: 2 test files pass, 6 tests pass. The vectors in these tests are hand-picked fixtures so the expected order is obvious. They are not model embeddings.
+Expected result: 2 test files pass, 6 tests pass.
+The vectors in these tests are hand-picked fixtures so the expected order is obvious.
+They are not model embeddings.
 
 Run the broader checks from the app directory:
 

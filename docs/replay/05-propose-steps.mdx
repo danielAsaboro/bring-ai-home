@@ -9,16 +9,22 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 Now a transcript and a few screen notes become a list of proposed frames.
 
-JSON Schema makes the answer parseable. It does not make it true. A model can produce perfect JSON for a step nobody said. So every proposed step must quote the narration, and plain code checks that quote before the step is shown.
+JSON Schema makes the answer parseable.
+It does not make it true.
+A model can produce perfect JSON for a step nobody said.
+So every proposed step must quote the narration, and plain code checks that quote before the step is shown.
 
 **Source checkpoint:** `01890a7` · **Starting checkpoint:** `41aaa15`
 
 ## What changes
 
-- `src/features/replay/proposals.ts`: `STEPS_JSON_SCHEMA`, the prompt, and `parseStepProposals`, the deterministic gate. It rejects non-JSON, empty or long titles, duplicates, and any step whose quote is not in the transcript, with a reason for each.
-- `src/features/replay/fixtures/model-output.fixture.ts`: a hand-written string shaped like model output, with one invented step and one duplicate. Labelled as a fixture.
+- `src/features/replay/proposals.ts`: `STEPS_JSON_SCHEMA`, the prompt, and `parseStepProposals`, the deterministic gate.
+  It rejects non-JSON, empty or long titles, duplicates, and any step whose quote is not in the transcript, with a reason for each.
+- `src/features/replay/fixtures/model-output.fixture.ts`: a hand-written string shaped like model output, with one invented step and one duplicate.
+  Labelled as a fixture.
 - `qvac-service/qvac-models.ts`: `createQvacDrafter` runs `LLAMA_3_2_1B_INST_Q4_0` with `responseFormat: { type: "json_schema" }` and returns `(await run.final).contentText`.
-- `/v1/propose-steps` returns the raw text and the gated result. Unusable output is `422 unusable_output`.
+- `/v1/propose-steps` returns the raw text and the gated result.
+  Unusable output is `422 unusable_output`.
 - The panel shows proposals with their quotes as checkboxes, a "held back" list with reasons, and **Add N selected frames**.
 
 To compare with the previous checkpoint: `git diff 41aaa15 01890a7`.
@@ -33,15 +39,22 @@ npm run qvac:service
 npm run dev
 ```
 
-Transcribe your recording, optionally read the screenshot, then click **Propose frames**. The first call downloads the LLM.
+Transcribe your recording, optionally read the screenshot, then click **Propose frames**.
+The first call downloads the LLM.
 
 ### 2. Read the quotes
 
-Each proposal shows the words it claims to come from. Open **proposals were held back** to see what the gate refused and why. If your run holds nothing back, that is fine. The gate's behaviour is proven by the fixture test, not by hoping the model fails on camera.
+Each proposal shows the words it claims to come from.
+Open **proposals were held back** to see what the gate refused and why.
+If your run holds nothing back, that is fine.
+The gate's behaviour is proven by the fixture test, not by hoping the model fails on camera.
 
 ### 3. Choose
 
-Nothing is added yet. Tick the steps you agree with and click **Add N selected frames**. They append to the tape as ordinary frames. Edit them like any other frame.
+Nothing is added yet.
+Tick the steps you agree with and click **Add N selected frames**.
+They append to the tape as ordinary frames.
+Edit them like any other frame.
 
 ## Read the checkpoint implementation
 
@@ -1593,7 +1606,9 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 10 passed (10)`, `Tests 29 passed (29)`. On the fixture, four steps pass, "Email the CFO" is held back because its quote is not in the narration, and the duplicate is held back. The panel test proves no frame is added until a person ticks one.
+Expected: `Test Files 10 passed (10)`, `Tests 29 passed (29)`.
+On the fixture, four steps pass, "Email the CFO" is held back because its quote is not in the narration, and the duplicate is held back.
+The panel test proves no frame is added until a person ticks one.
 
 ## Before continuing
 

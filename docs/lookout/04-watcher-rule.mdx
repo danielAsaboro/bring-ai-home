@@ -7,7 +7,10 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 04. Turn a sentence into an inspectable watcher rule" />
 
-We will type "tell me when a parcel is left by the gate" and get back a watcher: a source, a condition, hours, and a motion floor. A local language model proposes it as JSON. The app validates it against fixed lists. A person reads every field and accepts it, or discards it.
+We will type "tell me when a parcel is left by the gate" and get back a watcher: a source, a condition, hours, and a motion floor.
+A local language model proposes it as JSON.
+The app validates it against fixed lists.
+A person reads every field and accepts it, or discards it.
 
 **Source checkpoint:** `f15f98d` · **Starting checkpoint:** `702516e`
 
@@ -28,11 +31,16 @@ To compare with the starting checkpoint: `git diff 702516e f15f98d`.
 
 ### 1. Read the authority line
 
-Open `watcher.ts`. The JSON Schema asks for `sourceId`, `condition`, `fromHour`, `toHour`, and `minMotion`. A schema constrains shape. It does not make the answer right. So `validateWatcherProposal` checks again: the source must be one of the three real IDs, hours are whole numbers 0 to 23, motion is 0 to 1, and the condition is short and non-empty.
+Open `watcher.ts`.
+The JSON Schema asks for `sourceId`, `condition`, `fromHour`, `toHour`, and `minMotion`.
+A schema constrains shape.
+It does not make the answer right.
+So `validateWatcherProposal` checks again: the source must be one of the three real IDs, hours are whole numbers 0 to 23, motion is 0 to 1, and the condition is short and non-empty.
 
 ### 2. Read the proposer
 
-Open `qvac-proposer.ts`. It calls `completion` with `responseFormat: { type: "json_schema", json_schema: { name: "watcher", schema } }` and reads `(await run.final).contentText`.
+Open `qvac-proposer.ts`.
+It calls `completion` with `responseFormat: { type: "json_schema", json_schema: { name: "watcher", schema } }` and reads `(await run.final).contentText`.
 
 ### 3. Propose a watcher
 
@@ -42,17 +50,25 @@ npm run qvac:service
 npm run dev
 ```
 
-Type **Tell me when a parcel is left by the gate** and click **Propose watcher**. A yellow box shows each field and the model that proposed it. Nothing is active yet. Click **Accept watcher** to activate it, or **Discard**.
+Type **Tell me when a parcel is left by the gate** and click **Propose watcher**.
+A yellow box shows each field and the model that proposed it.
+Nothing is active yet.
+Click **Accept watcher** to activate it, or **Discard**.
 
-If the model invents a source, the service answers `422 invalid_proposal` and returns the raw reply, so you can see what it said. The UI shows "No watcher proposed" and the reply. Stop the service and try again: the UI says the local service is not running.
+If the model invents a source, the service answers `422 invalid_proposal` and returns the raw reply, so you can see what it said.
+The UI shows "No watcher proposed" and the reply.
+Stop the service and try again: the UI says the local service is not running.
 
 ### 4. A runtime import detail
 
-`watcher.ts` imports `./verdict.ts` with the extension. The Node service loads these files directly, without a bundler, and Node needs the extension. Next accepts it because of `allowImportingTsExtensions`.
+`watcher.ts` imports `./verdict.ts` with the extension.
+The Node service loads these files directly, without a bundler, and Node needs the extension.
+Next accepts it because of `allowImportingTsExtensions`.
 
 ## Read the checkpoint implementation
 
-These are complete files from `f15f98d`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `f15f98d`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="qvac-service/qvac-proposer.ts">
@@ -1002,9 +1018,11 @@ Run the focused tests for this chapter:
 npm test -- src/features/lookout/watcher.test.ts qvac-service/server.test.ts src/app/page.test.tsx
 ```
 
-Expected result: 3 test files pass, 11 tests pass. Proposals come from fixture proposers and a stubbed `fetch`, labelled as fixtures in the code.
+Expected result: 3 test files pass, 11 tests pass.
+Proposals come from fixture proposers and a stubbed `fetch`, labelled as fixtures in the code.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -1027,4 +1045,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] A proposal appeared with every field visible and nothing active.
 - [ ] Accepting added exactly one active watcher.
 
-Next: [05. Evaluate watchers on the event tape](/docs/lookout/05-evaluate-watchers)
+Next: [05.
+Evaluate watchers on the event tape](/docs/lookout/05-evaluate-watchers)

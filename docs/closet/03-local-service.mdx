@@ -7,9 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 03. Add the local service boundary" />
 
-A browser cannot load a native model runtime, and React is the wrong place to own a model's lifecycle. We put a small HTTP service on `127.0.0.1` between Closet and QVAC.
+A browser cannot load a native model runtime, and React is the wrong place to own a model's lifecycle.
+We put a small HTTP service on `127.0.0.1` between Closet and QVAC.
 
-At the end of this chapter the service can describe a photo, rejects bad requests, and says plainly when a model is not loaded. The Closet UI does not change yet.
+At the end of this chapter the service can describe a photo, rejects bad requests, and says plainly when a model is not loaded.
+The Closet UI does not change yet.
 
 **Source checkpoint:** `6e855f3` · **Starting checkpoint:** `6193b20`
 
@@ -29,11 +31,16 @@ To compare with the previous checkpoint: `git diff 6193b20 6e855f3`.
 
 ### 1. Read the route table
 
-Open `server.ts`. Each capability is an optional function on `ClosetEngine`. A route whose function is missing returns `null`, and the server answers `503`. The service never saves anything; it returns a proposal and the browser decides.
+Open `server.ts`.
+Each capability is an optional function on `ClosetEngine`.
+A route whose function is missing returns `null`, and the server answers `503`.
+The service never saves anything; it returns a proposal and the browser decides.
 
 ### 2. Validate the image, not the file name
 
-`parseGarmentImage` accepts only `data:image/png` or `data:image/jpeg` URLs, then checks the first bytes. A JPEG label on PNG bytes is rejected with `400`. The service never accepts a file path from the browser.
+`parseGarmentImage` accepts only `data:image/png` or `data:image/jpeg` URLs, then checks the first bytes.
+A JPEG label on PNG bytes is rejected with `400`.
+The service never accepts a file path from the browser.
 
 ### 3. Start the service
 
@@ -48,19 +55,30 @@ curl http://127.0.0.1:4320/health
 curl -X POST http://127.0.0.1:4320/describe -d '{"name":"x"}'
 ```
 
-Health lists `["describe"]`. The second call returns `400` with `Request must contain name and dataUrl`. Health says the process is up. It does not say the model has downloaded; the first `/describe` call loads it.
+Health lists `["describe"]`.
+The second call returns `400` with `Request must contain name and dataUrl`.
+Health says the process is up.
+It does not say the model has downloaded; the first `/describe` call loads it.
 
 ### 4. Keep failures apart
 
-Open `service-client.ts`. A refused connection is `service-unreachable`. `503` is `model-unavailable`. `400` is `rejected-request`. `502` is `inference-failed`. A wrong JSON shape is `bad-response`. These are different problems with different fixes, and the UI will say which one happened.
+Open `service-client.ts`.
+A refused connection is `service-unreachable`.
+`503` is `model-unavailable`.
+`400` is `rejected-request`.
+`502` is `inference-failed`.
+A wrong JSON shape is `bad-response`.
+These are different problems with different fixes, and the UI will say which one happened.
 
 ### 5. Check the local boundary
 
-The service binds to `127.0.0.1`. Requests from any browser origin other than `localhost` or `127.0.0.1` get `403`, so a website you visit cannot call your wardrobe service.
+The service binds to `127.0.0.1`.
+Requests from any browser origin other than `localhost` or `127.0.0.1` get `403`, so a website you visit cannot call your wardrobe service.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/server.ts">
@@ -500,7 +518,9 @@ describe("service client", () => {
 npm test -- qvac-service/server.test.ts src/features/closet/service-client.test.ts
 ```
 
-Expected result: 2 test files pass, 11 tests pass. The service tests start a real HTTP server on a random loopback port with a hand-written engine. They do not load a model.
+Expected result: 2 test files pass, 11 tests pass.
+The service tests start a real HTTP server on a random loopback port with a hand-written engine.
+They do not load a model.
 
 Run the broader checks from the app directory:
 

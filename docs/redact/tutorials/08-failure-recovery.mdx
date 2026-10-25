@@ -7,13 +7,15 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 08. Keep working when analysis fails" />
 
-In this lesson we will add timeouts, cancellation and retry, then break local analysis three ways on purpose. Each time, the prepared page stays on screen and we can finish the copy by hand.
+In this lesson we will add timeouts, cancellation and retry, then break local analysis three ways on purpose.
+Each time, the prepared page stays on screen and we can finish the copy by hand.
 
 **Checkpoint:** [`2d16cd9`](https://github.com/danielAsaboro/bring-ai-home/commit/2d16cd92961c0cd3f30a19ed733d1fde63758b31), starting from `234e4ce`
 
 ## 1. Apply the lesson's changes
 
-Download [`08-failure-recovery.patch`](/docs/downloads/redact/08-failure-recovery.patch) into your Downloads folder. Stop the app and the service, then from the parent `redact-course` folder:
+Download [`08-failure-recovery.patch`](/docs/downloads/redact/08-failure-recovery.patch) into your Downloads folder.
+Stop the app and the service, then from the parent `redact-course` folder:
 
 ```bash
 git apply --check ~/Downloads/08-failure-recovery.patch
@@ -32,35 +34,46 @@ Start only the app:
 npm run dev -- --port 3101
 ```
 
-Upload `public/test-files/redact/chat-private.png`, choose **Private**, and select **Prepare for review**. Don't start the service.
+Upload `public/test-files/redact/chat-private.png`, choose **Private**, and select **Prepare for review**.
+Don't start the service.
 
-The review screen opens anyway, with a red banner ending in **Manual review remains available.** and a **Retry local analysis** button. There are no suggestions, but the page is there. Drag a mark over `Maya Chen`, select **Done**, then **Save copy**. You get a normal `chat-private.redacted.png`.
+The review screen opens anyway, with a red banner ending in **Manual review remains available.** and a **Retry local analysis** button.
+There are no suggestions, but the page is there.
+Drag a mark over `Maya Chen`, select **Done**, then **Save copy**.
+You get a normal `chat-private.redacted.png`.
 
 ## 3. Retry once the service is back
 
-Select **Return to review**. In a second terminal, start the service:
+Select **Return to review**.
+In a second terminal, start the service:
 
 ```bash
 npm run qvac:service
 ```
 
-Wait for `Redact QVAC service listening on http://127.0.0.1:4317`, then select **Retry local analysis**. After about half a minute the six suggestions appear next to the mark you already drew.
+Wait for `Redact QVAC service listening on http://127.0.0.1:4317`, then select **Retry local analysis**.
+After about half a minute the six suggestions appear next to the mark you already drew.
 
 ## 4. Cancel a run
 
-Select **Change settings**, then **Prepare for review** again. While the screen says **Building your review copy** and **Reading page 1 of 1 locally…**, select **Continue without local analysis**.
+Select **Change settings**, then **Prepare for review** again.
+While the screen says **Building your review copy** and **Reading page 1 of 1 locally…**, select **Continue without local analysis**.
 
-The review screen opens straight away with the banner **Local analysis was cancelled. Manual review remains available.** Your page is ready for manual marks.
+The review screen opens straight away with the banner **Local analysis was cancelled.
+Manual review remains available.**
+Your page is ready for manual marks.
 
 ## 5. See the single slot
 
-Cancelling stopped the browser waiting, but the model may still be finishing that page. Ask the service:
+Cancelling stopped the browser waiting, but the model may still be finishing that page.
+Ask the service:
 
 ```bash
 curl -s http://127.0.0.1:4317/health
 ```
 
-If the run is still going you'll see `"busy":true`. While it's busy, any new analysis is refused:
+If the run is still going you'll see `"busy":true`.
+While it's busy, any new analysis is refused:
 
 ```bash
 curl -s -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:4317/v1/analyze-page
@@ -70,7 +83,10 @@ curl -s -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:431
 {"error":{"code":"busy","message":"Local analyzer is busy"}}
 ```
 
-Run the same two commands again a few seconds later. Health shows `"busy":false`, and the POST now returns `{"error":{"code":"invalid_request",...}}` because `{}` isn't a page. The service runs one analysis at a time and only frees the slot when the model really stops. A page that takes longer than 180 seconds gets a `504`, but the slot still stays taken until the work ends.
+Run the same two commands again a few seconds later.
+Health shows `"busy":false`, and the POST now returns `{"error":{"code":"invalid_request",...}}` because `{}` isn't a page.
+The service runs one analysis at a time and only frees the slot when the model really stops.
+A page that takes longer than 180 seconds gets a `504`, but the slot still stays taken until the work ends.
 
 ## 6. Run the checks
 
@@ -84,7 +100,9 @@ npm test
 npm run build
 ```
 
-These tests also inject a timeout, a malformed response and a stale result; those failures are simulated, not live. `npm test` should end with `Tests  79 passed (79)`. Record the checkpoint from the parent folder:
+These tests also inject a timeout, a malformed response and a stale result; those failures are simulated, not live.
+`npm test` should end with `Tests  79 passed (79)`.
+Record the checkpoint from the parent folder:
 
 ```bash
 cd ..
@@ -100,4 +118,5 @@ An app that degrades to manual review instead of breaking: a stopped service, a 
 - Why one analysis at a time: [About the local service](/docs/redact/concepts/local-service)
 - All status codes: [Local service API](/docs/redact/reference/service-api)
 
-Next: [09. Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation)
+Next: [09.
+Measure suggestions against labelled documents](/docs/redact/tutorials/09-evaluation)

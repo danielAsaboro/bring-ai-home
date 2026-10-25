@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 08. Prove it offline" />
 
-We will prove that reading a receipt works with the network turned off for the process. We do this on macOS with a `sandbox-exec` profile that denies every outbound connection except loopback.
+We will prove that reading a receipt works with the network turned off for the process.
+We do this on macOS with a `sandbox-exec` profile that denies every outbound connection except loopback.
 
-A warm cache is not an offline proof. A blocked API call is not an offline proof. The process must be refused the network and still work.
+A warm cache is not an offline proof.
+A blocked API call is not an offline proof.
+The process must be refused the network and still work.
 
 **Source checkpoint:** `36f6ebd` · **Starting checkpoint:** `1532ea0`
 
@@ -26,7 +29,9 @@ To compare with the checkpoint: `git diff 1532ea0 36f6ebd`.
 
 ### 1. Warm the cache online
 
-Models download on first use. While online, run the service and use each feature once: read a receipt, propose a category, and find similar entries. That puts OCR, the LLM, and GTE into `.qvac/models`.
+Models download on first use.
+While online, run the service and use each feature once: read a receipt, propose a category, and find similar entries.
+That puts OCR, the LLM, and GTE into `.qvac/models`.
 
 ### 2. Read the profile
 
@@ -38,17 +43,22 @@ Models download on first use. While online, run the service and use each feature
 (allow network-outbound (remote unix-socket))
 ```
 
-Everything is allowed except outbound network. Loopback and Unix sockets stay open, because the app talks to the service on `127.0.0.1` and QVAC talks to its worker over a local socket.
+Everything is allowed except outbound network.
+Loopback and Unix sockets stay open, because the app talks to the service on `127.0.0.1` and QVAC talks to its worker over a local socket.
 
 ### 3. Check the cache first
 
-`assertWarmedCache` needs one non-empty file for each model: `latin_g2` for OCR, `llama-3.2-1b` for the LLM, and `gte-large` for embeddings. An empty file is a half-finished download and counts as missing.
+`assertWarmedCache` needs one non-empty file for each model: `latin_g2` for OCR, `llama-3.2-1b` for the LLM, and `gte-large` for embeddings.
+An empty file is a half-finished download and counts as missing.
 
-If something is missing, the check stops with: `QVAC cache is incomplete (...)`. Go back to step 1. Do not try to download inside the sandbox.
+If something is missing, the check stops with: `QVAC cache is incomplete (...)`.
+Go back to step 1.
+Do not try to download inside the sandbox.
 
 ### 4. Prove the network is refused
 
-The check tries `https://example.com/`. `classifyProbe` sorts the result:
+The check tries `https://example.com/`.
+`classifyProbe` sorts the result:
 
 - it worked: `network-allowed`, and the proof fails;
 - DNS failed: `dns-failed`, and the proof fails, because a DNS failure is not a denial;
@@ -62,7 +72,8 @@ On macOS:
 npm run qvac:offline
 ```
 
-When it passes, it prints `network: "network-denied"`, the OCR block count, the parsed total in cents, the arithmetic check, and the time taken. All of it comes from your machine with no network.
+When it passes, it prints `network: "network-denied"`, the OCR block count, the parsed total in cents, the arithmetic check, and the time taken.
+All of it comes from your machine with no network.
 
 To use the whole app offline, run the service under the same profile and the app as usual:
 
@@ -71,9 +82,13 @@ npm run qvac:service:offline
 npm run dev
 ```
 
-`sandbox-exec` is macOS only. On Linux, use a network namespace or a firewall rule instead. The probe logic is the same.
+`sandbox-exec` is macOS only.
+On Linux, use a network namespace or a firewall rule instead.
+The probe logic is the same.
 
-We could not run this proof while writing the course. Our container is Linux and our model downloads did not complete (see Chapter 2). Without the sandbox and with an empty cache, the check stops at the right place:
+We could not run this proof while writing the course.
+Our container is Linux and our model downloads did not complete (see Chapter 2).
+Without the sandbox and with an empty cache, the check stops at the right place:
 
 ```text
 Offline proof failed: QVAC cache is incomplete (ocr, llm, embeddings). Warm it online first: run the service and use each feature once.
@@ -245,7 +260,11 @@ describe("offline proof", () => {
 npm test -- qvac-service/offline-proof.test.ts
 ```
 
-Expected: 3 tests pass. They use hand-written file lists and probe results. They prove that a full cache passes, an empty file counts as missing, and DNS failure is not counted as denial. They do not prove offline inference. Only `npm run qvac:offline` passing on your machine does.
+Expected: 3 tests pass.
+They use hand-written file lists and probe results.
+They prove that a full cache passes, an empty file counts as missing, and DNS failure is not counted as denial.
+They do not prove offline inference.
+Only `npm run qvac:offline` passing on your machine does.
 
 Full set:
 
@@ -263,4 +282,7 @@ Expected: `Test Files 12 passed (12)`, `Tests 44 passed (44)`.
 - [ ] The probe reported `network-denied`, not `dns-failed`.
 - [ ] OCR ran and the draft total was computed in code, with the network refused.
 
-That is the whole course. Receipts are read, proposed, and compared on your machine. A person decides. Code does the sums.
+That is the whole course.
+Receipts are read, proposed, and compared on your machine.
+A person decides.
+Code does the sums.

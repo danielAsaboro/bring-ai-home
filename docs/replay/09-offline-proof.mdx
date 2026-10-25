@@ -7,15 +7,19 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 09. Prove it offline" />
 
-A full model cache is not an offline proof. Blocking `fetch` is not either; native code can open its own sockets. The proof is a process the operating system will not let reach the network, doing the real work.
+A full model cache is not an offline proof.
+Blocking `fetch` is not either; native code can open its own sockets.
+The proof is a process the operating system will not let reach the network, doing the real work.
 
 **Source checkpoint:** `7a35290` · **Starting checkpoint:** `18f5755`
 
 ## What changes
 
-- `qvac-service/offline-proof.ts`: `assertWarmedCache` requires all five pinned files (Whisper, SmolVLM2, its projection, Llama, GTE) to be present and non-empty. `classifyProbe` only accepts a refused or unreachable TCP connection to a public IP as denial; DNS failure and timeouts do not count.
+- `qvac-service/offline-proof.ts`: `assertWarmedCache` requires all five pinned files (Whisper, SmolVLM2, its projection, Llama, GTE) to be present and non-empty.
+  `classifyProbe` only accepts a refused or unreachable TCP connection to a public IP as denial; DNS failure and timeouts do not count.
 - `qvac-service/offline-check.mjs`: checks the cache, probes the network, then transcribes your narration, reads the sample screenshot, proposes steps and conditions through the same gates, ranks the sample tapes, and hashes the skill export.
-- `qvac-service/offline.sb`: the macOS sandbox profile. Only loopback and local sockets are allowed.
+- `qvac-service/offline.sb`: the macOS sandbox profile.
+  Only loopback and local sockets are allowed.
 - `qvac-service/qvac-models.ts`: `closeSdk` now tolerates an SDK that never loaded.
 - Scripts: `qvac:offline` (macOS `sandbox-exec`), `qvac:offline:linux` (`unshare -rn`, a fresh network namespace with only loopback), and `qvac:service:offline`.
 
@@ -30,7 +34,8 @@ git checkout 7a35290
 npm run qvac:service
 ```
 
-Use every feature once in the app: transcribe, read a screenshot, propose frames, propose conditions, and find a tape. Then stop the service.
+Use every feature once in the app: transcribe, read a screenshot, propose frames, propose conditions, and find a tape.
+Then stop the service.
 
 ### 2. Run the proof
 
@@ -46,15 +51,21 @@ Linux:
 npm run qvac:offline:linux -- ~/Desktop/weekly-report.wav
 ```
 
-The receipt is JSON: `"network": "network-denied"`, transcript word count, the screen note, how many steps were proposed and held back, parameter names that passed the gate, the closest sample tape, the skill hash `76cfecf827fc5d5fc620072ef0f51779ba3e370fda04c875c816a376d5574b0f`, and elapsed time. These numbers come from your machine. The course does not print them for you.
+The receipt is JSON: `"network": "network-denied"`, transcript word count, the screen note, how many steps were proposed and held back, parameter names that passed the gate, the closest sample tape, the skill hash `76cfecf827fc5d5fc620072ef0f51779ba3e370fda04c875c816a376d5574b0f`, and elapsed time.
+These numbers come from your machine.
+The course does not print them for you.
 
 ### 3. See it refuse
 
-Run `node --no-warnings qvac-service/offline-check.mjs your.wav` without the sandbox. It refuses with `Expected this process to be denied network access, got network-allowed`. Move `.qvac/models` aside and it refuses with `QVAC cache is incomplete (...)`, naming every missing model.
+Run `node --no-warnings qvac-service/offline-check.mjs your.wav` without the sandbox.
+It refuses with `Expected this process to be denied network access, got network-allowed`.
+Move `.qvac/models` aside and it refuses with `QVAC cache is incomplete (...)`, naming every missing model.
 
 ### 4. Know what was proven
 
-This denies the network to one process. It does not disconnect your computer. It proves that Replay's models, gates, and export run without any remote call.
+This denies the network to one process.
+It does not disconnect your computer.
+It proves that Replay's models, gates, and export run without any remote call.
 
 ## Read the checkpoint implementation
 
@@ -325,7 +336,9 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 14 passed (14)`, `Tests 46 passed (46)`. Cache listings in the tests are fixtures; they prove that a projection file cannot stand in for the vision model and that DNS failure is not counted as denial. Your offline receipt is the JSON from step 2.
+Expected: `Test Files 14 passed (14)`, `Tests 46 passed (46)`.
+Cache listings in the tests are fixtures; they prove that a projection file cannot stand in for the vision model and that DNS failure is not counted as denial.
+Your offline receipt is the JSON from step 2.
 
 ## Before continuing
 
@@ -333,4 +346,5 @@ Expected: `Test Files 14 passed (14)`, `Tests 46 passed (46)`. Cache listings in
 - [ ] The proof refuses to run with an incomplete cache.
 - [ ] Your receipt shows network-denied and the same skill hash.
 
-That completes Replay. You built a manual tape library, let local models listen, look, and propose while a person decided every change, and proved it runs with the network denied.
+That completes Replay.
+You built a manual tape library, let local models listen, look, and propose while a person decided every change, and proved it runs with the network denied.

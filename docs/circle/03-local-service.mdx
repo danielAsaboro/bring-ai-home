@@ -7,11 +7,17 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 03. Add the local service boundary" />
 
-We will put a small loopback HTTP service between the browser and the native QVAC runtime. React never imports the SDK. Missing capabilities answer `not-configured` instead of pretending.
+We will put a small loopback HTTP service between the browser and the native QVAC runtime.
+React never imports the SDK.
+Missing capabilities answer `not-configured` instead of pretending.
 
-The QVAC SDK runs native code. It cannot run inside a browser tab, and it should not be loaded by React. We add a small service on `127.0.0.1` that owns the models. The app talks to it over HTTP.
+The QVAC SDK runs native code.
+It cannot run inside a browser tab, and it should not be loaded by React.
+We add a small service on `127.0.0.1` that owns the models.
+The app talks to it over HTTP.
 
-The service checks every request before a model sees it. It also tells the truth about what it can do.
+The service checks every request before a model sees it.
+It also tells the truth about what it can do.
 
 **Source checkpoint:** `97bc73a` · **Starting checkpoint:** `e35ad0b`
 
@@ -40,7 +46,8 @@ You should see `Circle QVAC service on http://127.0.0.1:4327`.
 curl http://127.0.0.1:4327/health
 ```
 
-The process is ready, but no model is loaded yet. Models load on the first request that needs them.
+The process is ready, but no model is loaded yet.
+Models load on the first request that needs them.
 
 ### 3. Send a bad request
 
@@ -49,7 +56,8 @@ curl -X POST -H 'content-type: application/json' \
   -d '{"fileName":"a.wav"}' http://127.0.0.1:4327/recap/transcribe
 ```
 
-You get `{"error":"Missing audioBase64"}`. The model was never called.
+You get `{"error":"Missing audioBase64"}`.
+The model was never called.
 
 ### 4. Try another origin
 
@@ -57,15 +65,18 @@ You get `{"error":"Missing audioBase64"}`. The model was never called.
 curl -H 'Origin: https://evil.example' http://127.0.0.1:4327/health
 ```
 
-You get `{"error":"origin-not-allowed"}`. A web page on another site cannot use your local models.
+You get `{"error":"origin-not-allowed"}`.
+A web page on another site cannot use your local models.
 
 ### 5. Read the client
 
-`service-client.ts` turns a refused connection into `The local AI service is not running`. It also rejects any response that is not marked `proposed`.
+`service-client.ts` turns a refused connection into `The local AI service is not running`.
+It also rejects any response that is not marked `proposed`.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -504,7 +515,9 @@ export type ServiceClient = ReturnType<typeof createServiceClient>;
 npm test -- qvac-service/service.test.ts src/features/circle/service-client.test.ts
 ```
 
-Expected result: 2 test files pass, 8 tests pass. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+Expected result: 2 test files pass, 8 tests pass.
+These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code.
+They prove the app's rules, not live model inference.
 
 Run the broader checks from the app directory:
 

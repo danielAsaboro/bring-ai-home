@@ -3,7 +3,8 @@ title: "How to add a sensitive-field label"
 description: "Teach Redact a new kind of sensitive field, end to end."
 ---
 
-This guide adds a label, for example `vehicle` for number plates. A label has to exist in five places, or the model's answer is rejected or silently dropped.
+This guide adds a label, for example `vehicle` for number plates.
+A label has to exist in five places, or the model's answer is rejected or silently dropped.
 
 ## 1. Add it to the shared type
 
@@ -15,7 +16,8 @@ This guide adds a label, for example `vehicle` for number plates. A label has to
 
 ## 2. Add it to the runtime contract
 
-`src/features/redact/analysis-contract.ts`, add `"vehicle"` to `redactionLabelSchema`. Responses with unknown labels fail this schema.
+`src/features/redact/analysis-contract.ts`, add `"vehicle"` to `redactionLabelSchema`.
+Responses with unknown labels fail this schema.
 
 ## 3. Let the model choose it
 
@@ -35,7 +37,8 @@ Without a rule, every `vehicle` candidate is dropped, because `groundedLabel()` 
 
 ## 5. Test it
 
-Add a case to `qvac-service/candidate-validation.test.ts` for text that should and shouldn't match. Then:
+Add a case to `qvac-service/candidate-validation.test.ts` for text that should and shouldn't match.
+Then:
 
 ```bash
 npm run typecheck

@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 03. Add the local service boundary" />
 
-We will put a small HTTP service between the browser and QVAC. React never imports QVAC. The native runtime lives in its own Node process on `127.0.0.1`.
+We will put a small HTTP service between the browser and QVAC.
+React never imports QVAC.
+The native runtime lives in its own Node process on `127.0.0.1`.
 
-At the end of this chapter health works, bad requests are rejected, and with vision switched off a frame check answers a typed `503`. That is a correct result. Lookout never invents a verdict.
+At the end of this chapter health works, bad requests are rejected, and with vision switched off a frame check answers a typed `503`.
+That is a correct result.
+Lookout never invents a verdict.
 
 **Source checkpoint:** `702516e` · **Starting checkpoint:** `b11ed2b`
 
@@ -30,7 +34,10 @@ To compare with the starting checkpoint: `git diff b11ed2b 702516e`.
 
 ### 1. Define the contract
 
-Read `check-contract.ts`. A request carries a frame ID, a condition, and the PNG as base64. It never carries a file path. A response carries the SHA-256 of the bytes the service received, the model name, the raw reply, the parsed verdict, and the time taken.
+Read `check-contract.ts`.
+A request carries a frame ID, a condition, and the PNG as base64.
+It never carries a file path.
+A response carries the SHA-256 of the bytes the service received, the model name, the raw reply, the parsed verdict, and the time taken.
 
 TypeScript types vanish at runtime, so both sides validate with plain functions.
 
@@ -49,32 +56,46 @@ curl -X POST http://127.0.0.1:4319/v1/check-frame \
   -d '{"frameId":"front-gate-3","condition":"a parcel is left by the gate","pngBase64":"aGk="}'
 ```
 
-We ran exactly this in our build container. The output was:
+We ran exactly this in our build container.
+The output was:
 
 ```json
 {"service":"ready","vision":{"state":"not_configured"}}
 {"error":{"code":"vision_unavailable","message":"The local vision model is not configured"}}
 ```
 
-The process is ready. The model is not. Those are different things.
+The process is ready.
+The model is not.
+Those are different things.
 
 ### 3. Start it with QVAC
 
-Stop the service and run `npm run qvac:service`. Now `health` reports the vision model as `configured`. It loads on the first check, not at startup. Send the same `curl` with a real base64 PNG and you get the digest, raw reply, and verdict.
+Stop the service and run `npm run qvac:service`.
+Now `health` reports the vision model as `configured`.
+It loads on the first check, not at startup.
+Send the same `curl` with a real base64 PNG and you get the digest, raw reply, and verdict.
 
 ### 4. Check the local boundary
 
-The service binds to `127.0.0.1` only. Browser requests from any origin other than `localhost`, `127.0.0.1`, or `[::1]` get `403`. A random website cannot ask your service about your frames.
+The service binds to `127.0.0.1` only.
+Browser requests from any origin other than `localhost`, `127.0.0.1`, or `[::1]` get `403`.
+A random website cannot ask your service about your frames.
 
-This is not authentication. Other software on your machine can still call it.
+This is not authentication.
+Other software on your machine can still call it.
 
 ### 5. Read the client
 
-Open `check-client.ts`. A refused connection is `unavailable`. A `503` is `unavailable`. A response that fails validation is `invalid`. The caller always knows which boundary failed.
+Open `check-client.ts`.
+A refused connection is `unavailable`.
+A `503` is `unavailable`.
+A response that fails validation is `invalid`.
+The caller always knows which boundary failed.
 
 ## Read the checkpoint implementation
 
-These are complete files from `702516e`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `702516e`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -594,9 +615,12 @@ Run the focused tests for this chapter:
 npm test -- qvac-service/server.test.ts src/features/lookout/check-client.test.ts
 ```
 
-Expected result: 2 test files pass, 7 tests pass. The server tests use a fixture checker with a fixed reply. It is not a model.
+Expected result: 2 test files pass, 7 tests pass.
+The server tests use a fixture checker with a fixed reply.
+It is not a model.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -619,4 +643,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] `/health` answered with vision `not_configured` when `LOOKOUT_VISION=off`.
 - [ ] A check answered `503 vision_unavailable`, not a made-up verdict.
 
-Next: [04. Turn a sentence into an inspectable watcher rule](/docs/lookout/04-watcher-rule)
+Next: [04.
+Turn a sentence into an inspectable watcher rule](/docs/lookout/04-watcher-rule)

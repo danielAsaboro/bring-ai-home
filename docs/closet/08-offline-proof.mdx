@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 08. Prove it offline" />
 
-Saying "it runs locally" is a claim. A blocked `fetch` in the browser or a non-empty cache folder does not prove it. We deny outbound network for the whole Node process, check that a real probe is refused, and then run Closet's model features from the cache.
+Saying "it runs locally" is a claim.
+A blocked `fetch` in the browser or a non-empty cache folder does not prove it.
+We deny outbound network for the whole Node process, check that a real probe is refused, and then run Closet's model features from the cache.
 
 **Source checkpoint:** `a0694c0` · **Starting checkpoint:** `e8906f1`
 
@@ -30,13 +32,16 @@ Run the service once with normal internet and use each feature (photo, search, o
 
 ### 2. Check the cache before going offline
 
-`assertWarmedCache` requires a non-empty file for the vision model, its projection model, the 1B language model, and the embedding model. A missing one fails before any network question is asked. On our build container, where model downloads are blocked, it printed:
+`assertWarmedCache` requires a non-empty file for the vision model, its projection model, the 1B language model, and the embedding model.
+A missing one fails before any network question is asked.
+On our build container, where model downloads are blocked, it printed:
 
 ```text
 Offline proof failed: QVAC cache is incomplete (vision, projection, details, embeddings). Warm it online with qvac:service and one run of each feature first.
 ```
 
-That is the expected failure on a cold cache. It is not an offline proof.
+That is the expected failure on a cold cache.
+It is not an offline proof.
 
 ### 3. Run under network denial (macOS)
 
@@ -44,9 +49,13 @@ That is the expected failure on a cold cache. It is not an offline proof.
 npm run qvac:offline
 ```
 
-`sandbox-exec` applies `offline.sb` to the Node process and everything it spawns. The script first probes `https://example.com`. Only a refused connection counts as `network-denied`; a DNS failure is reported as `dns-failed`, because it can mean a broken resolver rather than denial. Then it embeds the sample looks for `rainy work day` and validates an outfit proposal, printing both.
+`sandbox-exec` applies `offline.sb` to the Node process and everything it spawns.
+The script first probes `https://example.com`.
+Only a refused connection counts as `network-denied`; a DNS failure is reported as `dns-failed`, because it can mean a broken resolver rather than denial.
+Then it embeds the sample looks for `rainy work day` and validates an outfit proposal, printing both.
 
-On Linux, `sandbox-exec` does not exist. A network namespace (for example `unshare`) can deny the process network, but we have not recorded a Linux receipt for this course.
+On Linux, `sandbox-exec` does not exist.
+A network namespace (for example `unshare`) can deny the process network, but we have not recorded a Linux receipt for this course.
 
 ### 4. Run the whole app under the same policy
 
@@ -55,11 +64,14 @@ npm run qvac:service:offline
 npm run dev
 ```
 
-The service still listens on loopback, which the profile allows. Add a garment from a photo, search the feed, and propose a carousel. Every proposal still goes through the same review.
+The service still listens on loopback, which the profile allows.
+Add a garment from a photo, search the feed, and propose a carousel.
+Every proposal still goes through the same review.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/offline.sb">
@@ -223,7 +235,8 @@ describe("offline proof", () => {
 npm test -- qvac-service/offline-proof.test.ts
 ```
 
-Expected result: 1 test file pass, 3 tests pass. They use hand-written file listings and probe results, not a real sandbox run.
+Expected result: 1 test file pass, 3 tests pass.
+They use hand-written file listings and probe results, not a real sandbox run.
 
 Run the broader checks from the app directory:
 
@@ -246,4 +259,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] `npm run qvac:offline` reported `network-denied` on your machine.
 - [ ] You used each feature with the service under the policy.
 
-You finished the Closet course. Return to the [Closet overview](/docs/closet/overview).
+You finished the Closet course.
+Return to the [Closet overview](/docs/closet/overview).

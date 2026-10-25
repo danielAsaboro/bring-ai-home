@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 01. Run the Ledger starter" />
 
-We will run the Ledger starter, look at what it does today, and pin the fictional receipt the whole course reads. Nothing in this chapter uses AI.
+We will run the Ledger starter, look at what it does today, and pin the fictional receipt the whole course reads.
+Nothing in this chapter uses AI.
 
-The starter is the foundation of an owned account book. It is small on purpose. We add local AI to it one chapter at a time and keep every check green.
+The starter is the foundation of an owned account book.
+It is small on purpose.
+We add local AI to it one chapter at a time and keep every check green.
 
 **Source checkpoint:** `d5d540a` · **Starting checkpoint:** `47e8cea` (untouched starter, first commit on `course/ledger-qvac`)
 
@@ -19,7 +22,8 @@ The starter is the foundation of an owned account book. It is small on purpose. 
 - Add a test that pins the receipt's SHA-256 digest.
 - Add a short README note about the test file.
 
-No application code changes. This is the baseline.
+No application code changes.
+This is the baseline.
 
 ## Build and observe
 
@@ -34,13 +38,20 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. You should see the **Ledger** heading. That is the whole interface for now.
+Open `http://localhost:3000`.
+You should see the **Ledger** heading.
+That is the whole interface for now.
 
 ### 2. Look at the test receipt
 
-Open `public/test-files/ledger/receipt-corner-cafe.png`. It is a made-up café receipt. It names no real business and no real card.
+Open `public/test-files/ledger/receipt-corner-cafe.png`.
+It is a made-up café receipt.
+It names no real business and no real card.
 
-Read it as a person would. Three lines, a subtotal of **9.75**, tax of **0.78**, and a printed total of **10.53**. Remember those numbers. Later chapters check them in code.
+Read it as a person would.
+Three lines, a subtotal of **9.75**, tax of **0.78**, and a printed total of **10.53**.
+Remember those numbers.
+Later chapters check them in code.
 
 ### 3. Know the rule before adding AI
 
@@ -108,7 +119,8 @@ export default function Home() {
 npm test
 ```
 
-Expected: `Test Files 2 passed (2)` and `Tests 2 passed (2)`. The digest test proves you are reading the same receipt bytes as the course: `8bc01b42…2f06cd`.
+Expected: `Test Files 2 passed (2)` and `Tests 2 passed (2)`.
+The digest test proves you are reading the same receipt bytes as the course: `8bc01b42…2f06cd`.
 
 ## Before continuing
 

@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 02. Check one frame against a plain-language condition" />
 
-We will ask a local vision model one question about one stored frame: does it show "a parcel left by the gate"? The script runs outside the app. React does not change in this chapter.
+We will ask a local vision model one question about one stored frame: does it show "a parcel left by the gate"?
+The script runs outside the app.
+React does not change in this chapter.
 
-The model proposes an answer. A small parser decides what Lookout will believe: a leading YES or NO, or **unclear**.
+The model proposes an answer.
+A small parser decides what Lookout will believe: a leading YES or NO, or **unclear**.
 
 **Source checkpoint:** `b11ed2b` · **Starting checkpoint:** `d67fc04`
 
@@ -33,15 +36,22 @@ git checkout b11ed2b
 npm ci
 ```
 
-On Linux, check that the Bare binary is executable. If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x` on it. That is an install problem, not a model problem.
+On Linux, check that the Bare binary is executable.
+If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x` on it.
+That is an install problem, not a model problem.
 
 `b4a` is a direct dependency because the SDK needs it at runtime on Linux.
 
 ### 2. Read the order of operations
 
-Open `qvac-service/check-frame-smoke.mjs`. It creates `.qvac/models`, writes `.qvac/config.json`, sets `QVAC_CONFIG_PATH`, and only then imports `@qvac/sdk`. The SDK reads its config when it starts.
+Open `qvac-service/check-frame-smoke.mjs`.
+It creates `.qvac/models`, writes `.qvac/config.json`, sets `QVAC_CONFIG_PATH`, and only then imports `@qvac/sdk`.
+The SDK reads its config when it starts.
 
-`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with `projectionModelSrc: MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model lets the language model read an image. `completion` sends the prompt with `attachments: [{ path }]`. The `finally` block unloads the model and closes the SDK, even after an error.
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with `projectionModelSrc: MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`.
+The projection model lets the language model read an image.
+`completion` sends the prompt with `attachments: [{ path }]`.
+The `finally` block unloads the model and closes the SDK, even after an error.
 
 ### 3. Run it
 
@@ -50,21 +60,37 @@ npm run qvac:check-smoke
 npm run qvac:check-smoke -- public/test-files/lookout/front-gate-4.png "a parcel left by the gate"
 ```
 
-The first run downloads model files into `.qvac/models`. Read `raw`, then `verdict`. `raw` is exactly what the model said. `verdict` is what Lookout will believe. Run the cat frame too. A small model may say yes to the wrong frame; that is why it only proposes.
+The first run downloads model files into `.qvac/models`.
+Read `raw`, then `verdict`.
+`raw` is exactly what the model said.
+`verdict` is what Lookout will believe.
+Run the cat frame too.
+A small model may say yes to the wrong frame; that is why it only proposes.
 
-We did not record a live run for this page. In our build container the QVAC registry is blocked, so no model output is shown here. Record your own receipt on your machine.
+We did not record a live run for this page.
+In our build container the QVAC registry is blocked, so no model output is shown here.
+Record your own receipt on your machine.
 
 ### 4. Read the parser
 
-Open `verdict.ts`. A reply counts only if it starts with YES or NO. "It might be a parcel, yes" is **unclear**. "Yesterday a box was here" is **unclear**, because `\b` stops "yes" from matching inside "Yesterday". Unclear never raises an alert on its own.
+Open `verdict.ts`.
+A reply counts only if it starts with YES or NO.
+"It might be a parcel, yes" is **unclear**.
+"Yesterday a box was here" is **unclear**, because `\b` stops "yes" from matching inside "Yesterday".
+Unclear never raises an alert on its own.
 
 ### 5. If the download stalls
 
-QVAC fetches models from its own registry, not from npm. If the log stops at a download line and the files stay at 0 bytes, the network is blocking the registry. That is a network failure. Run on a machine with normal internet. Do not change the code.
+QVAC fetches models from its own registry, not from npm.
+If the log stops at a download line and the files stay at 0 bytes, the network is blocking the registry.
+That is a network failure.
+Run on a machine with normal internet.
+Do not change the code.
 
 ## Read the checkpoint implementation
 
-These are complete files from `b11ed2b`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `b11ed2b`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -274,9 +300,11 @@ Run the focused tests for this chapter:
 npm test -- src/features/lookout/verdict.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. They use hand-written replies, labelled as fixtures, not model output.
+Expected result: 1 test file passes, 3 tests pass.
+They use hand-written replies, labelled as fixtures, not model output.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -299,4 +327,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] `qvac:check-smoke` printed a `raw` reply and a parsed `verdict` on your machine.
 - [ ] You know why "It might be a parcel, yes" is unclear.
 
-Next: [03. Add the local service boundary](/docs/lookout/03-local-service)
+Next: [03.
+Add the local service boundary](/docs/lookout/03-local-service)

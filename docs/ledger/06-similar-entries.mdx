@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Ledger · 06. Find similar past entries with embeddings" />
 
-We will use a local embeddings model to find past entries that look like the new receipt. The model only turns text into numbers. Plain code compares the numbers and ranks the matches.
+We will use a local embeddings model to find past entries that look like the new receipt.
+The model only turns text into numbers.
+Plain code compares the numbers and ranks the matches.
 
 **Source checkpoint:** `7ee6547` · **Starting checkpoint:** `57829cc`
 
@@ -25,27 +27,40 @@ To compare with the checkpoint: `git diff 57829cc 7ee6547`.
 
 ### 1. Decide what gets embedded
 
-`entryText` returns `"Harbour Bakery (Eating out)"`. Merchant and category only. Amounts stay out again. "Similar" here means "same kind of place", not "same price".
+`entryText` returns `"Harbour Bakery (Eating out)"`.
+Merchant and category only.
+Amounts stay out again.
+"Similar" here means "same kind of place", not "same price".
 
 ### 2. Embed the book once
 
-The server builds its index on the first `/v1/similar` call. It sends all six entry texts in one `embed({ modelId, text: [...] })` call and keeps the vectors. If that fails, it forgets the half-built index so the next call can try again.
+The server builds its index on the first `/v1/similar` call.
+It sends all six entry texts in one `embed({ modelId, text: [...] })` call and keeps the vectors.
+If that fails, it forgets the half-built index so the next call can try again.
 
 Each later request embeds only the query.
 
 ### 3. Rank in code
 
-`rankSimilar` scores each entry with cosine similarity, rounds to three decimals, drops anything under `0.5`, sorts by score and then by ID, and keeps the top three. The same vectors always give the same list.
+`rankSimilar` scores each entry with cosine similarity, rounds to three decimals, drops anything under `0.5`, sorts by score and then by ID, and keeps the top three.
+The same vectors always give the same list.
 
-No match above the floor? You get an empty list and the UI says **No close past entries.** A weak match is worse than none.
+No match above the floor?
+You get an empty list and the UI says **No close past entries.**
+A weak match is worse than none.
 
 ### 4. Try it
 
-With the service and app running, read the sample receipt. Optionally propose a category first. Then select **Find similar past entries**.
+With the service and app running, read the sample receipt.
+Optionally propose a category first.
+Then select **Find similar past entries**.
 
-If a proposal was accepted by the validator, the query is `"Corner Cafe (Eating out)"`. If not, it is the raw OCR merchant text. You see past entries with their date, merchant, category, and score.
+If a proposal was accepted by the validator, the query is `"Corner Cafe (Eating out)"`.
+If not, it is the raw OCR merchant text.
+You see past entries with their date, merchant, category, and score.
 
-We did not run GTE in the environment used to write this course. The scores in the tests come from hand-made vectors.
+We did not run GTE in the environment used to write this course.
+The scores in the tests come from hand-made vectors.
 
 ## Read the checkpoint implementation
 
@@ -243,7 +258,9 @@ describe("similar past entries", () => {
 npm test -- src/features/ledger/similar.test.ts qvac-service/server.test.ts
 ```
 
-Expected: 10 tests pass. The similarity tests use three-number vectors written by hand. The server test proves the book is embedded once and then one query per request.
+Expected: 10 tests pass.
+The similarity tests use three-number vectors written by hand.
+The server test proves the book is embedded once and then one query per request.
 
 Full set:
 

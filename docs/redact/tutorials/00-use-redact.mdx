@@ -7,7 +7,8 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Redact · 00. Redact your first document with local AI" />
 
-In this lesson we will run the finished Redact app on our own machine, give it a screenshot of a fictional chat, and turn its suggestions into a safe copy we could share. Nothing leaves the computer.
+In this lesson we will run the finished Redact app on our own machine, give it a screenshot of a fictional chat, and turn its suggestions into a safe copy we could share.
+Nothing leaves the computer.
 
 You need Node.js 22.17 or newer, Git, about 4 GB of free disk, and an internet connection for the first run.
 
@@ -27,7 +28,8 @@ The models download once, into `redact/.qvac/models`:
 | `OCR_LATIN` | 98 MB | Finds each line of text and where it sits on the page |
 | `LAYA_421M_Q8_0` | 450 MB | Answers yes/no questions about each line: is this a name, an email, an account number? |
 
-We use QVAC because it runs both kinds of model through one local API, with nothing to host and no data sent anywhere. On an Apple Silicon Mac, expect about 20–30 seconds per page for OCR, under a second for Laya's decisions, and about 25 seconds for the final check of the copy.
+We use QVAC because it runs both kinds of model through one local API, with nothing to host and no data sent anywhere.
+On an Apple Silicon Mac, expect about 20–30 seconds per page for OCR, under a second for Laya's decisions, and about 25 seconds for the final check of the copy.
 
 ## 1. Get the app
 
@@ -37,7 +39,8 @@ cd redact-app/redact
 npm ci
 ```
 
-`npm ci` takes a few minutes and ends with an `added … packages` line. The QVAC SDK and its native engines are most of the 2.8 GB it installs.
+`npm ci` takes a few minutes and ends with an `added … packages` line.
+The QVAC SDK and its native engines are most of the 2.8 GB it installs.
 
 ## 2. Start the local AI service
 
@@ -53,7 +56,9 @@ You should see:
 Redact QVAC service listening on http://127.0.0.1:4317
 ```
 
-This is the process that runs OCR and the decision model. It only listens on `127.0.0.1`, so nothing outside your machine can reach it. Leave it running.
+This is the process that runs OCR and the decision model.
+It only listens on `127.0.0.1`, so nothing outside your machine can reach it.
+Leave it running.
 
 ## 3. Start the app
 
@@ -67,9 +72,11 @@ When it prints `Ready`, open [http://localhost:3101](http://localhost:3101). You
 
 ## 4. Choose the document and a privacy level
 
-Select **Choose a file** and pick `public/test-files/redact/chat-private.png` from the `redact` folder. It's a made-up chat between Maya Chen and a colleague; none of it is real.
+Select **Choose a file** and pick `public/test-files/redact/chat-private.png` from the `redact` folder.
+It's a made-up chat between Maya Chen and a colleague; none of it is real.
 
-Under **Privacy level**, select **Private**. In **Additional direction**, type:
+Under **Privacy level**, select **Private**.
+In **Additional direction**, type:
 
 ```text
 Redact direct identifiers, account numbers, and reference codes.
@@ -81,9 +88,12 @@ Select **Prepare for review**.
 
 ## 5. Wait for the first analysis
 
-The screen shows **Preparing locally** while the page is read. The first time, QVAC downloads the OCR model and Laya, the decision model that suggests what to cover, about 550 MB in all, into `redact/.qvac/models`, so expect a few minutes. Watch the service terminal: it stays quiet unless something fails.
+The screen shows **Preparing locally** while the page is read.
+The first time, QVAC downloads the OCR model and Laya, the decision model that suggests what to cover, about 550 MB in all, into `redact/.qvac/models`, so expect a few minutes.
+Watch the service terminal: it stays quiet unless something fails.
 
-Later runs skip the download. Reading one page then takes about 20–30 seconds.
+Later runs skip the download.
+Reading one page then takes about 20–30 seconds.
 
 ## 6. Review the suggestions
 
@@ -93,23 +103,34 @@ The review screen opens with the original on the left and a **Safe-share preview
 
 Notice three things:
 
-- Every outlined box on the original is text that OCR found. The right panel says **12 text regions found locally**.
-- Under **7 suggested redactions** are the name, email, address, phone number, account number and reference, plus `keep the amount confidential.` labelled **OTHER**, which matched your direction. Each has a label, a score and the text it would cover.
-- **Done** is disabled. The banner says **Review 7 remaining suggestions before creating a safe copy.** Nothing is covered until you decide.
+- Every outlined box on the original is text that OCR found.
+  The right panel says **12 text regions found locally**.
+- Under **7 suggested redactions** are the name, email, address, phone number, account number and reference, plus `keep the amount confidential.` labelled **OTHER**, which matched your direction.
+  Each has a label, a score and the text it would cover.
+- **Done** is disabled.
+  The banner says **Review 7 remaining suggestions before creating a safe copy.**
+  Nothing is covered until you decide.
 
-Let's make one decision differently from the rest. On the **EMAIL** card, select **Reject**. Then select **Accept** on the other six cards.
+Let's make one decision differently from the rest.
+On the **EMAIL** card, select **Reject**.
+Then select **Accept** on the other six cards.
 
-The preview updates as you go: accepted fields turn into black boxes, and the email stays readable. The **Recent activity** list records each decision.
+The preview updates as you go: accepted fields turn into black boxes, and the email stays readable.
+The **Recent activity** list records each decision.
 
 ## 7. Save the copy
 
-Select **Done**. The screen changes to **Your safe copy is ready**, and Redact reads the copy it just made, the same way it read the original. After about 25 seconds it lists what is still readable:
+Select **Done**.
+The screen changes to **Your safe copy is ready**, and Redact reads the copy it just made, the same way it read the original.
+After about 25 seconds it lists what is still readable:
 
 ![The finished screen listing the email as still readable on the copy](/docs/redact/images/laya-copy-check.png)
 
-That's the email we rejected. The check is a reminder, not a block: you decided to keep the email, so **Save copy** stays enabled.
+That's the email we rejected.
+The check is a reminder, not a block: you decided to keep the email, so **Save copy** stays enabled.
 
-Select **Save copy**. Your browser downloads `chat-private.redacted.png`.
+Select **Save copy**.
+Your browser downloads `chat-private.redacted.png`.
 
 ## 8. Check what you'll share
 
@@ -117,17 +138,22 @@ Open the downloaded file outside the browser.
 
 ![The saved copy with six fields covered and the email still visible](/docs/redact/images/use-07-result.png)
 
-The name, address, phone number, account number, reference and the "amount" line are solid black. The email is still there, because we rejected that suggestion. The covered text is gone from the file itself: the copy is a new image, not the original with boxes drawn on top.
+The name, address, phone number, account number, reference and the "amount" line are solid black.
+The email is still there, because we rejected that suggestion.
+The covered text is gone from the file itself: the copy is a new image, not the original with boxes drawn on top.
 
-Now open `public/test-files/redact/chat-private.png` again. It's unchanged.
+Now open `public/test-files/redact/chat-private.png` again.
+It's unchanged.
 
 ## What we did
 
 We ran a privacy tool whose OCR and decision model both ran on our own machine, let it propose what to cover, overruled it once, and produced a flattened copy that contains only what we approved.
 
-To stop, press `Ctrl+C` in both terminals. The models stay in `redact/.qvac/models` for next time.
+To stop, press `Ctrl+C` in both terminals.
+The models stay in `redact/.qvac/models` for next time.
 
 ## Next
 
-- Build this app yourself, starting from a version with no AI: [01. Run the manual starter](/docs/redact/tutorials/01-starter).
+- Build this app yourself, starting from a version with no AI: [01.
+  Run the manual starter](/docs/redact/tutorials/01-starter).
 - Why a suggestion never covers anything on its own: [About Redact's trust boundary](/docs/redact/concepts/trust-boundary).

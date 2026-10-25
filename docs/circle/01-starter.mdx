@@ -9,9 +9,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will build Circle as a working phonebook with no AI: alphabet tabs, person cards with timelines, logged interactions and memories, gentle reminders, and circles, all saved in the browser.
 
-Before a model can help, the product has to stand on its own. Circle is a warm personal phonebook. You open a letter tab, find a person, and read what you have saved about them: things they shared, times you talked, and promises you made.
+Before a model can help, the product has to stand on its own.
+Circle is a warm personal phonebook.
+You open a letter tab, find a person, and read what you have saved about them: things they shared, times you talked, and promises you made.
 
-This is not a sales CRM. There are no scores, no cadences, and no contact import. Every person in the demo book is fictional.
+This is not a sales CRM.
+There are no scores, no cadences, and no contact import.
+Every person in the demo book is fictional.
 
 **Source checkpoint:** `7a37170` · **Starting checkpoint:** `49cb5bb`
 
@@ -38,7 +42,8 @@ git checkout 49cb5bb
 npm ci
 ```
 
-The starting checkpoint is only a heading page. In this chapter you build the product around it.
+The starting checkpoint is only a heading page.
+In this chapter you build the product around it.
 
 ### 2. Run the app
 
@@ -46,23 +51,34 @@ The starting checkpoint is only a heading page. In this chapter you build the pr
 npm run dev
 ```
 
-Open `http://localhost:3000`. The **A** tab opens with Amara Okafor's card. Letters with nobody under them are disabled.
+Open `http://localhost:3000`.
+The **A** tab opens with Amara Okafor's card.
+Letters with nobody under them are disabled.
 
 ### 3. Log something and reload
 
-Open the **D** tab and choose Dev Raman. Pick **Memory**, write `Prefers tea after six.`, and select **Save to timeline**. Reload the page. The entry is still there, because `storage.ts` wrote the whole book to `localStorage` under `circle:v1`.
+Open the **D** tab and choose Dev Raman.
+Pick **Memory**, write `Prefers tea after six.`, and select **Save to timeline**.
+Reload the page.
+The entry is still there, because `storage.ts` wrote the whole book to `localStorage` under `circle:v1`.
 
 ### 4. Read the boundary
 
-Only `storage.ts` touches persistence. The UI calls pure functions in `state.ts` and hands the result to `store.save`. When we add local AI later, it will propose changes. These same functions will still decide what is valid.
+Only `storage.ts` touches persistence.
+The UI calls pure functions in `state.ts` and hands the result to `store.save`.
+When we add local AI later, it will propose changes.
+These same functions will still decide what is valid.
 
 ### 5. Try the edges
 
-Save an empty entry: you see `Write something before saving`. Mark Dev's reminder done. Select **Reset demo data** to return to the fictional book.
+Save an empty entry: you see `Write something before saving`.
+Mark Dev's reminder done.
+Select **Reset demo data** to return to the fictional book.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="src/app/layout.tsx">
@@ -777,7 +793,8 @@ afterEach(() => cleanup());
 npm test
 ```
 
-Expected result: 2 test files pass, 7 tests pass. These tests use the fictional demo book only.
+Expected result: 2 test files pass, 7 tests pass.
+These tests use the fictional demo book only.
 
 Run the broader checks from the app directory:
 

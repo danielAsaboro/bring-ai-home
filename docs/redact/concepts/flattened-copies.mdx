@@ -3,34 +3,52 @@ title: "About flattened copies"
 description: "Why Redact saves a new image of each page instead of drawing boxes on the original file."
 ---
 
-The most common redaction failure isn't a missed field. It's a black box that only *looks* like it hides something. Redact's export design exists to make that failure impossible within the copy it creates.
+The most common redaction failure isn't a missed field.
+It's a black box that only *looks* like it hides something.
+Redact's export design exists to make that failure impossible within the copy it creates.
 
 ## Why boxes on top aren't enough
 
-A PDF is a set of drawing instructions, not a picture. Text is stored as text objects; a black rectangle drawn later is just another object on top. Anyone can select the text under the box, copy it, or delete the rectangle in an editor. Court filings and government reports have leaked this way many times.
+A PDF is a set of drawing instructions, not a picture.
+Text is stored as text objects; a black rectangle drawn later is just another object on top.
+Anyone can select the text under the box, copy it, or delete the rectangle in an editor.
+Court filings and government reports have leaked this way many times.
 
 Images have quieter versions of the same problem: metadata such as EXIF, embedded thumbnails, or an editor that saves layers.
 
 ## What Redact does instead
 
-Redact never edits the uploaded file. When you select **Done**, it starts from the page rasters it prepared at the beginning, the same PNG images the review workspace shows. For each page it paints every accepted and manual mark as solid pixels onto a canvas and encodes the result as a new PNG.
+Redact never edits the uploaded file.
+When you select **Done**, it starts from the page rasters it prepared at the beginning, the same PNG images the review workspace shows.
+For each page it paints every accepted and manual mark as solid pixels onto a canvas and encodes the result as a new PNG.
 
 - A PNG or JPEG source becomes one new `.redacted.png`.
-- A PDF source becomes a new PDF built with `pdf-lib`, where each page is a single full-page image. There are no text objects to copy because no text was ever written.
+- A PDF source becomes a new PDF built with `pdf-lib`, where each page is a single full-page image.
+  There are no text objects to copy because no text was ever written.
 
-So in the saved copy a mark isn't a layer: the pixels under it are gone. The new PDF carries only Redact's own producer and creator fields, not the source's metadata.
+So in the saved copy a mark isn't a layer: the pixels under it are gone.
+The new PDF carries only Redact's own producer and creator fields, not the source's metadata.
 
-The original bytes stay in memory unchanged and are never written back. Redact's offline browser test checks this by comparing the source file's SHA-256 before and after a full review and save.
+The original bytes stay in memory unchanged and are never written back.
+Redact's offline browser test checks this by comparing the source file's SHA-256 before and after a full review and save.
 
 ## What it costs
 
-Rasterizing is lossy on purpose. Text in the saved copy can't be selected, searched or read by a screen reader. File sizes grow, because pages become images. Pages are rendered with the long edge capped at 2,400 pixels, so very large scans are scaled down and fine print may soften.
+Rasterizing is lossy on purpose.
+Text in the saved copy can't be selected, searched or read by a screen reader.
+File sizes grow, because pages become images.
+Pages are rendered with the long edge capped at 2,400 pixels, so very large scans are scaled down and fine print may soften.
 
-A text-preserving redactor, one that really removes text objects under each box and keeps the rest, would avoid those costs. It is also much harder to get right across every PDF feature: annotations, forms, incremental saves, fonts with odd encodings. For a course and for a person sharing one document, the raster approach is the version that is easy to reason about.
+A text-preserving redactor, one that really removes text objects under each box and keeps the rest, would avoid those costs.
+It is also much harder to get right across every PDF feature: annotations, forms, incremental saves, fonts with odd encodings.
+For a course and for a person sharing one document, the raster approach is the version that is easy to reason about.
 
 ## Where the guarantee stops
 
-Flattening guarantees that what's under a mark is gone from the copy. It can't guarantee that every sensitive field was marked. That is still the reviewer's job ([About Redact's trust boundary](/docs/redact/concepts/trust-boundary)). Nor does it cover what's outside the copy, such as the original file on disk or a screenshot of the review screen ([About what Redact does not protect](/docs/redact/concepts/threat-model)).
+Flattening guarantees that what's under a mark is gone from the copy.
+It can't guarantee that every sensitive field was marked.
+That is still the reviewer's job ([About Redact's trust boundary](/docs/redact/concepts/trust-boundary)).
+Nor does it cover what's outside the copy, such as the original file on disk or a screenshot of the review screen ([About what Redact does not protect](/docs/redact/concepts/threat-model)).
 
 ## Related
 

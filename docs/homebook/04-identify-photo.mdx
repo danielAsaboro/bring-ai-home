@@ -7,7 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 04. Identify the asset from a photo" />
 
-A rating plate gives the model and serial. A photo of the whole appliance can suggest what it is. We use SmolVLM2, a small local vision model, to propose a category. The model writes free text. Homebook only accepts a category from its own list.
+A rating plate gives the model and serial.
+A photo of the whole appliance can suggest what it is.
+We use SmolVLM2, a small local vision model, to propose a category.
+The model writes free text.
+Homebook only accepts a category from its own list.
 
 **Source checkpoint:** `097e56d` · **Starting checkpoint:** `fb2b93d`
 
@@ -29,25 +33,39 @@ A rating plate gives the model and serial. A photo of the whole appliance can su
 npm run qvac:identify-smoke
 ```
 
-`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with `projectionModelSrc: MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model lets the language model read an image. `completion` takes one message with `attachments: [{ path }]`. Read `identity.rawText` first, then `identity.category`.
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with `projectionModelSrc: MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`.
+The projection model lets the language model read an image.
+`completion` takes one message with `attachments: [{ path }]`.
+Read `identity.rawText` first, then `identity.category`.
 
 ### 2. Read the parser
 
-`parseAssetIdentity` looks for `category:` and `name:`. If the model says `water heater`, the parser turns it into `water-heater`, which is in the list. If it says `boiler tank`, the parser stores `other` and sets `categoryUnrecognised: true`. The panel then says so in plain words. A small model will sometimes be wrong, and the raw reply stays visible so you can see why.
+`parseAssetIdentity` looks for `category:` and `name:`.
+If the model says `water heater`, the parser turns it into `water-heater`, which is in the list.
+If it says `boiler tank`, the parser stores `other` and sets `categoryUnrecognised: true`.
+The panel then says so in plain words.
+A small model will sometimes be wrong, and the raw reply stays visible so you can see why.
 
 ### 3. Try it in the binder
 
-Restart `npm run qvac:service`. Choose `utility-room-heater.png` under **Identify from a photo**. The asset's category changes only when you press **Use category**.
+Restart `npm run qvac:service`.
+Choose `utility-room-heater.png` under **Identify from a photo**.
+The asset's category changes only when you press **Use category**.
 
 ### 4. Why the photo touches disk
 
-QVAC attachments take a file path. The service writes the uploaded bytes to `.qvac/inbox/<random>.png`, runs the completion, and deletes the file in `finally`. `.qvac/` is ignored by git.
+QVAC attachments take a file path.
+The service writes the uploaded bytes to `.qvac/inbox/<random>.png`, runs the completion, and deletes the file in `finally`.
+`.qvac/` is ignored by git.
 
-The vision model download stalled in our build container, as in chapter 02. We have no live reply to show here.
+The vision model download stalled in our build container, as in chapter 02.
+We have no live reply to show here.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -819,7 +837,8 @@ export const serviceClient: AssistClient = {
 npm test -- src/features/homebook/asset-identity.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. Every reply in it is a hand-written fixture.
+Expected result: 1 test file passes, 3 tests pass.
+Every reply in it is a hand-written fixture.
 
 Run the broader checks from the app directory:
 

@@ -7,11 +7,18 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Circle · 05. Confirm proposals before they are saved" />
 
-We will show extracted items as unticked proposals with their evidence. A person can edit, tick, or ignore each one. Only ticked items are saved, and plain code saves them.
+We will show extracted items as unticked proposals with their evidence.
+A person can edit, tick, or ignore each one.
+Only ticked items are saved, and plain code saves them.
 
-This is the moment Circle is built for. You speak a messy recap. Circle shows what it found. You keep only what is right.
+This is the moment Circle is built for.
+You speak a messy recap.
+Circle shows what it found.
+You keep only what is right.
 
-Every proposal starts unticked. The save button counts what you ticked and stays disabled at zero. The model never writes to the book.
+Every proposal starts unticked.
+The save button counts what you ticked and stays disabled at zero.
+The model never writes to the book.
 
 **Source checkpoint:** `f0e0c0c` · **Starting checkpoint:** `f5faf8e`
 
@@ -39,11 +46,18 @@ npm run dev
 
 ### 2. Speak, then read
 
-Choose your recording in **Voice recap**, or type a recap into the box. Select **Find proposals**. Each row shows the type, the person, editable text, a date for promises and dates, and `You said: “…”` with the evidence.
+Choose your recording in **Voice recap**, or type a recap into the box.
+Select **Find proposals**.
+Each row shows the type, the person, editable text, a date for promises and dates, and `You said: “…”` with the evidence.
 
 ### 3. Confirm only what is right
 
-Tick the promise. Fix its wording if needed. Leave a wrong item unticked. Select **Save 1 confirmed**. Open the person's card: the promise is now a gentle reminder. The unticked item is nowhere.
+Tick the promise.
+Fix its wording if needed.
+Leave a wrong item unticked.
+Select **Save 1 confirmed**.
+Open the person's card: the promise is now a gentle reminder.
+The unticked item is nowhere.
 
 ### 4. Open what was set aside
 
@@ -51,11 +65,14 @@ Expand **set aside by the app** to see the items the checks in chapter 04 refuse
 
 ### 5. Turn the service off
 
-Stop `qvac:service` and select **Find proposals** again. You see `The local AI service is not running`. Manual logging still works.
+Stop `qvac:service` and select **Find proposals** again.
+You see `The local AI service is not running`.
+Manual logging still works.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `circle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `circle` app.
 
 <AccordionGroup>
 <Accordion title="src/features/circle/CircleApp.tsx">
@@ -818,7 +835,10 @@ export function applyConfirmed(
 npm test -- src/features/circle/RecapPanel.test.tsx src/features/circle/state.test.ts
 ```
 
-Expected result: 2 test files pass, 6 tests pass. The panel test uses a fixture client that returns hand-written proposals. These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code. They prove the app's rules, not live model inference.
+Expected result: 2 test files pass, 6 tests pass.
+The panel test uses a fixture client that returns hand-written proposals.
+These focused tests use hand-written fixtures, and each one is labelled as a fixture in the code.
+They prove the app's rules, not live model inference.
 
 Run the broader checks from the app directory:
 

@@ -7,7 +7,8 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 08. Prove footage never leaves the machine" />
 
-A blocked `fetch` or a full cache is not an offline proof. We will run the vision check inside an operating-system sandbox that denies every outbound connection except loopback, prove the denial with a probe, and still get a verdict for a stored frame.
+A blocked `fetch` or a full cache is not an offline proof.
+We will run the vision check inside an operating-system sandbox that denies every outbound connection except loopback, prove the denial with a probe, and still get a verdict for a stored frame.
 
 **Source checkpoint:** `4f6617d` · **Starting checkpoint:** `3e3ecdc`
 
@@ -32,7 +33,9 @@ git checkout 4f6617d
 npm run qvac:check-smoke
 ```
 
-The offline run needs SmolVLM2 and its projection model already in `.qvac/models`. Without them, `offline-check.mjs` stops with "QVAC cache is incomplete". We saw exactly that message in our build container, where the cache is empty.
+The offline run needs SmolVLM2 and its projection model already in `.qvac/models`.
+Without them, `offline-check.mjs` stops with "QVAC cache is incomplete".
+We saw exactly that message in our build container, where the cache is empty.
 
 ### 2. Run the proof
 
@@ -41,9 +44,13 @@ unset LOOKOUT_DELEGATE
 npm run qvac:offline
 ```
 
-`sandbox-exec` is macOS only. The script first tries `https://example.com`. Only a refused connection counts as `network-denied`; a DNS failure does not prove anything. Then it checks `front-gate-3.png` and prints the frame digest and the verdict.
+`sandbox-exec` is macOS only.
+The script first tries `https://example.com`.
+Only a refused connection counts as `network-denied`; a DNS failure does not prove anything.
+Then it checks `front-gate-3.png` and prints the frame digest and the verdict.
 
-The proof refuses to run with `LOOKOUT_DELEGATE` set. Delegation needs the home network, and this chapter proves the opposite.
+The proof refuses to run with `LOOKOUT_DELEGATE` set.
+Delegation needs the home network, and this chapter proves the opposite.
 
 ### 3. Run the whole app under the policy
 
@@ -52,13 +59,17 @@ npm run qvac:service:offline
 npm run dev
 ```
 
-Check watchers on stored frames. The browser talks to `127.0.0.1`, which the policy allows. The QVAC process cannot reach anything else.
+Check watchers on stored frames.
+The browser talks to `127.0.0.1`, which the policy allows.
+The QVAC process cannot reach anything else.
 
-This is process-level denial, not a disconnected machine. Other processes on the computer still have the network.
+This is process-level denial, not a disconnected machine.
+Other processes on the computer still have the network.
 
 ## Read the checkpoint implementation
 
-These are complete files from `4f6617d`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `4f6617d`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -289,9 +300,11 @@ Run the focused tests for this chapter:
 npm test -- qvac-service/offline-proof.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. They use hand-written file listings and probe results, not a real sandbox run.
+Expected result: 1 test file passes, 3 tests pass.
+They use hand-written file listings and probe results, not a real sandbox run.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -314,4 +327,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] `npm run qvac:offline` reported `network-denied` and a verdict.
 - [ ] You checked watchers in the app with the service under the policy.
 
-You finished the Lookout course. Back to the [Lookout overview](/docs/lookout/overview).
+You finished the Lookout course.
+Back to the [Lookout overview](/docs/lookout/overview).

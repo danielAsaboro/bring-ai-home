@@ -9,11 +9,16 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will gate every proposal through the closed rule vocabulary, show it in plain language, and apply it only as a revision a person can undo.
 
-A raw reply can contain anything: a regex, a made-up `script` rule, a template with no `{value}`, or broken JSON. Showing that to a person is not enough. The app must decide whether a proposal is even a Pattern weave.
+A raw reply can contain anything: a regex, a made-up `script` rule, a template with no `{value}`, or broken JSON.
+Showing that to a person is not enough.
+The app must decide whether a proposal is even a Pattern weave.
 
-The gate is `checkProposal`. It accepts only the five known kinds with their exact fields and short literal text, at most six rules, and rejects the whole proposal with readable reasons otherwise. The service runs the gate, and the browser runs it again, because the app never trusts a rule it did not check itself.
+The gate is `checkProposal`.
+It accepts only the five known kinds with their exact fields and short literal text, at most six rules, and rejects the whole proposal with readable reasons otherwise.
+The service runs the gate, and the browser runs it again, because the app never trusts a rule it did not check itself.
 
-**Readable** means each rule is shown as a sentence. **Reversible** means applying saves your current weave as **Before proposal** first, so one click on Restore undoes it.
+**Readable** means each rule is shown as a sentence.
+**Reversible** means applying saves your current weave as **Before proposal** first, so one click on Restore undoes it.
 
 **Source checkpoint:** `f6ec73d` · **Starting checkpoint:** `86e219b`
 
@@ -36,19 +41,25 @@ git checkout f6ec73d
 npm test -- src/features/pattern/rule-schema.test.ts
 ```
 
-The fixtures include `{"kind":"script"}`, a replace rule with a `regex` field, a template without `{value}`, and seven rules. Each is rejected with a sentence a person can read.
+The fixtures include `{"kind":"script"}`, a replace rule with a `regex` field, a template without `{value}`, and seven rules.
+Each is rejected with a sentence a person can read.
 
 ### 2. Apply and undo
 
-With the service running, propose rules for **Vendor names**. If the proposal passes the gate, read the sentences, press **Apply as new revision**, then **Restore Before proposal**. The empty weave returns.
+With the service running, propose rules for **Vendor names**.
+If the proposal passes the gate, read the sentences, press **Apply as new revision**, then **Restore Before proposal**.
+The empty weave returns.
 
 ### 3. Notice what is still missing
 
-A proposal can be perfectly readable and still wrong. Nothing yet checks that it produces the right output. That is the next chapter.
+A proposal can be perfectly readable and still wrong.
+Nothing yet checks that it produces the right output.
+That is the next chapter.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/server.ts">
@@ -719,7 +730,8 @@ export function reduce(patterns: Pattern[], action: Action): Pattern[] {
 npm test -- src/features/pattern/rule-schema.test.ts qvac-service/server.test.ts src/features/pattern/ProposalPanel.test.tsx src/features/pattern/workbench.test.ts
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -729,7 +741,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `f6ec73d`, lint and typecheck pass and the full suite passes 25 tests. Every rejected proposal in the tests is a FIXTURE. We did not observe a live model producing these; they are the shapes the gate must refuse.
+**Receipt:** at `f6ec73d`, lint and typecheck pass and the full suite passes 25 tests.
+Every rejected proposal in the tests is a FIXTURE.
+We did not observe a live model producing these; they are the shapes the gate must refuse.
 
 Then record your checkpoint:
 

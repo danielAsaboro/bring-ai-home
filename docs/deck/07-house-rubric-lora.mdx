@@ -7,9 +7,14 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 07. Adapt critique to a house rubric with LoRA" />
 
-Every team has a house style for arguments. Here it is four rules: one beat per card, evidence after every claim, a specific ask, and an opening that speaks to the audience. A general model critiques vaguely. A LoRA adapter, trained locally on a few examples, nudges it toward the rubric's voice.
+Every team has a house style for arguments.
+Here it is four rules: one beat per card, evidence after every claim, a specific ask, and an opening that speaks to the audience.
+A general model critiques vaguely.
+A LoRA adapter, trained locally on a few examples, nudges it toward the rubric's voice.
 
-The installed SDK exports `finetune()` in `@qvac/sdk` 0.22.0, and the llama.cpp model config accepts a `lora` path, so this chapter keeps LoRA. The dataset is a tiny fixture of eight invented decks. It teaches the mechanics, not a production-quality adapter.
+The installed SDK exports `finetune()` in `@qvac/sdk` 0.22.0, and the llama.cpp model config accepts a `lora` path, so this chapter keeps LoRA.
+The dataset is a tiny fixture of eight invented decks.
+It teaches the mechanics, not a production-quality adapter.
 
 **Source checkpoint:** `067701b` · **Starting checkpoint:** `2434066`
 
@@ -31,7 +36,8 @@ The installed SDK exports `finetune()` in `@qvac/sdk` 0.22.0, and the llama.cpp 
 npm test -- src/features/deck/house-rubric.test.ts
 ```
 
-The last test runs every assistant answer in the dataset through `parseCritique`. A training example the app would reject would teach the model to produce output the app throws away.
+The last test runs every assistant answer in the dataset through `parseCritique`.
+A training example the app would reject would teach the model to produce output the app throws away.
 
 ### 2. Train the adapter
 
@@ -39,17 +45,25 @@ The last test runs every assistant answer in the dataset through `parseCritique`
 npm run qvac:finetune-rubric
 ```
 
-It prints the loss for each step and the final result. Record your own numbers. The SDK's own finetune example names `QWEN3_600M_INST_Q4`, which is not in the 0.22.0 model registry, so the course uses the text model already in the service. Fine-tuning is not supported for every model and quantization: if this run fails at the start, that is a model support limit, not a dataset problem.
+It prints the loss for each step and the final result.
+Record your own numbers.
+The SDK's own finetune example names `QWEN3_600M_INST_Q4`, which is not in the 0.22.0 model registry, so the course uses the text model already in the service.
+Fine-tuning is not supported for every model and quantization: if this run fails at the start, that is a model support limit, not a dataset problem.
 
 ### 3. Critique a deck
 
-Restart `npm run qvac:service`. The log says either `Rubric critique ready (adapter …)` or `(base model, no adapter)`. Press **Critique this deck**. The status line repeats which one answered, so a viewer can always tell whether the adapter was in use.
+Restart `npm run qvac:service`.
+The log says either `Rubric critique ready (adapter …)` or `(base model, no adapter)`.
+Press **Critique this deck**.
+The status line repeats which one answered, so a viewer can always tell whether the adapter was in use.
 
 Compare the two on the same deck if you like, but do not call the adapter better until you have measured it on labelled decks.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -1276,7 +1290,8 @@ export function rubricLabel(id: RubricId): string {
 npm test -- src/features/deck/house-rubric.test.ts src/features/deck/CritiquePanel.test.tsx qvac-service/server.test.ts
 ```
 
-Expected result: 3 test files pass, 10 tests pass. The critique text in these tests is a fixture; the dataset test reads the real training files.
+Expected result: 3 test files pass, 10 tests pass.
+The critique text in these tests is a fixture; the dataset test reads the real training files.
 
 Run the broader checks from the app directory:
 

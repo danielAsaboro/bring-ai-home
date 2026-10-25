@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 07. Review and publish an issue" />
 
-We will connect caption drafting to the Chronicle page through a small local HTTP service. A person picks memories, asks for drafts, edits or rejects each one, and then publishes an issue.
+We will connect caption drafting to the Chronicle page through a small local HTTP service.
+A person picks memories, asks for drafts, edits or rejects each one, and then publishes an issue.
 
-React never imports QVAC. The browser talks to a service on `127.0.0.1`. If that service is down, Chronicle still works by hand.
+React never imports QVAC.
+The browser talks to a service on `127.0.0.1`.
+If that service is down, Chronicle still works by hand.
 
 **Source checkpoint:** `e503d4b` · **Starting checkpoint:** `d413c3a`
 
@@ -32,7 +35,12 @@ React never imports QVAC. The browser talks to a service on `127.0.0.1`. If that
 npm run dev
 ```
 
-Tick "Include in issue" on "First tomatoes" and select **Publish issue**. The issue appears. Now select **Draft caption for Nine candles**. You see "The local QVAC service is not running. You can still edit captions by hand." That is the correct result.
+Tick "Include in issue" on "First tomatoes" and select **Publish issue**.
+The issue appears.
+Now select **Draft caption for Nine candles**.
+You see "The local QVAC service is not running.
+You can still edit captions by hand."
+That is the correct result.
 
 ### 2. Start the service
 
@@ -43,19 +51,31 @@ npm run qvac:service
 curl http://127.0.0.1:4318/health
 ```
 
-`drafting: true` means the model loaded. `drafting: false` means the process is up but the model is not. Then `/caption` answers 503, never a made-up caption.
+`drafting: true` means the model loaded.
+`drafting: false` means the process is up but the model is not.
+Then `/caption` answers 503, never a made-up caption.
 
 ### 3. Review a draft
 
-Tick "Picnic at Gull Point" and draft its caption. Try **Publish issue** first. It is blocked: "Accept or reject every caption draft before publishing". Edit the draft, select **Accept caption**, and publish. The issue shows your edited text. Caption history shows the old caption.
+Tick "Picnic at Gull Point" and draft its caption.
+Try **Publish issue** first.
+It is blocked: "Accept or reject every caption draft before publishing".
+Edit the draft, select **Accept caption**, and publish.
+The issue shows your edited text.
+Caption history shows the old caption.
 
 ### 4. Inspect the boundary
 
-The service binds to `127.0.0.1` and only admits browser origins on `localhost` or `127.0.0.1`. It checks the memory before calling the model and checks the draft before returning it. The client checks again, including that the draft is for the memory it asked about. This keeps out other websites. It is not protection against other software on your own machine.
+The service binds to `127.0.0.1` and only admits browser origins on `localhost` or `127.0.0.1`.
+It checks the memory before calling the model and checks the draft before returning it.
+The client checks again, including that the draft is for the memory it asked about.
+This keeps out other websites.
+It is not protection against other software on your own machine.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/server.ts">
@@ -460,9 +480,13 @@ export function IssueEditor(props: {
 npm test -- qvac-service/server.test.ts src/features/chronicle/IssueEditor.test.tsx
 ```
 
-Expected result: 2 test files pass, 7 tests pass. The service tests use a fixture drafter. The editor tests use a fixture `requestDraft`.
+Expected result: 2 test files pass, 7 tests pass.
+The service tests use a fixture drafter.
+The editor tests use a fixture `requestDraft`.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

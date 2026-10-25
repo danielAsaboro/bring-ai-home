@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 06. Answer with citations to the manual page" />
 
-Warranty and safety answers must point at their source. The model gets numbered manual excerpts and must cite them. Homebook then removes any citation that points at nothing, and refuses to show an answer with no valid citation.
+Warranty and safety answers must point at their source.
+The model gets numbered manual excerpts and must cite them.
+Homebook then removes any citation that points at nothing, and refuses to show an answer with no valid citation.
 
 **Source checkpoint:** `4f6641a` · **Starting checkpoint:** `4633a20`
 
@@ -33,23 +35,33 @@ npm run qvac:service
 
 ### 2. Ask a question
 
-On the water heater, ask `How do I relight the pilot?`. Homebook sends the question with this asset's manual ids, so the dishwasher manual cannot answer for the heater. The answer lists sources like `Aquaterra AT-50G owner's manual, page 4`. Open it and check.
+On the water heater, ask `How do I relight the pilot?`.
+Homebook sends the question with this asset's manual ids, so the dishwasher manual cannot answer for the heater.
+The answer lists sources like `Aquaterra AT-50G owner's manual, page 4`.
+Open it and check.
 
 ### 3. Read the three outcomes
 
-- `answered`: the draft cites at least one retrieved excerpt. Citation numbers outside the list, like `[7]` when there are three excerpts, are removed.
-- `not-in-manuals`: retrieval found nothing above the score floor, or the model replied `NOT IN MANUALS`. With no excerpts, the model is never called.
-- `unsupported`: the model wrote prose with no valid citation. Homebook does not show it as an answer.
+- `answered`: the draft cites at least one retrieved excerpt.
+  Citation numbers outside the list, like `[7]` when there are three excerpts, are removed.
+- `not-in-manuals`: retrieval found nothing above the score floor, or the model replied `NOT IN MANUALS`.
+  With no excerpts, the model is never called.
+- `unsupported`: the model wrote prose with no valid citation.
+  Homebook does not show it as an answer.
 
 ### 4. Ask something the manuals do not cover
 
-Ask `What colour is the roof?`. You should get the `not-in-manuals` message, which points you to the original document or a professional.
+Ask `What colour is the roof?`.
+You should get the `not-in-manuals` message, which points you to the original document or a professional.
 
-The LLM and embedding downloads stalled in our build container. We have no live answer to show.
+The LLM and embedding downloads stalled in our build container.
+We have no live answer to show.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="qvac-service/serve.mjs">
@@ -1212,7 +1224,8 @@ export const fixtureEmbedder: Embedder = async (texts) => texts.map(fixtureVecto
 npm test -- src/features/homebook/cited-answer.test.ts
 ```
 
-Expected result: 1 test file passes, 4 tests pass. Every model reply is a hand-written fixture.
+Expected result: 1 test file passes, 4 tests pass.
+Every model reply is a hand-written fixture.
 
 Run the broader checks from the app directory:
 

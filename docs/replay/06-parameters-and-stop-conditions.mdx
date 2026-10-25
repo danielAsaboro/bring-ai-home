@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 06. Extract parameters and stop conditions" />
 
-A procedure that cannot say when to stop is dangerous to follow. Recorded workflows rot: layouts change, exports come back empty. The tape should carry its own stop conditions.
+A procedure that cannot say when to stop is dangerous to follow.
+Recorded workflows rot: layouts change, exports come back empty.
+The tape should carry its own stop conditions.
 
-The same model proposes three lists with a second schema. The gate is stricter here: a parameter's example value must appear inside its own quote.
+The same model proposes three lists with a second schema.
+The gate is stricter here: a parameter's example value must appear inside its own quote.
 
 **Source checkpoint:** `08c0682` · **Starting checkpoint:** `01890a7`
 
@@ -17,7 +20,8 @@ The same model proposes three lists with a second schema. The gate is stricter h
 
 - `src/features/replay/conditions.ts`: `CONDITIONS_JSON_SCHEMA`, the prompt, `parseConditions`, `toParameterName` (snake_case), and `mergeConditions`, which never overwrites what a person already wrote.
 - `/v1/propose-conditions` uses the same drafter door with a schema named `conditions`.
-- The panel adds **Propose inputs and stop conditions** with checkboxes and reasons. Accepted items merge into the tape's parameter, precondition, and stop condition fields.
+- The panel adds **Propose inputs and stop conditions** with checkboxes and reasons.
+  Accepted items merge into the tape's parameter, precondition, and stop condition fields.
 - The editor's text fields now follow the saved value after a merge.
 
 To compare with the previous checkpoint: `git diff 01890a7 08c0682`.
@@ -36,11 +40,15 @@ Transcribe your narration and click **Propose inputs and stop conditions**.
 
 ### 2. Check the grounding
 
-Each item shows its quote. A parameter like `week_start = September 28th` is only shown when "September 28th" appears inside the quoted words. A stop condition the narration never said is held back.
+Each item shows its quote.
+A parameter like `week_start = September 28th` is only shown when "September 28th" appears inside the quoted words.
+A stop condition the narration never said is held back.
 
 ### 3. Accept and play
 
-Tick the items you want and click **Add N selected items**. Play the tape: the player shows **Stop safely if** with your accepted conditions above the playhead. **Stop safely** still needs you to type a reason.
+Tick the items you want and click **Add N selected items**.
+Play the tape: the player shows **Stop safely if** with your accepted conditions above the playhead.
+**Stop safely** still needs you to type a reason.
 
 ## Read the checkpoint implementation
 
@@ -1580,7 +1588,8 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 11 passed (11)`, `Tests 33 passed (33)`. On the fixture, `week_start` passes, `workspace` is held back because "Finance" is not in its quote, and an unsaid stop condition is held back.
+Expected: `Test Files 11 passed (11)`, `Tests 33 passed (33)`.
+On the fixture, `week_start` passes, `workspace` is held back because "Finance" is not in its quote, and an unsaid stop condition is held back.
 
 ## Before continuing
 

@@ -9,9 +9,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will keep held-out counterexamples away from the model and refuse any proposal that does not replay every saved case.
 
-Three examples are easy to overfit. A weave that turns `" inv 0042 "` into `INV-0042` by stripping `INV ` and formatting `INV-{value}` matches every example, then turns an already clean `INV-0042` into `INV-INV-0042`.
+Three examples are easy to overfit.
+A weave that turns `" inv 0042 "` into `INV-0042` by stripping `INV ` and formatting `INV-{value}` matches every example, then turns an already clean `INV-0042` into `INV-INV-0042`.
 
-Counterexamples are saved cases the model never sees. The app replays the proposal against examples and counterexamples together. If any case fails, the panel lists it (input, actual, expected) and **Apply as new revision** is disabled. A person can still fix the weave by hand.
+Counterexamples are saved cases the model never sees.
+The app replays the proposal against examples and counterexamples together.
+If any case fails, the panel lists it (input, actual, expected) and **Apply as new revision** is disabled.
+A person can still fix the weave by hand.
 
 **Source checkpoint:** `e181a61` · **Starting checkpoint:** `f6ec73d`
 
@@ -33,19 +37,23 @@ git checkout e181a61
 npm test -- src/features/pattern/ProposalPanel.test.tsx
 ```
 
-The FIXTURE proposal matches all three invoice examples and fails the counterexample: `"INV-0042" → "INV-INV-0042"`. Apply is disabled.
+The FIXTURE proposal matches all three invoice examples and fails the counterexample: `"INV-0042" → "INV-INV-0042"`.
+Apply is disabled.
 
 ### 2. Add your own counterexample
 
-In the app, open **Contact names**, tick **counterexample**, and add `Maren Hollis` → `Maren Hollis`. It appears under **Counterexamples · never sent to the model** with its result.
+In the app, open **Contact names**, tick **counterexample**, and add `Maren Hollis` → `Maren Hollis`.
+It appears under **Counterexamples · never sent to the model** with its result.
 
 ### 3. Check older saved data
 
-Patterns saved before this chapter have no `counterexamples` field. `replayGate` treats that as an empty list, so they still load and gate on their examples.
+Patterns saved before this chapter have no `counterexamples` field.
+`replayGate` treats that as an empty list, so they still load and gate on their examples.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="src/features/pattern/ProposalPanel.tsx">
@@ -629,7 +637,8 @@ export function reduce(patterns: Pattern[], action: Action): Pattern[] {
 npm test -- src/features/pattern/ProposalPanel.test.tsx src/features/pattern/workbench.test.ts
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -639,7 +648,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `e181a61`, lint and typecheck pass and the full suite passes 28 tests. The failing proposal is a hand-written FIXTURE chosen to overfit. It is not a recorded model mistake.
+**Receipt:** at `e181a61`, lint and typecheck pass and the full suite passes 28 tests.
+The failing proposal is a hand-written FIXTURE chosen to overfit.
+It is not a recorded model mistake.
 
 Then record your checkpoint:
 

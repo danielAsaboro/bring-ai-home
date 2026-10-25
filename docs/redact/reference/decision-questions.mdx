@@ -3,7 +3,8 @@ title: "Decision questions"
 description: "The Laya questions Redact asks about each OCR line, the threshold, and how answers become suggestions."
 ---
 
-Defined in `qvac-service/decision-reasoner.ts`; selected by `qvac-service/reasoner-choice.ts`. Since lesson 11.
+Defined in `qvac-service/decision-reasoner.ts`; selected by `qvac-service/reasoner-choice.ts`.
+Since lesson 11.
 
 ## Model
 
@@ -53,11 +54,15 @@ The `decide()` call fails the analysis (`503 analyzer_unavailable`) if it return
 | unset or `laya` | Laya, `LAYA_421M_Q8_0` |
 | `qwen` | Qwen3 0.6B, `QWEN3_600M_INST_Q4`, structured output |
 
-Read by `npm run qvac:service`, `qvac:evaluate` and `qvac:offline`. `qvac:offline` requires the chosen model's file in `.qvac/models`.
+Read by `npm run qvac:service`, `qvac:evaluate` and `qvac:offline`.
+`qvac:offline` requires the chosen model's file in `.qvac/models`.
 
 ## Copy check
 
-After **Done**, the browser sends each flattened page to `POST /v1/analyze-page` with the same level and direction. Any suggestion returned is listed under **Still readable on the copy**. It doesn't block **Save copy**. If the service is busy, preparing the next document waits up to 60 s for it.
+After **Done**, the browser sends each flattened page to `POST /v1/analyze-page` with the same level and direction.
+Any suggestion returned is listed under **Still readable on the copy**.
+It doesn't block **Save copy**.
+If the service is busy, preparing the next document waits up to 60 s for it.
 
 ## Measured
 

@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 01. Build the Homebook starter" />
 
-Home records scatter across a drawer of manuals, an email inbox, a calendar, and memory. They only matter when something breaks, and then nobody can find the serial number.
+Home records scatter across a drawer of manuals, an email inbox, a calendar, and memory.
+They only matter when something breaks, and then nobody can find the serial number.
 
-Homebook is a living binder for one home. This chapter builds the whole non-AI product first. Every later chapter adds local AI to an app that already does its job by hand, and the app must keep working when the AI is not there.
+Homebook is a living binder for one home.
+This chapter builds the whole non-AI product first.
+Every later chapter adds local AI to an app that already does its job by hand, and the app must keep working when the AI is not there.
 
 **Source checkpoint:** `cda74e3` · **Starting checkpoint:** `cb2e661`
 
@@ -24,7 +27,8 @@ Homebook is a living binder for one home. This chapter builds the whole non-AI p
 | `public/test-files/homebook/*.txt` | Two fictional appliance manuals with printed page markers, used from chapter 05 |
 | `vitest.setup.ts` | Clean up rendered components between tests |
 
-Every home, brand, serial number, and manual is invented. Keep your real home records out of the repository.
+Every home, brand, serial number, and manual is invented.
+Keep your real home records out of the repository.
 
 ## Build and observe
 
@@ -43,28 +47,41 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. The binder opens on the water heater's asset plate. Look at the room tabs, the schedule badges (`overdue`, `due-soon`, `scheduled`), the service history, and the filed manual, receipt, and warranty.
+Open http://localhost:3000. The binder opens on the water heater's asset plate.
+Look at the room tabs, the schedule badges (`overdue`, `due-soon`, `scheduled`), the service history, and the filed manual, receipt, and warranty.
 
 ### 3. Do the manual job once
 
-1. Click **Stamp done: Flush sediment from the tank**. A dated record appears in the service history and the next due date moves 12 months on.
-2. Register an asset by hand: type a name, pick a room, and press **Register**. Its plate opens.
-3. Reload the page. Your changes are still there, because the binder saved through `storage.ts`.
+1. Click **Stamp done: Flush sediment from the tank**.
+   A dated record appears in the service history and the next due date moves 12 months on.
+2. Register an asset by hand: type a name, pick a room, and press **Register**.
+   Its plate opens.
+3. Reload the page.
+   Your changes are still there, because the binder saved through `storage.ts`.
 4. Press **Reset demo data** to return to the sample binder.
 
 ### 4. Read the boundary
 
-Open `storage.ts`. `createLocalStore` is the only code that touches `localStorage`. It catches blocked or corrupt storage and falls back to the sample binder, so a private window still works. Component tests pass an in-memory store instead.
+Open `storage.ts`.
+`createLocalStore` is the only code that touches `localStorage`.
+It catches blocked or corrupt storage and falls back to the sample binder, so a private window still works.
+Component tests pass an in-memory store instead.
 
-Open `binder.ts` and find `completeTask`. It returns a new binder with a history record and a moved due date. The UI never edits the binder directly.
+Open `binder.ts` and find `completeTask`.
+It returns a new binder with a history record and a moved due date.
+The UI never edits the binder directly.
 
 ### 5. One bug we hit
 
-The first test run failed with `Found multiple elements with the role "form"`. The starter's Vitest setup does not use globals, so Testing Library never cleaned up between tests. `vitest.setup.ts` now calls `cleanup()` after each test.
+The first test run failed with `Found multiple elements with the role "form"`.
+The starter's Vitest setup does not use globals, so Testing Library never cleaned up between tests.
+`vitest.setup.ts` now calls `cleanup()` after each test.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="README.md">
@@ -143,12 +160,7 @@ Model numbers, warranty terms, and maintenance instructions can be misread. Sour
 ## 17. Run, test, and reset
 
 ```bash
-npm install
-npm run dev
-npm run lint
-npm run typecheck
-npm test
-npm run build
+npm install npm run dev npm run lint npm run typecheck npm test npm run build
 ```
 
 The binder saves to `localStorage` through one adapter (`src/features/homebook/storage.ts`). The header has a visible **Reset demo data** action. Every home, brand, serial number, and manual in `src/features/homebook/binder.ts` and `public/test-files/homebook/` is fictional.

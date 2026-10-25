@@ -3,7 +3,8 @@ title: "Local service API"
 description: "Routes, request and response shapes, limits, and errors of Redact's localhost QVAC service."
 ---
 
-Defined in `qvac-service/server.ts`; schemas in `src/features/redact/analysis-contract.ts`. Started by `npm run qvac:service`.
+Defined in `qvac-service/server.ts`; schemas in `src/features/redact/analysis-contract.ts`.
+Started by `npm run qvac:service`.
 
 ## Address
 
@@ -15,7 +16,9 @@ Defined in `qvac-service/server.ts`; schemas in `src/features/redact/analysis-co
 
 ## Origins
 
-Requests with an `Origin` header are accepted only from `http://localhost:*` and `http://127.0.0.1:*`. Any other origin gets `403 origin_forbidden`. Requests without an `Origin` header (curl, scripts) are accepted.
+Requests with an `Origin` header are accepted only from `http://localhost:*` and `http://127.0.0.1:*`.
+Any other origin gets `403 origin_forbidden`.
+Requests without an `Origin` header (curl, scripts) are accepted.
 
 `OPTIONS` returns `204` with `access-control-allow-methods: GET, POST, OPTIONS` and `access-control-allow-headers: content-type, accept`.
 
@@ -43,7 +46,8 @@ Models load on the first analysis, not at startup.
 
 ## `POST /v1/analyze-page`
 
-`Content-Type: application/json`. One page per request.
+`Content-Type: application/json`.
+One page per request.
 
 ### Request
 

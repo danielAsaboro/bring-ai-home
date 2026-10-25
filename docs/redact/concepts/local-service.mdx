@@ -3,35 +3,57 @@ title: "About the local service"
 description: "Why Redact's models sit behind a small localhost HTTP service, and why it handles one page at a time."
 ---
 
-Between the browser and QVAC sits a small program: `npm run qvac:service`, a Node HTTP server on `127.0.0.1:4317`. It has two routes, `GET /health` and `POST /v1/analyze-page`. Each design choice in it is about one thing: keeping the review workflow usable whatever happens to the models.
+Between the browser and QVAC sits a small program: `npm run qvac:service`, a Node HTTP server on `127.0.0.1:4317`.
+It has two routes, `GET /health` and `POST /v1/analyze-page`.
+Each design choice in it is about one thing: keeping the review workflow usable whatever happens to the models.
 
 ## Why not run the models in the browser?
 
-QVAC's engines are native code that need a Node or Bare process, file system access for the model cache, and memory a browser tab doesn't get. Running them in Next.js's server would tie model loading to page rendering and restart it on every code reload.
+QVAC's engines are native code that need a Node or Bare process, file system access for the model cache, and memory a browser tab doesn't get.
+Running them in Next.js's server would tie model loading to page rendering and restart it on every code reload.
 
-A separate long-lived process loads each model once, keeps it warm between pages, and can be started, stopped or sandboxed on its own. That separation is what makes the macOS offline proof possible: the service runs under `sandbox-exec` while the app runs normally.
+A separate long-lived process loads each model once, keeps it warm between pages, and can be started, stopped or sandboxed on its own.
+That separation is what makes the macOS offline proof possible: the service runs under `sandbox-exec` while the app runs normally.
 
 ## Why not `qvac serve`?
 
-QVAC's CLI has its own HTTP server, `qvac serve`, with an OpenAI-compatible mode ([HTTP server](https://docs.qvac.tether.io/cli/http-server/)). It would remove most of Redact's service code. Redact keeps its own for two reasons.
+QVAC's CLI has its own HTTP server, `qvac serve`, with an OpenAI-compatible mode ([HTTP server](https://docs.qvac.tether.io/cli/http-server/)).
+It would remove most of Redact's service code.
+Redact keeps its own for two reasons.
 
-The analysis is a pipeline, not one model call: OCR, a possible rotated retry, structured reasoning and evidence grounding, and those steps belong together in one request. And a purpose-built contract can be narrow: one PNG in, typed evidence and suggestions out, validated at both ends with the same Zod schemas. For an app that only needed chat completions, `qvac serve` would be the better choice.
+The analysis is a pipeline, not one model call: OCR, a possible rotated retry, structured reasoning and evidence grounding, and those steps belong together in one request.
+And a purpose-built contract can be narrow: one PNG in, typed evidence and suggestions out, validated at both ends with the same Zod schemas.
+For an app that only needed chat completions, `qvac serve` would be the better choice.
 
 ## A narrow boundary
 
-The service binds to `127.0.0.1`, so nothing on the network can reach it. Its CORS headers allow only `http://localhost` and `http://127.0.0.1` origins, so a web page from elsewhere can't use your browser to call it. Requests must be JSON, at most 20 MB, and carry a base64 PNG whose decoded width and height match the request. Errors come back as typed codes the browser can act on, such as `invalid_request`, `request_too_large`, `busy`, `analysis_timeout` and `analyzer_unavailable` ([Service API](/docs/redact/reference/service-api)).
+The service binds to `127.0.0.1`, so nothing on the network can reach it.
+Its CORS headers allow only `http://localhost` and `http://127.0.0.1` origins, so a web page from elsewhere can't use your browser to call it.
+Requests must be JSON, at most 20 MB, and carry a base64 PNG whose decoded width and height match the request.
+Errors come back as typed codes the browser can act on, such as `invalid_request`, `request_too_large`, `busy`, `analysis_timeout` and `analyzer_unavailable` ([Service API](/docs/redact/reference/service-api)).
 
 ## One page at a time
 
-The service has a single slot. While one page is being analysed, another request gets `409 busy` immediately rather than queuing. Both models share one worker and most of the machine's attention; running two pages at once would make both slower and risk running out of memory.
+The service has a single slot.
+While one page is being analysed, another request gets `409 busy` immediately rather than queuing.
+Both models share one worker and most of the machine's attention; running two pages at once would make both slower and risk running out of memory.
 
-The slot is taken before the request body is read, so two requests can't both slip in. It is released when the model work actually ends, whether it succeeded or failed. After 180 seconds the service answers with a timeout error, but the slot stays taken until the underlying OCR and reasoning finish, because the service doesn't cancel them. The browser gives up after 190 seconds, slightly longer, so it normally receives the service's own timeout error.
+The slot is taken before the request body is read, so two requests can't both slip in.
+It is released when the model work actually ends, whether it succeeded or failed.
+After 180 seconds the service answers with a timeout error, but the slot stays taken until the underlying OCR and reasoning finish, because the service doesn't cancel them.
+The browser gives up after 190 seconds, slightly longer, so it normally receives the service's own timeout error.
 
-There's a known rough edge here. If a tab is closed mid-analysis, the service keeps working on that page until the model work finishes, and a new request meanwhile gets `busy`. In testing this produced a stall of a few minutes. A cancellation path from browser to worker would fix it; QVAC supports cancelling operations ([Cancellation](https://docs.qvac.tether.io/sdk/runtime/cancellation/)), but Redact doesn't wire it through yet.
+There's a known rough edge here.
+If a tab is closed mid-analysis, the service keeps working on that page until the model work finishes, and a new request meanwhile gets `busy`.
+In testing this produced a stall of a few minutes.
+A cancellation path from browser to worker would fix it; QVAC supports cancelling operations ([Cancellation](https://docs.qvac.tether.io/sdk/runtime/cancellation/)), but Redact doesn't wire it through yet.
 
 ## Failure is a normal state
 
-Every failure lands the person in the same place: manual review, with the page prepared and the drawing tools working. The model is optional to the workflow. A missing service, a slow first download, a timeout or a malformed model reply all show a message and leave the document usable. Health reports each model as `not_loaded`, `loading`, `ready` or `error`, so the app can say honestly what state it's in instead of showing a spinner forever.
+Every failure lands the person in the same place: manual review, with the page prepared and the drawing tools working.
+The model is optional to the workflow.
+A missing service, a slow first download, a timeout or a malformed model reply all show a message and leave the document usable.
+Health reports each model as `not_loaded`, `loading`, `ready` or `error`, so the app can say honestly what state it's in instead of showing a spinner forever.
 
 ## Related
 

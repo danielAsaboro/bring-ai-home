@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Replay · 07. Find a tape by describing the job" />
 
-People rarely remember a tape's title. They remember the job: "post last week's numbers". Embeddings let Replay match meaning instead of exact words.
+People rarely remember a tape's title.
+They remember the job: "post last week's numbers".
+Embeddings let Replay match meaning instead of exact words.
 
-The model only turns text into vectors. Ranking, thresholds, and ties are ordinary code you can read and test.
+The model only turns text into vectors.
+Ranking, thresholds, and ties are ordinary code you can read and test.
 
 **Source checkpoint:** `0d88b0b` · **Starting checkpoint:** `08c0682`
 
@@ -17,8 +20,10 @@ The model only turns text into vectors. Ranking, thresholds, and ties are ordina
 
 - `src/features/replay/search.ts`: `cosine`, `rankTapes` (top three, minimum score 0.5, stable ties), and `filterByWords`, the manual fallback.
 - `qvac-service/qvac-models.ts`: `createQvacEmbedder` with `GTE_LARGE_FP16`.
-- `/v1/find-tape`: the browser sends tape text, because the library lives in the browser. The service caches vectors by exact text, so an edited tape is re-embedded.
-- The shelf gains **Describe the job** and **Find tape**. If the service fails, it says so and filters by words instead.
+- `/v1/find-tape`: the browser sends tape text, because the library lives in the browser.
+  The service caches vectors by exact text, so an edited tape is re-embedded.
+- The shelf gains **Describe the job** and **Find tape**.
+  If the service fails, it says so and filters by words instead.
 
 To compare with the previous checkpoint: `git diff 08c0682 0d88b0b`.
 
@@ -32,15 +37,20 @@ npm run qvac:service
 npm run dev
 ```
 
-Type `post last week's numbers for the ops team` and click **Find tape**. The note under the box says the results are the closest tapes by meaning and names the model.
+Type `post last week's numbers for the ops team` and click **Find tape**.
+The note under the box says the results are the closest tapes by meaning and names the model.
 
 ### 2. Search with nothing close
 
-Try `renew the office lease`. If nothing reaches 0.5, Replay says no tape is close enough. It does not show a weak match to look helpful.
+Try `renew the office lease`.
+If nothing reaches 0.5, Replay says no tape is close enough.
+It does not show a weak match to look helpful.
 
 ### 3. Stop the service
 
-Search again. The note says the service is not running and that word matches are shown instead. Search still works for exact words.
+Search again.
+The note says the service is not running and that word matches are shown instead.
+Search still works for exact words.
 
 ## Read the checkpoint implementation
 
@@ -1540,7 +1550,9 @@ npm run typecheck
 npm test
 ```
 
-Expected: `Test Files 12 passed (12)`, `Tests 38 passed (38)`. Ranking tests use hand-made 3D vectors, labelled as fixtures. The server test proves the second search only embeds the new query.
+Expected: `Test Files 12 passed (12)`, `Tests 38 passed (38)`.
+Ranking tests use hand-made 3D vectors, labelled as fixtures.
+The server test proves the second search only embeds the new query.
 
 ## Before continuing
 

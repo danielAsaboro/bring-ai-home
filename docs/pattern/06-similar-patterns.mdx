@@ -9,9 +9,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will embed saved patterns locally with GTE and suggest similar ones, without copying any rules between them.
 
-When a new export arrives, you may already have a weave for something like it. Local embeddings turn each pattern's name, description, and examples into a vector, and cosine similarity ranks the closest saved patterns.
+When a new export arrives, you may already have a weave for something like it.
+Local embeddings turn each pattern's name, description, and examples into a vector, and cosine similarity ranks the closest saved patterns.
 
-Similarity only suggests where to look. Opening a match selects that pattern; it never copies rules.
+Similarity only suggests where to look.
+Opening a match selects that pattern; it never copies rules.
 
 **Source checkpoint:** `d20c0cf` · **Starting checkpoint:** `e181a61`
 
@@ -34,19 +36,24 @@ git checkout d20c0cf
 npm run qvac:service
 ```
 
-The first start downloads the embedding model. `/health` now reports `embedding: true`.
+The first start downloads the embedding model.
+`/health` now reports `embedding: true`.
 
 ### 2. Find a neighbour
 
-Open **Contact names** and press **Find similar patterns**. Up to three matches appear with their scores and the model name. Click one to open it.
+Open **Contact names** and press **Find similar patterns**.
+Up to three matches appear with their scores and the model name.
+Click one to open it.
 
 ### 3. Read the threshold
 
-`rankSimilar` drops the pattern itself and anything under 0.5. With only three sample patterns, "No saved pattern is close enough" is a valid answer.
+`rankSimilar` drops the pattern itself and anything under 0.5.
+With only three sample patterns, "No saved pattern is close enough" is a valid answer.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/qvac-runtime.ts">
@@ -757,7 +764,8 @@ export function rankSimilar(
 npm test -- src/features/pattern/similar.test.ts src/features/pattern/SimilarPanel.test.tsx qvac-service/server.test.ts
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -767,7 +775,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `d20c0cf`, lint and typecheck pass and the full suite passes 32 tests. The ranking tests use FIXTURE vectors chosen by hand. Real GTE scores come from your own machine and will differ.
+**Receipt:** at `d20c0cf`, lint and typecheck pass and the full suite passes 32 tests.
+The ranking tests use FIXTURE vectors chosen by hand.
+Real GTE scores come from your own machine and will differ.
 
 Then record your checkpoint:
 

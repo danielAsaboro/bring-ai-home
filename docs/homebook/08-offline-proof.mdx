@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 08. Prove it offline" />
 
-Saying "local" is not proof. Blocking one API call is not proof either. This chapter denies the whole Node process outbound network access, checks that the model cache is warm, and then runs OCR and manual retrieval.
+Saying "local" is not proof.
+Blocking one API call is not proof either.
+This chapter denies the whole Node process outbound network access, checks that the model cache is warm, and then runs OCR and manual retrieval.
 
 **Source checkpoint:** `0d80ba6` · **Starting checkpoint:** `9e876d0`
 
@@ -43,9 +45,12 @@ On Linux:
 npm run qvac:offline:linux
 ```
 
-`sandbox-exec` and `unshare -rn` both deny network to the process itself. The check runs in order:
+`sandbox-exec` and `unshare -rn` both deny network to the process itself.
+The check runs in order:
 
-1. Probe `https://1.1.1.1/`. We use an IP address so a DNS failure cannot pass as denied access. `EAI_AGAIN` counts as `dns-failed`, not `network-denied`.
+1. Probe `https://1.1.1.1/`.
+   We use an IP address so a DNS failure cannot pass as denied access.
+   `EAI_AGAIN` counts as `dns-failed`, not `network-denied`.
 2. Check that the OCR recogniser, the OCR detector, and the embedding model are on disk and not empty.
 3. Load OCR and read the plate, then embed a question and search the saved index.
 
@@ -58,12 +63,19 @@ Network probe: network-denied
 Offline proof failed: QVAC cache is incomplete (label OCR recogniser, label OCR detector, embeddings). Warm it online with qvac:label-smoke and qvac:ingest-manuals first.
 ```
 
-The probe works. The cache check caught the 0-byte files the blocked download left behind, so the check refused to claim anything. That is the correct result for that machine. On a machine with a warm cache, the same command prints the label facts and the manual pages.
+The probe works.
+The cache check caught the 0-byte files the blocked download left behind, so the check refused to claim anything.
+That is the correct result for that machine.
+On a machine with a warm cache, the same command prints the label facts and the manual pages.
 
 Two notes:
 
-- Our container already blocks direct outbound connections, so the plain command also printed `network-denied`. On your machine, run it without the sandbox first. You should see `network-allowed`, which shows that the sandbox is what blocks the network.
-- In our container, `unshare -rn` could not read the app folder, because the folder belongs to another user. Plain `unshare -n` as root worked. On a normal laptop, `-rn` is the unprivileged form.
+- Our container already blocks direct outbound connections, so the plain command also printed `network-denied`.
+  On your machine, run it without the sandbox first.
+  You should see `network-allowed`, which shows that the sandbox is what blocks the network.
+- In our container, `unshare -rn` could not read the app folder, because the folder belongs to another user.
+  Plain `unshare -n` as root worked.
+  On a normal laptop, `-rn` is the unprivileged form.
 
 ### 4. Run the service offline
 
@@ -75,7 +87,9 @@ Loopback stays allowed, so the browser can still reach `127.0.0.1:4319`.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -320,4 +334,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] Without the sandbox the probe says `network-allowed`.
 - [ ] With it, the probe says `network-denied` and inference still runs from the warm cache.
 
-You finished Homebook. Return to the [overview](/docs/homebook/overview).
+You finished Homebook.
+Return to the [overview](/docs/homebook/overview).

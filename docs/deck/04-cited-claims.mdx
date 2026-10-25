@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 04. Propose cited claim cards" />
 
-Generated deck text is often generic or unsupported. Here the model may only propose. The app checks every proposal against the note sections it was given, and a person decides what enters the deck.
+Generated deck text is often generic or unsupported.
+Here the model may only propose.
+The app checks every proposal against the note sections it was given, and a person decides what enters the deck.
 
 **Source checkpoint:** `65c2447` · **Starting checkpoint:** `0b27861`
 
@@ -25,21 +27,30 @@ Generated deck text is often generic or unsupported. Here the model may only pro
 
 ### 1. Ask for proposals
 
-With the service running, type `Why buyers should stock a kettle that shows temperature` and choose **The problem**. Press **Propose cards**.
+With the service running, type `Why buyers should stock a kettle that shows temperature` and choose **The problem**.
+Press **Propose cards**.
 
-Each proposal shows the note sections it cites, quoted. Under them, **proposal(s) removed by the app** lists anything dropped and why, for example `cites no retrieved note section`.
+Each proposal shows the note sections it cites, quoted.
+Under them, **proposal(s) removed by the app** lists anything dropped and why, for example `cites no retrieved note section`.
 
 ### 2. Accept one
 
-Press **Accept** on one card. It joins the target round as a claim card whose **Source** names the note and section. Rejected or ignored proposals never touch the deck.
+Press **Accept** on one card.
+It joins the target round as a claim card whose **Source** names the note and section.
+Rejected or ignored proposals never touch the deck.
 
 ### 3. Why the schema is not enough
 
-`json_schema` constrains shape, not truth. A citation can be well-formed and still point at an id that was never retrieved. `parseClaimProposals` checks every id against the passages sent in the prompt. The test uses a hand-written model answer with an invented id, an empty citation list, and a generic `Conclusion` title to show each rule.
+`json_schema` constrains shape, not truth.
+A citation can be well-formed and still point at an id that was never retrieved.
+`parseClaimProposals` checks every id against the passages sent in the prompt.
+The test uses a hand-written model answer with an invented id, an empty citation list, and a generic `Conclusion` title to show each rule.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="qvac-service/serve.mjs">
@@ -1073,7 +1084,8 @@ export function sourceLabel(proposal: ClaimProposal): string {
 npm test -- src/features/deck/claim-proposals.test.ts src/features/deck/ProposalPanel.test.tsx qvac-service/server.test.ts
 ```
 
-Expected result: 3 test files pass, 8 tests pass. Every model answer in these tests is a labelled fixture string.
+Expected result: 3 test files pass, 8 tests pass.
+Every model answer in these tests is a labelled fixture string.
 
 Run the broader checks from the app directory:
 

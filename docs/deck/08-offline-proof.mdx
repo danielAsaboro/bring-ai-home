@@ -7,7 +7,8 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 08. Prove it offline" />
 
-A blocked `fetch` is not an offline proof, and a non-empty cache is not either. This chapter denies the whole process network access and runs the real path: embed a topic, retrieve note sections, and propose cited cards.
+A blocked `fetch` is not an offline proof, and a non-empty cache is not either.
+This chapter denies the whole process network access and runs the real path: embed a topic, retrieve note sections, and propose cited cards.
 
 **Source checkpoint:** `149cfee` · **Starting checkpoint:** `067701b`
 
@@ -33,7 +34,8 @@ npm run qvac:offline          # macOS
 npm run qvac:offline:linux    # Linux, with user namespaces
 ```
 
-The output starts with `Network probe: network-denied`, then prints the retrieved section ids and the validated proposals. Run the same script without the sandbox first: on a normal connection the probe says `network-allowed` and the script refuses to continue.
+The output starts with `Network probe: network-denied`, then prints the retrieved section ids and the validated proposals.
+Run the same script without the sandbox first: on a normal connection the probe says `network-allowed` and the script refuses to continue.
 
 ### 3. What this machine actually showed
 
@@ -44,7 +46,9 @@ Network probe: network-denied
 Offline proof failed: QVAC cache is incomplete (embeddings, text model). Warm it online with qvac:ingest-notes and qvac:service first.
 ```
 
-That is an honest failure at the cache gate, not a passing proof. `unshare -rn` was also not usable in that container. Record the passing receipt on your own warmed machine.
+That is an honest failure at the cache gate, not a passing proof.
+`unshare -rn` was also not usable in that container.
+Record the passing receipt on your own warmed machine.
 
 ### 4. Use the app offline
 
@@ -57,7 +61,9 @@ The service still reaches the browser over loopback, and every panel works from 
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -297,4 +303,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] Without the sandbox the probe says `network-allowed`.
 - [ ] With it, the probe says `network-denied` and proposals still run from the warm cache.
 
-You finished Deck. Return to the [overview](/docs/deck/overview).
+You finished Deck.
+Return to the [overview](/docs/deck/overview).

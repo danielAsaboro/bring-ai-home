@@ -9,9 +9,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will put QVAC behind a small loopback service and call it from Pattern, without letting a proposal change anything yet.
 
-Loading a model inside React would tie the model's lifecycle to page reloads and put native code in the browser bundle. Instead we run a tiny HTTP service on `127.0.0.1:4319`. The browser sends examples; the service answers with a proposal. The service never stores patterns.
+Loading a model inside React would tie the model's lifecycle to page reloads and put native code in the browser bundle.
+Instead we run a tiny HTTP service on `127.0.0.1:4319`.
+The browser sends examples; the service answers with a proposal.
+The service never stores patterns.
 
-The app shows the raw proposal in a dashed panel marked **not applied**. If the service is stopped, the panel says so and the manual workbench keeps working.
+The app shows the raw proposal in a dashed panel marked **not applied**.
+If the service is stopped, the panel says so and the manual workbench keeps working.
 
 **Source checkpoint:** `86e219b` · **Starting checkpoint:** `f06cb75`
 
@@ -33,23 +37,30 @@ git checkout 86e219b
 npm run qvac:service
 ```
 
-In a second terminal: `curl http://127.0.0.1:4319/health`. It reports whether proposals are available.
+In a second terminal: `curl http://127.0.0.1:4319/health`.
+It reports whether proposals are available.
 
 ### 2. Propose from the app
 
-Run `npm run dev`, open **Contact names**, and press **Propose rules**. The raw reply appears, marked not applied. Your weave is unchanged.
+Run `npm run dev`, open **Contact names**, and press **Propose rules**.
+The raw reply appears, marked not applied.
+Your weave is unchanged.
 
 ### 3. Stop the service
 
-Stop the service and press **Propose rules** again. The panel says the local service is not running. Every manual control still works.
+Stop the service and press **Propose rules** again.
+The panel says the local service is not running.
+Every manual control still works.
 
 ### 4. Read the boundary
 
-In `server.ts`, a request from a foreign origin gets 403, an empty example list gets 400, and a missing model gets 503. The service only forwards `before` and `after`; ids and other fields are dropped.
+In `server.ts`, a request from a foreign origin gets 403, an empty example list gets 400, and a missing model gets 503.
+The service only forwards `before` and `after`; ids and other fields are dropped.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -578,7 +589,8 @@ export async function requestProposal(
 npm test -- qvac-service/server.test.ts src/features/pattern/proposal-client.test.ts src/features/pattern/ProposalPanel.test.tsx
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -588,7 +600,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `86e219b`, lint and typecheck pass and the full suite passes 19 tests. The service tests start a real HTTP server on a random loopback port with a FIXTURE proposer. A live proposal through the service needs the model from chapter 02 on your machine.
+**Receipt:** at `86e219b`, lint and typecheck pass and the full suite passes 19 tests.
+The service tests start a real HTTP server on a random loopback port with a FIXTURE proposer.
+A live proposal through the service needs the model from chapter 02 on your machine.
 
 Then record your checkpoint:
 

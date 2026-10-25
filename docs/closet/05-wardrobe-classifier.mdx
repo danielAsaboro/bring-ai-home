@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 05. Label garments with a wardrobe classifier" />
 
-A classifier gives a label and a confidence in milliseconds, with no prompt to get wrong. QVAC 0.22.0 exposes `classify` for `ggml-classification` models.
+A classifier gives a label and a confidence in milliseconds, with no prompt to get wrong.
+QVAC 0.22.0 exposes `classify` for `ggml-classification` models.
 
-There is a catch you should see for yourself. The bundled classifier is MobileNetV3-Small with three labels: `food`, `report`, and `other`. It is not a wardrobe model. Useful wardrobe labels need a custom classifier, which you point the service at with `CLOSET_CLASSIFIER_GGUF`.
+There is a catch you should see for yourself.
+The bundled classifier is MobileNetV3-Small with three labels: `food`, `report`, and `other`.
+It is not a wardrobe model.
+Useful wardrobe labels need a custom classifier, which you point the service at with `CLOSET_CLASSIFIER_GGUF`.
 
 **Source checkpoint:** `f3fee74` · **Starting checkpoint:** `550c9c2`
 
@@ -37,11 +41,16 @@ The type definition documents the three bundled labels and says custom models ma
 
 ### 2. Read the gate
 
-Open `wardrobe-labels.ts`. `judgeClassification` takes the top result and returns one of four verdicts: `accepted`, `below-threshold` (under 0.6), `not-a-wardrobe-label`, or `no-result`. A confident `other` is still `not-a-wardrobe-label`. Confidence is not relevance.
+Open `wardrobe-labels.ts`.
+`judgeClassification` takes the top result and returns one of four verdicts: `accepted`, `below-threshold` (under 0.6), `not-a-wardrobe-label`, or `no-result`.
+A confident `other` is still `not-a-wardrobe-label`.
+Confidence is not relevance.
 
 ### 3. Try it with the bundled model
 
-Run the service and upload a garment photo. The card shows **Wardrobe classifier: no wardrobe label (the model said "...")** and no button. That is the correct, honest result for this model.
+Run the service and upload a garment photo.
+The card shows **Wardrobe classifier: no wardrobe label (the model said "...")** and no button.
+That is the correct, honest result for this model.
 
 ### 4. Point at a wardrobe classifier
 
@@ -51,13 +60,17 @@ If you have a GGUF image classifier trained on garment categories whose labels m
 CLOSET_CLASSIFIER_GGUF=/path/to/wardrobe-classifier.gguf npm run qvac:service
 ```
 
-When its top label is accepted, the card offers **Use outerwear** (or similar). Pressing it fills the proposed category. The person still copies the card into the form and saves.
+When its top label is accepted, the card offers **Use outerwear** (or similar).
+Pressing it fills the proposed category.
+The person still copies the card into the form and saves.
 
-We did not train or run a wardrobe classifier for this course. The accepted path is tested with a hand-written result.
+We did not train or run a wardrobe classifier for this course.
+The accepted path is tested with a hand-written result.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="src/features/closet/wardrobe-labels.ts">
@@ -532,7 +545,9 @@ export async function createQvacEngine(appDirectory: string): Promise<ClosetEngi
 npm test -- src/features/closet/wardrobe-labels.test.ts src/features/closet/PhotoReview.test.tsx
 ```
 
-Expected result: 2 test files pass, 7 tests pass. Every label and confidence in these tests is a hand-written fixture. They do not prove live classification.
+Expected result: 2 test files pass, 7 tests pass.
+Every label and confidence in these tests is a hand-written fixture.
+They do not prove live classification.
 
 Run the broader checks from the app directory:
 

@@ -9,11 +9,16 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 We will train a small LoRA adapter on approved weaves with the SDK's finetune API, then serve proposals from the tuned model.
 
-The pinned SDK, `@qvac/sdk` 0.22.0, exports `finetune()` (see `dist/src/client/api/finetune.d.ts`): it trains LoRA adapter weights on a loaded GGUF model from a JSONL chat dataset, streams loss, and writes the adapter to `outputParametersDir`. The adapter loads again through `modelConfig.lora`.
+The pinned SDK, `@qvac/sdk` 0.22.0, exports `finetune()` (see `dist/src/client/api/finetune.d.ts`): it trains LoRA adapter weights on a loaded GGUF model from a JSONL chat dataset, streams loss, and writes the adapter to `outputParametersDir`.
+The adapter loads again through `modelConfig.lora`.
 
-Training data must be trustworthy. We build it only from weaves a person kept **and** that replay every example and counterexample. The incomplete invoice weave and the empty vendor weave are left out. A tiny fictional set of four more approved weaves completes the dataset.
+Training data must be trustworthy.
+We build it only from weaves a person kept **and** that replay every example and counterexample.
+The incomplete invoice weave and the empty vendor weave are left out.
+A tiny fictional set of four more approved weaves completes the dataset.
 
-Not every model or quantization can be fine-tuned. We use `QWEN3_600M_INST_Q4`, the model in the SDK's own fine-tuning example, as the base for the tuned proposer.
+Not every model or quantization can be fine-tuned.
+We use `QWEN3_600M_INST_Q4`, the model in the SDK's own fine-tuning example, as the base for the tuned proposer.
 
 **Source checkpoint:** `675f040` · **Starting checkpoint:** `d20c0cf`
 
@@ -36,7 +41,8 @@ git checkout 675f040
 npm test -- qvac-service/finetune-data.test.ts
 ```
 
-Five records pass the gate: Contact names plus the four fixture weaves. Four train, one validates.
+Five records pass the gate: Contact names plus the four fixture weaves.
+Four train, one validates.
 
 ### 2. Train
 
@@ -44,7 +50,9 @@ Five records pass the gate: Contact names plus the four fixture weaves. Four tra
 npm run qvac:finetune
 ```
 
-Each line shows epoch, step, train or val, and loss. The result lists files written to `.qvac/lora/pattern`. Training needs real memory and time; on a small machine use fewer epochs.
+Each line shows epoch, step, train or val, and loss.
+The result lists files written to `.qvac/lora/pattern`.
+Training needs real memory and time; on a small machine use fewer epochs.
 
 ### 3. Serve the tuned model
 
@@ -52,15 +60,20 @@ Each line shows epoch, step, train or val, and loss. The result lists files writ
 PATTERN_LORA_ADAPTER="$PWD/.qvac/lora/pattern/<adapter>.gguf" npm run qvac:service
 ```
 
-Proposals now report `QWEN3_600M_INST_Q4+LoRA`. They still pass through the same gate and counterexamples. Fine-tuning changes what is proposed, never who decides.
+Proposals now report `QWEN3_600M_INST_Q4+LoRA`.
+They still pass through the same gate and counterexamples.
+Fine-tuning changes what is proposed, never who decides.
 
 ### 4. Be honest about five examples
 
-Four training records cannot teach a model much. This chapter teaches the workflow. Measure the tuned model against the base on your own held-out patterns before you trust it.
+Four training records cannot teach a model much.
+This chapter teaches the workflow.
+Measure the tuned model against the base on your own held-out patterns before you trust it.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint, excluding tests and the lockfile. Paths are relative to the `pattern` app.
+These are complete files from this chapter's checkpoint, excluding tests and the lockfile.
+Paths are relative to the `pattern` app.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -386,7 +399,8 @@ export const approvedFixturePatterns: Pattern[] = [
 npm test -- qvac-service/finetune-data.test.ts
 ```
 
-Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code. They prove the app's contract, not live model quality.
+Tests that stand in for the model use hand-written fixtures, labelled `FIXTURE` in the code.
+They prove the app's contract, not live model quality.
 
 Run the broader checks from the app directory:
 
@@ -396,7 +410,9 @@ npm run typecheck
 npm test
 ```
 
-**Receipt:** at `675f040`, lint and typecheck pass and the full suite passes 34 tests. The `finetune()` and `lora` call shapes are checked by `npm run typecheck` against the installed 0.22.0 type definitions. No training run happened in the course build environment (model downloads blocked), so no loss values or adapter file names are shown here.
+**Receipt:** at `675f040`, lint and typecheck pass and the full suite passes 34 tests.
+The `finetune()` and `lora` call shapes are checked by `npm run typecheck` against the installed 0.22.0 type definitions.
+No training run happened in the course build environment (model downloads blocked), so no loss values or adapter file names are shown here.
 
 Then record your checkpoint:
 

@@ -7,9 +7,12 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Closet · 02. Describe a garment from a photo" />
 
-Typing every garment into a catalogue is the reason people give up on wardrobe apps. A photo is faster. We start by asking a local vision model to describe one garment photo, outside React, in a single command.
+Typing every garment into a catalogue is the reason people give up on wardrobe apps.
+A photo is faster.
+We start by asking a local vision model to describe one garment photo, outside React, in a single command.
 
-The result is a proposed description. It does not touch the closet.
+The result is a proposed description.
+It does not touch the closet.
 
 **Source checkpoint:** `6193b20` · **Starting checkpoint:** `807dd99`
 
@@ -30,9 +33,11 @@ To compare with the previous checkpoint: `git diff 807dd99 6193b20`.
 
 ### Before you start on Linux
 
-Two install problems show up on Linux. Apply each fix only if it applies to you.
+Two install problems show up on Linux.
+Apply each fix only if it applies to you.
 
-- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`. This checkpoint already adds it.
+- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`.
+  This checkpoint already adds it.
 - If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x node_modules/bare-runtime-linux-x64/bin/bare`.
 
 ### 1. Install the pinned runtime
@@ -41,19 +46,30 @@ Two install problems show up on Linux. Apply each fix only if it applies to you.
 npm ci
 ```
 
-The lockfile pins `@qvac/sdk` 0.22.0. Do not run a floating `npm install @qvac/sdk`.
+The lockfile pins `@qvac/sdk` 0.22.0.
+Do not run a floating `npm install @qvac/sdk`.
 
 ### 2. Why `b4a` is a direct dependency
 
-QVAC runs inference in a separate worker on the Bare runtime. When that worker cannot start, the SDK only reports an RPC timeout. Running the worker directly shows the real cause: a nested package imports `b4a` without declaring it. Adding `b4a` as a direct dependency fixes the install boundary. No QVAC code changes.
+QVAC runs inference in a separate worker on the Bare runtime.
+When that worker cannot start, the SDK only reports an RPC timeout.
+Running the worker directly shows the real cause: a nested package imports `b4a` without declaring it.
+Adding `b4a` as a direct dependency fixes the install boundary.
+No QVAC code changes.
 
 ### 3. Prepare configuration before importing QVAC
 
-Open `describe-garment-smoke.mjs`. It creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`. Only then does it `await import("@qvac/sdk")`. The SDK reads its config when it starts, so the order matters.
+Open `describe-garment-smoke.mjs`.
+It creates `.qvac/models`, writes `.qvac/config.json`, and sets `QVAC_CONFIG_PATH`.
+Only then does it `await import("@qvac/sdk")`.
+The SDK reads its config when it starts, so the order matters.
 
 ### 4. Read the model lifecycle
 
-`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with its projection model `MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`. The projection model is what lets the language model read an image. `completion` takes one user message with `attachments: [{ path }]` and streams tokens. The `finally` block unloads the model and closes the SDK even after an error.
+`loadModel` loads `SMOLVLM2_500M_MULTIMODAL_Q8_0` with its projection model `MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0`.
+The projection model is what lets the language model read an image.
+`completion` takes one user message with `attachments: [{ path }]` and streams tokens.
+The `finally` block unloads the model and closes the SDK even after an error.
 
 ### 5. Run it twice
 
@@ -62,17 +78,27 @@ npm run qvac:describe-smoke
 npm run qvac:describe-smoke public/garments/striped-breton.png
 ```
 
-The first run downloads model files into `.qvac/models`. Later runs reuse them. Read `kind`, `sourceDigest`, `description`, and `loadMs`. Compare the description with the drawing. A 500M model can miss the stripes or call a blazer a shirt. That is why it only proposes.
+The first run downloads model files into `.qvac/models`.
+Later runs reuse them.
+Read `kind`, `sourceDigest`, `description`, and `loadMs`.
+Compare the description with the drawing.
+A 500M model can miss the stripes or call a blazer a shirt.
+That is why it only proposes.
 
 ### 6. If the download stalls
 
-QVAC fetches models from its own registry, not from npm. On a network that blocks that registry the log stops at the download step and the cache files stay empty. That is a network failure; rerun on a machine with normal internet. Do not change code to fix it.
+QVAC fetches models from its own registry, not from npm.
+On a network that blocks that registry the log stops at the download step and the cache files stay empty.
+That is a network failure; rerun on a machine with normal internet.
+Do not change code to fix it.
 
-We built this course in a container that blocks the registry, so this chapter's receipt is the focused test below, not a live description. Run the smoke command yourself to see real output.
+We built this course in a container that blocks the registry, so this chapter's receipt is the focused test below, not a live description.
+Run the smoke command yourself to see real output.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `closet` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `closet` app.
 
 <AccordionGroup>
 <Accordion title="qvac-service/describe-garment-smoke.mjs">
@@ -290,7 +316,9 @@ describe("garment description", () => {
 npm test -- qvac-service/local-config.test.ts
 ```
 
-Expected result: 1 test file pass, 3 tests pass. They use hand-written description text, labelled as a fixture in the code. They do not prove live model inference.
+Expected result: 1 test file pass, 3 tests pass.
+They use hand-written description text, labelled as a fixture in the code.
+They do not prove live model inference.
 
 Run the broader checks from the app directory:
 

@@ -7,9 +7,14 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Lookout · 07. Hand inference to a stronger device" />
 
-A small box near the door may be too weak to run a vision model quickly. A Mac in the next room is not. We will let Lookout hand the heavy work to that Mac, and keep everything inside the home network.
+A small box near the door may be too weak to run a vision model quickly.
+A Mac in the next room is not.
+We will let Lookout hand the heavy work to that Mac, and keep everything inside the home network.
 
-We checked the installed `@qvac/sdk` 0.22.0 types first. There is no function called "delegate". There is ggml RPC: `startRpcServer`, `stopRpcServer`, `discoverRpcServers`, `getRpcDeviceMap`, and the llama.cpp `rpc-servers` model option. That is what this chapter uses.
+We checked the installed `@qvac/sdk` 0.22.0 types first.
+There is no function called "delegate".
+There is ggml RPC: `startRpcServer`, `stopRpcServer`, `discoverRpcServers`, `getRpcDeviceMap`, and the llama.cpp `rpc-servers` model option.
+That is what this chapter uses.
 
 **Source checkpoint:** `3e3ecdc` · **Starting checkpoint:** `3cb1fa6`
 
@@ -29,9 +34,15 @@ To compare with the starting checkpoint: `git diff 3cb1fa6 3e3ecdc`.
 
 ### 1. Understand what moves
 
-With ggml RPC, the Lookout machine still owns the frame and still runs the service. The model's tensor work runs on the other machine. Tensors derived from the frame cross your home network. The PNG file does not leave this machine, but derived data does. Be honest about that.
+With ggml RPC, the Lookout machine still owns the frame and still runs the service.
+The model's tensor work runs on the other machine.
+Tensors derived from the frame cross your home network.
+The PNG file does not leave this machine, but derived data does.
+Be honest about that.
 
-The RPC link is not encrypted and not authenticated. So `delegate.ts` accepts only a private IPv4 address and a port. It refuses public addresses and host names to resolve.
+The RPC link is not encrypted and not authenticated.
+So `delegate.ts` accepts only a private IPv4 address and a port.
+It refuses public addresses and host names to resolve.
 
 ### 2. Start the RPC host on the stronger machine
 
@@ -43,7 +54,9 @@ npm ci
 npm run qvac:rpc-host -- 192.168.1.20 50052
 ```
 
-Use that machine's real private address. The script writes a worker config that registers the SDK's RPC provider, as the SDK's own `rpc-server` example says to, and prints the URL to use. We could not run this in our build container, which has one machine and no access to the model registry.
+Use that machine's real private address.
+The script writes a worker config that registers the SDK's RPC provider, as the SDK's own `rpc-server` example says to, and prints the URL to use.
+We could not run this in our build container, which has one machine and no access to the model registry.
 
 ### 3. Point Lookout at it
 
@@ -54,13 +67,17 @@ LOOKOUT_DELEGATE=192.168.1.20:50052 npm run qvac:service
 curl http://127.0.0.1:4319/health
 ```
 
-`vision.placement` reads `delegated to 192.168.1.20:50052`. The browser still talks only to `127.0.0.1`. Try `LOOKOUT_DELEGATE=8.8.8.8:1`: the service refuses to start.
+`vision.placement` reads `delegated to 192.168.1.20:50052`.
+The browser still talks only to `127.0.0.1`.
+Try `LOOKOUT_DELEGATE=8.8.8.8:1`: the service refuses to start.
 
-For one server, Lookout uses the device alias `RPC0`. For several servers or devices, use `discoverRpcServers` and `getRpcDeviceMap` to build `rpc-servers` and `devices`, as the SDK's `rpc-inference` example does.
+For one server, Lookout uses the device alias `RPC0`.
+For several servers or devices, use `discoverRpcServers` and `getRpcDeviceMap` to build `rpc-servers` and `devices`, as the SDK's `rpc-inference` example does.
 
 ## Read the checkpoint implementation
 
-These are complete files from `3e3ecdc`, changed in this chapter. Paths are relative to the repository root at that checkpoint.
+These are complete files from `3e3ecdc`, changed in this chapter.
+Paths are relative to the repository root at that checkpoint.
 
 <AccordionGroup>
 <Accordion title="package.json">
@@ -537,9 +554,11 @@ Run the focused tests for this chapter:
 npm test -- qvac-service/delegate.test.ts qvac-service/server.test.ts
 ```
 
-Expected result: 2 test files pass, 9 tests pass. They test parsing and the health report, not a live RPC link.
+Expected result: 2 test files pass, 9 tests pass.
+They test parsing and the health report, not a live RPC link.
 
-These focused tests do not prove live model inference. Live results come only from the QVAC scripts on your own machine.
+These focused tests do not prove live model inference.
+Live results come only from the QVAC scripts on your own machine.
 
 Then run the broader checks from the app directory:
 
@@ -562,4 +581,5 @@ git -c user.name="Course learner" -c user.email="learner@example.invalid" commit
 - [ ] You can say which data crosses the network when delegating, and which does not.
 - [ ] A public address was refused.
 
-Next: [08. Prove footage never leaves the machine](/docs/lookout/08-offline-proof)
+Next: [08.
+Prove footage never leaves the machine](/docs/lookout/08-offline-proof)

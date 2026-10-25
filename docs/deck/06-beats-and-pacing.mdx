@@ -7,7 +7,9 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Deck · 06. Flag duplicate beats and pacing" />
 
-Two cards that say the same thing waste a beat, and one round that takes most of the time unbalances the match. Pacing is arithmetic, so it needs no model. Duplicate beats need meaning, so the app asks for embeddings and applies its own threshold.
+Two cards that say the same thing waste a beat, and one round that takes most of the time unbalances the match.
+Pacing is arithmetic, so it needs no model.
+Duplicate beats need meaning, so the app asks for embeddings and applies its own threshold.
 
 **Source checkpoint:** `2434066` · **Starting checkpoint:** `593df7d`
 
@@ -23,19 +25,26 @@ Two cards that say the same thing waste a beat, and one round that takes most of
 
 ### 1. Break the pacing
 
-Set **Prototype trial** to 240 seconds and add an empty round. The panel flags the heavy round, the empty round, and the long card at once, without the service.
+Set **Prototype trial** to 240 seconds and add an empty round.
+The panel flags the heavy round, the empty round, and the long card at once, without the service.
 
 ### 2. Add a duplicate beat
 
-In **The problem**, add a card titled `Rushed mornings again`. Press **Check for duplicate beats**. If the embeddings put it close to **Mornings are rushed**, the panel names both cards and their similarity.
+In **The problem**, add a card titled `Rushed mornings again`.
+Press **Check for duplicate beats**.
+If the embeddings put it close to **Mornings are rushed**, the panel names both cards and their similarity.
 
 ### 3. Decide
 
-**Discard the later card** removes it. **Keep as is** hides the flag for this session. Nothing is removed without one of those clicks.
+**Discard the later card** removes it.
+**Keep as is** hides the flag for this session.
+Nothing is removed without one of those clicks.
 
 ## Read the checkpoint implementation
 
-These are complete files changed in this chapter's checkpoint. Paths are relative to the `deck` app. The lockfile is left out.
+These are complete files changed in this chapter's checkpoint.
+Paths are relative to the `deck` app.
+The lockfile is left out.
 
 <AccordionGroup>
 <Accordion title="src/features/deck/DeckApp.tsx">
@@ -621,7 +630,8 @@ export function cardsInPlayOrder(deck: Deck): Card[] {
 npm test -- src/features/deck/deck-health.test.ts src/features/deck/HealthPanel.test.tsx
 ```
 
-Expected result: 2 test files pass, 3 tests pass. The duplicate pair comes from fixture vectors.
+Expected result: 2 test files pass, 3 tests pass.
+The duplicate pair comes from fixture vectors.
 
 Run the broader checks from the app directory:
 

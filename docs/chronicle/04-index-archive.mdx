@@ -7,9 +7,11 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Chronicle · 04. Index the archive with embeddings" />
 
-We will turn each memory into a vector with a local embedding model and save a small index. This lets Chronicle find memories by meaning, not only by exact words.
+We will turn each memory into a vector with a local embedding model and save a small index.
+This lets Chronicle find memories by meaning, not only by exact words.
 
-We embed only the fields a person wrote: title, caption, people, and date. Proposed text from earlier chapters stays out of the index until someone accepts it.
+We embed only the fields a person wrote: title, caption, people, and date.
+Proposed text from earlier chapters stays out of the index until someone accepts it.
 
 **Source checkpoint:** `9faae9c` · **Starting checkpoint:** `e401734`
 
@@ -29,19 +31,26 @@ We embed only the fields a person wrote: title, caption, people, and date. Propo
 npm run qvac:index-smoke
 ```
 
-The output shows `model`, `dimensions`, `memories`, and `elapsedMs`. `memories` should be 6. The index file goes into `.qvac`, which Git ignores.
+The output shows `model`, `dimensions`, `memories`, and `elapsedMs`.
+`memories` should be 6.
+The index file goes into `.qvac`, which Git ignores.
 
 ### 2. Reuse app code outside React
 
-The smoke script imports `archive.ts` and `memory-index.ts` directly. Node 22.18 and newer strip TypeScript types on import. That is why `memory-index.ts` uses `import type` for `Memory`: a type-only import disappears, so Node does not need to resolve another `.ts` file.
+The smoke script imports `archive.ts` and `memory-index.ts` directly.
+Node 22.18 and newer strip TypeScript types on import.
+That is why `memory-index.ts` uses `import type` for `Memory`: a type-only import disappears, so Node does not need to resolve another `.ts` file.
 
 ### 3. Validate what comes back
 
-`embed` with an array of texts returns one vector per text. `buildMemoryIndex` checks three things before it trusts the result: the count matches, every vector has the same size, and every number is finite. A mismatch is an error, not a partial index.
+`embed` with an array of texts returns one vector per text.
+`buildMemoryIndex` checks three things before it trusts the result: the count matches, every vector has the same size, and every number is finite.
+A mismatch is an error, not a partial index.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `chronicle` app.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `chronicle` app.
 
 <AccordionGroup>
 <Accordion title="src/features/chronicle/memory-index.ts">
@@ -233,7 +242,9 @@ npm test -- src/features/chronicle/memory-index.test.ts
 
 Expected result: 1 test file passes, 4 tests pass.
 
-These focused tests use hand-written fixtures. They are labelled as fixtures in the code. They do not prove live model inference.
+These focused tests use hand-written fixtures.
+They are labelled as fixtures in the code.
+They do not prove live model inference.
 
 Run the broader checks separately, from the app directory:
 

@@ -3,19 +3,22 @@ title: "How to troubleshoot Redact"
 description: "Find the cause of a failed install, analysis, test or export, and fix it."
 ---
 
-Each entry is a symptom, its usual cause and the fix. Before sharing logs, remove any document text or image data from them.
+Each entry is a symptom, its usual cause and the fix.
+Before sharing logs, remove any document text or image data from them.
 
 ## `npm ci` fails with `EPERM`
 
 **Cause:** npm can't write to its cache.
 
-**Fix:** use a scoped cache: `npm ci --cache /tmp/redact-npm-cache`. If the error names another path, fix permissions there.
+**Fix:** use a scoped cache: `npm ci --cache /tmp/redact-npm-cache`.
+If the error names another path, fix permissions there.
 
 ## `npm ci` or the first analysis fails with "no space left on device"
 
 **Cause:** Redact needs about 2.8 GB for `node_modules` and about 550 MB for models.
 
-**Fix:** free space, then rerun. See [How to clear the model cache and free disk space](/docs/redact/how-to/clear-model-cache).
+**Fix:** free space, then rerun.
+See [How to clear the model cache and free disk space](/docs/redact/how-to/clear-model-cache).
 
 ## The service fails to start with a missing plugin or native module
 
@@ -27,37 +30,50 @@ Each entry is a symptom, its usual cause and the fix. Before sharing logs, remov
 
 **Cause:** it downloads about 550 MB of models, then loads them.
 
-**Fix:** none needed. Later runs take roughly 20–30 seconds of OCR per page. To download ahead of time, see [How to download the models](/docs/redact/how-to/download-models).
+**Fix:** none needed.
+Later runs take roughly 20–30 seconds of OCR per page.
+To download ahead of time, see [How to download the models](/docs/redact/how-to/download-models).
 
 ## `/health` says ready, but the models say `not_loaded`
 
 **Cause:** models load on the first analysis, not at startup.
 
-**Fix:** none needed. Run one analysis and check again.
+**Fix:** none needed.
+Run one analysis and check again.
 
 ## Analysis says the local analyzer is busy
 
-**Cause:** the service runs one analysis at a time and answers `409 busy` to any other. A previous analysis, from another tab, a closed tab or a test run, still holds the slot. Cancelling in the browser stops waiting but doesn't stop inference already running.
+**Cause:** the service runs one analysis at a time and answers `409 busy` to any other.
+A previous analysis, from another tab, a closed tab or a test run, still holds the slot.
+Cancelling in the browser stops waiting but doesn't stop inference already running.
 
-**Fix:** wait for it to finish; each page times out after 180 seconds. If it doesn't clear, stop the service with Ctrl+C and start it again. Meanwhile, select **Continue without local analysis** to mark by hand.
+**Fix:** wait for it to finish; each page times out after 180 seconds.
+If it doesn't clear, stop the service with Ctrl+C and start it again.
+Meanwhile, select **Continue without local analysis** to mark by hand.
 
 ## The analysis fails with `Local reasoning returned invalid candidates`
 
 **Cause:** the model's answer named a block that doesn't exist or named one block twice, so the whole page's suggestions were rejected.
 
-**Fix:** select **Try again**. If it repeats on the same page, check that `qvac-service/reasoning.ts` passes `generationParams: { temp: 0, seed: 42 }`; without it, answers vary between runs. The review screen still lets you mark by hand.
+**Fix:** select **Try again**.
+If it repeats on the same page, check that `qvac-service/reasoning.ts` passes `generationParams: { temp: 0, seed: 42 }`; without it, answers vary between runs.
+The review screen still lets you mark by hand.
 
 ## Suggestions miss fields you expected
 
-**Cause:** suggestions depend on the privacy level, your **Additional direction** text, OCR quality and a small 0.6B model. With no direction, Redact may suggest only a name.
+**Cause:** suggestions depend on the privacy level, your **Additional direction** text, OCR quality and a small 0.6B model.
+With no direction, Redact may suggest only a name.
 
-**Fix:** describe what to cover in the direction, choose **Confidential** for financial details, and always add manual marks for anything missed. To improve the model, see [How to use a larger reasoning model](/docs/redact/how-to/use-a-larger-model).
+**Fix:** describe what to cover in the direction, choose **Confidential** for financial details, and always add manual marks for anything missed.
+To improve the model, see [How to use a larger reasoning model](/docs/redact/how-to/use-a-larger-model).
 
 ## Outlines sit on the wrong text
 
-**Cause:** OCR boxes are in pixels of the analysed raster. Something converted them against a different size or forgot a rotation.
+**Cause:** OCR boxes are in pixels of the analysed raster.
+Something converted them against a different size or forgot a rotation.
 
-**Fix:** run `npm test`; the geometry tests cover conversion and rotation. See [OCR boxes and rotation](/docs/qvac/ocr-geometry).
+**Fix:** run `npm test`; the geometry tests cover conversion and rotation.
+See [OCR boxes and rotation](/docs/qvac/ocr-geometry).
 
 ## **Done** stays disabled
 
@@ -73,7 +89,8 @@ Each entry is a symptom, its usual cause and the fix. Before sharing logs, remov
 
 ## Manual-workflow browser tests fail while the service is running
 
-**Cause:** those tests expect analysis to be unavailable, so the review screen appears at once. With the service up, the page is still analysing.
+**Cause:** those tests expect analysis to be unavailable, so the review screen appears at once.
+With the service up, the page is still analysing.
 
 **Fix:** stop `qvac:service` before `npm run test:e2e`.
 
@@ -105,4 +122,6 @@ Each entry is a symptom, its usual cause and the fix. Before sharing logs, remov
 
 **Cause:** the gate passes at 0.7 precision, recall and F1, so a case can pass with a miss.
 
-**Fix:** read `falseNegatives` per case. Keep reviewing exports by eye. See [About measuring suggestions](/docs/redact/concepts/measuring-suggestions).
+**Fix:** read `falseNegatives` per case.
+Keep reviewing exports by eye.
+See [About measuring suggestions](/docs/redact/concepts/measuring-suggestions).

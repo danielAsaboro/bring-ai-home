@@ -7,9 +7,13 @@ import { LessonVideo } from "/snippets/lesson-video.jsx";
 
 <LessonVideo title="Homebook · 02. Read an appliance label with OCR" />
 
-Typing a serial number from a rating plate is slow and easy to get wrong. A local OCR model can read the plate. It cannot decide which text is the serial number. Homebook decides that, and a person still accepts each value.
+Typing a serial number from a rating plate is slow and easy to get wrong.
+A local OCR model can read the plate.
+It cannot decide which text is the serial number.
+Homebook decides that, and a person still accepts each value.
 
-This chapter runs OCR outside React. That separates install, download, and native runtime problems from app problems.
+This chapter runs OCR outside React.
+That separates install, download, and native runtime problems from app problems.
 
 **Source checkpoint:** `d126ea1` · **Starting checkpoint:** `cda74e3`
 
@@ -27,7 +31,8 @@ This chapter runs OCR outside React. That separates install, download, and nativ
 
 ### Before you start on Linux
 
-- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`. This checkpoint adds it.
+- If the QVAC worker reports `Cannot find module 'b4a'`, check that `b4a` is in `package.json`.
+  This checkpoint adds it.
 - If `ls -l node_modules/bare-runtime-linux-x64/bin/bare` shows no `x`, run `chmod +x node_modules/bare-runtime-linux-x64/bin/bare`.
 
 ### 1. Install the pinned runtime
@@ -36,19 +41,26 @@ This chapter runs OCR outside React. That separates install, download, and nativ
 npm ci
 ```
 
-The lockfile pins `@qvac/sdk` 0.22.0. Do not run a floating `npm install @qvac/sdk`.
+The lockfile pins `@qvac/sdk` 0.22.0.
+Do not run a floating `npm install @qvac/sdk`.
 
 ### 2. Read the OCR lifecycle
 
-Open `qvac-service/label-ocr-smoke.mjs`. It writes `.qvac/config.json` and sets `QVAC_CONFIG_PATH` before it imports the SDK. Then:
+Open `qvac-service/label-ocr-smoke.mjs`.
+It writes `.qvac/config.json` and sets `QVAC_CONFIG_PATH` before it imports the SDK.
+Then:
 
 - `loadModel({ modelSrc: sdk.OCR_LATIN, modelType: sdk.MODEL_TYPES.ggmlOcr, modelConfig: { langList: ["en"], ... } })` loads the Latin recogniser and its CRAFT detector.
-- `ocr({ modelId, image, options: { paragraph: false } })` returns `blocks` and `stats` promises. Each block has `text`, and optionally `bbox` and `confidence`.
+- `ocr({ modelId, image, options: { paragraph: false } })` returns `blocks` and `stats` promises.
+  Each block has `text`, and optionally `bbox` and `confidence`.
 - `finally` calls `unloadModel` and `close`, even after an error.
 
 ### 3. Read where the app decides
 
-OCR returns separate blocks: `MODEL NO.` and `AT-50G` are two boxes on one row. `readingOrder` groups blocks into rows by their top edge, then sorts each row left to right. `proposeLabelFacts` matches field names on those rows and keeps the source line and confidence with each value. A manufacture month like `2021-02` only becomes a starting guess for the install date.
+OCR returns separate blocks: `MODEL NO.` and `AT-50G` are two boxes on one row.
+`readingOrder` groups blocks into rows by their top edge, then sorts each row left to right.
+`proposeLabelFacts` matches field names on those rows and keeps the source line and confidence with each value.
+A manufacture month like `2021-02` only becomes a starting guess for the install date.
 
 ### 4. Run it twice
 
@@ -57,15 +69,24 @@ npm run qvac:label-smoke
 npm run qvac:label-smoke
 ```
 
-The first run downloads OCR assets into `.qvac/models`. The second reuses them. Read `blocks` and compare them with the plate, then read `facts`. Each fact names the text it came from.
+The first run downloads OCR assets into `.qvac/models`.
+The second reuses them.
+Read `blocks` and compare them with the plate, then read `facts`.
+Each fact names the text it came from.
 
 ### 5. If the download stalls
 
-In our build container the worker started, then the log stopped after printing the blob it wanted, and `.qvac/models` held two 0-byte files: `..._latin_g2.gguf` and `..._craft_mlt_25k.gguf`. That network blocks QVAC's model registry. It is a download failure, not a code failure. Run on a machine with normal internet. We did not get live OCR output in that container, so this page shows none.
+In our build container the worker started, then the log stopped after printing the blob it wanted, and `.qvac/models` held two 0-byte files: `..._latin_g2.gguf` and `..._craft_mlt_25k.gguf`.
+That network blocks QVAC's model registry.
+It is a download failure, not a code failure.
+Run on a machine with normal internet.
+We did not get live OCR output in that container, so this page shows none.
 
 ## Read the checkpoint implementation
 
-These are complete files from this chapter's checkpoint. Paths are relative to the `homebook` app. The lockfile and images are left out.
+These are complete files from this chapter's checkpoint.
+Paths are relative to the `homebook` app.
+The lockfile and images are left out.
 
 <AccordionGroup>
 <Accordion title=".gitignore">
@@ -377,7 +398,9 @@ export function proposeLabelFacts(blocks: readonly OcrBlock[]): LabelFact[] {
 npm test -- src/features/homebook/label-facts.test.ts
 ```
 
-Expected result: 1 test file passes, 3 tests pass. The OCR blocks in this test are hand-written fixtures that match the plate. They are not model output.
+Expected result: 1 test file passes, 3 tests pass.
+The OCR blocks in this test are hand-written fixtures that match the plate.
+They are not model output.
 
 Run the broader checks from the app directory:
 

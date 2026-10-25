@@ -3,7 +3,8 @@ title: "Commands"
 description: "Every npm script in the Redact app, what it runs, and what it writes."
 ---
 
-Run from `redact/`. Defined in `package.json` on `course/redact-qvac`.
+Run from `redact/`.
+Defined in `package.json` on `course/redact-qvac`.
 
 ## App
 
@@ -27,7 +28,8 @@ The service, `qvac:evaluate` and `qvac:offline` use Laya for suggestions, or Qwe
 
 `qvac:ocr-smoke` defaults to `public/test-files/redact/chat-private.png`.
 
-`qvac:offline` and `qvac:service:offline` use macOS `sandbox-exec`. They fail on Linux and Windows.
+`qvac:offline` and `qvac:service:offline` use macOS `sandbox-exec`.
+They fail on Linux and Windows.
 
 ## Checks
 
@@ -39,7 +41,8 @@ The service, `qvac:evaluate` and `qvac:offline` use Laya for suggestions, or Qwe
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:e2e` | Playwright, desktop and mobile projects |
 
-`npm run test:e2e` needs a running app (`REDACT_BASE_URL`, default `http://localhost:3101`) and a Playwright browser. The live QVAC test runs only with `REDACT_LIVE_QVAC=1` and the service running.
+`npm run test:e2e` needs a running app (`REDACT_BASE_URL`, default `http://localhost:3101`) and a Playwright browser.
+The live QVAC test runs only with `REDACT_LIVE_QVAC=1` and the service running.
 
 Run `typecheck` and `build` one after the other, not in parallel: both write `.next/`.
 
@@ -49,7 +52,8 @@ Run `typecheck` and `build` one after the other, not in parallel: both write `.n
 |---|---|
 | `npm run redact:test-files` | Regenerates `public/test-files/redact/` |
 
-The committed test files are already in place. Regenerating can change PDF bytes.
+The committed test files are already in place.
+Regenerating can change PDF bytes.
 
 ## Related
 
