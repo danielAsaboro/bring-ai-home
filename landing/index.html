@@ -6,6 +6,7 @@
 <title>Bring AI Home</title>
 <meta name="description" content="Ten everyday apps that gain private, on-device AI with QVAC, one tested lesson at a time.">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/brand/png/favicon-180.png">
 <meta property="og:title" content="Bring AI Home">
 <meta property="og:description" content="Ten everyday apps that gain private, on-device AI with QVAC, one tested lesson at a time.">
 <style>
@@ -15,7 +16,7 @@
   --text: #25231F;
   --muted: #6B665D;
   --line: #E4DED3;
-  --accent: #D4513D;
+  --accent: #FC412C;
   --accent-ink: #FFFFFF;
   --hover: #FBF8F3;
 }
@@ -26,7 +27,7 @@
     --text: #F2EEE6;
     --muted: #A39E93;
     --line: #2E2C26;
-    --accent: #F07761;
+    --accent: #FF6B57;
     --accent-ink: #14130F;
     --hover: #22211C;
   }
@@ -43,7 +44,7 @@ a { color: inherit; text-decoration: none; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 header { display: flex; align-items: center; justify-content: space-between; padding: 24px 0; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-.brand svg { width: 26px; height: 28px; }
+.brand img { height: 30px; width: auto; display: block; }
 header nav { display: flex; gap: 24px; font-size: 15px; color: var(--muted); }
 header nav a:hover { color: var(--text); }
 .hero { padding: 96px 0 72px; max-width: 760px; }
@@ -80,8 +81,7 @@ footer a:hover { color: var(--accent); }
 <div class="wrap">
   <header>
     <a class="brand" href="/" aria-label="Bring AI Home">
-      <svg viewBox="0 0 32 36" aria-hidden="true"><path d="M5 17 16 7l11 10v12H5Z" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/><path d="M13 29V19h6v10" fill="none" stroke="var(--accent)" stroke-width="2.5"/></svg>
-      Bring AI Home
+      <picture><source srcset="/logo/dark.svg" media="(prefers-color-scheme: dark)"><img src="/logo/light.svg" alt="Bring AI Home" height="30"></picture>
     </a>
     <nav>
       <a href="/docs">Docs</a>
