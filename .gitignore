@@ -6,3 +6,7 @@ node_modules/
 .DS_Store
 dist/
 .vercel/
+apps/
+internal/
+plans/
+private/
