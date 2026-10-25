@@ -1,16 +1,45 @@
 ---
-title: "00. Redact your first document with local AI"
-description: "We will run the finished Redact app, let local OCR and a local model suggest what to cover in a fictional chat, decide on every suggestion, and save a flattened copy."
+title: "00. Use Redact"
+description: "What Redact is, how it works with QVAC, what it costs, and the template you'll build from. Then we run the finished app on a sample document."
 ---
 
 import { LessonVideo } from "/snippets/lesson-video.jsx";
 
-<LessonVideo title="Redact · 00. Redact your first document with local AI" />
+<LessonVideo title="Redact · 00. Use Redact" />
 
-In this lesson we will run the finished Redact app on our own machine, give it a screenshot of a fictional chat, and turn its suggestions into a safe copy we could share.
-Nothing leaves the computer.
+Yes, to all four questions.
+In this course we build **Redact**, a small web app that finds the private details in a screenshot or PDF, lets you decide what to cover, and saves a clean copy you can share.
+Every AI model runs on your own computer, through [QVAC](https://docs.qvac.tether.io/), Tether's SDK for local AI.
+The document never leaves the machine; the only download is the models, once.
 
-You need Node.js 22.17 or newer, Git, about 4 GB of free disk, and an internet connection for the first run.
+## How Redact works
+
+```mermaid
+flowchart LR
+  A[Your file] --> B[Page images]
+  B --> C[Local OCR finds the text]
+  C --> D[Laya decides which lines are sensitive]
+  D --> E[You accept or reject each one]
+  E --> F[New flattened copy]
+  F --> G[Local check: anything still readable?]
+```
+
+1. You upload a PNG, JPEG or PDF.
+   The original is never changed.
+2. Each page becomes an image, and local OCR reads its text and where each line sits.
+3. Laya, a small decision model, answers one yes/no question per line and field: does this contain a name, an email, an account number?
+4. You accept or reject every suggestion, and can draw your own marks.
+5. Redact paints the marks into a new image (or image-only PDF), so no text is left underneath.
+6. It reads that copy once more and tells you if anything private is still readable.
+
+Nothing becomes a black box until you say so.
+The model suggests; you decide.
+
+## Why QVAC
+
+QVAC runs both kinds of model Redact needs, a text reader and a decision model, through one JavaScript API on your machine.
+There is no server to host, no API key, and no request that leaves the computer.
+It runs on macOS, Linux and Windows, using the GPU where there is one.
 
 ## What you'll run
 
@@ -28,8 +57,40 @@ The models download once, into `redact/.qvac/models`:
 | `OCR_LATIN` | 98 MB | Finds each line of text and where it sits on the page |
 | `LAYA_421M_Q8_0` | 450 MB | Answers yes/no questions about each line: is this a name, an email, an account number? |
 
-We use QVAC because it runs both kinds of model through one local API, with nothing to host and no data sent anywhere.
-On an Apple Silicon Mac, expect about 20–30 seconds per page for OCR, under a second for Laya's decisions, and about 25 seconds for the final check of the copy.
+## What it costs
+
+- **Disk:** about 4 GB: 2.8 GB of dependencies and about 550 MB of models.
+- **Network:** only for installing and the first run, which downloads the models.
+- **Time:** on an Apple Silicon Mac, OCR takes 20–30 seconds per page, Laya's decisions under a second, and the final check of the copy about 25 seconds.
+- **Limits:** it doesn't claim legal-grade redaction or catch everything.
+  [About what Redact does not protect](/docs/redact/concepts/threat-model) lists what it can't do.
+
+This course is for developers who know React and TypeScript and want to learn local AI by building something real.
+You don't need any machine-learning background.
+
+## The base template
+
+You won't start from an empty folder.
+We've prepared a base template: the complete Redact interface with **no AI in it**.
+It already uploads PNG, JPEG and PDF files, turns pages into images, lets you draw, move and resize marks by hand, previews the safe copy, and saves a flattened PNG or PDF.
+
+The **Build it** lessons start from that template and add the AI one step at a time:
+
+| Lessons | What we add |
+|---|---|
+| [01](/docs/redact/tutorials/01-starter) | Run the template and redact a document by hand |
+| [02–05](/docs/redact/tutorials/02-first-ocr) | Local OCR: read a page, run a local service, line the boxes up with the page |
+| [06–07](/docs/redact/tutorials/06-suggestions) | Suggestions from a local model, and a review step where you accept or reject each one |
+| [08–10](/docs/redact/tutorials/08-failure-recovery) | Recovery when analysis fails, a measured evaluation, and proof it works offline |
+| [11](/docs/redact/tutorials/11-laya-decisions) | Swap the generator for Laya, and check the copy before it's shared |
+
+You can [download the template](/docs/downloads/redact/redact-starter.zip) now, or get it in lesson 01.
+
+## Try the finished app first
+
+In the rest of this lesson we will run the finished app, give it a screenshot of a fictional chat, and turn its suggestions into a safe copy we could share.
+
+You need Node.js 22.17 or newer, Git, about 4 GB of free disk, and an internet connection for the first run.
 
 ## 1. Get the app
 

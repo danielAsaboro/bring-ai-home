@@ -1,6 +1,7 @@
 ---
-title: "Redact"
-description: "Share a screenshot or PDF without its private details. Local OCR and a local decision model suggest what to cover; you decide; nothing leaves your machine."
+title: "Sharing a document without leaking what's in it"
+sidebarTitle: "Overview"
+description: "Every day, people send screenshots and PDFs that hold someone else's private details. The tools they reach for either leak the data or miss it."
 ---
 
 Imagine you run the front desk at a small clinic.
@@ -42,56 +43,24 @@ In January 2019, lawyers for Paul Manafort filed a court document whose black ba
   It's fast and good at spotting names.
   But the document, with everything you meant to hide, is sent to someone else's servers before anything is hidden.
   What happens to it next depends on that provider's retention and training terms, your plan, and your settings.
-  For a clinic or a law firm, that's often the end of the discussion.
 
 - **Use a PDF editor's box tool.**
   Unless it truly removes the content, the text under the box is still in the file, as the Manafort filing showed.
 
-- **Use local AI.**
-  Run the models on your own computer, so the document never leaves it.
+- **Use AI on your own computer.**
+  The document never leaves the machine.
+  Until recently, models small enough to run there weren't good enough to trust.
 
-Until recently the models small enough to do this were too weak to be useful.
-They are now good enough for this job, with limits we measure honestly: on Redact's labelled test pages, local suggestions score between 0.83 and 0.92 F1, and the app is built on the assumption that a person checks every one.
+## So here's the question
 
-## What we'll build
+What if the AI that reads your documents ran on your own machine, and the data never left it?
 
-Redact is a small web app that does the fourth option with [QVAC](https://docs.qvac.tether.io/), Tether's SDK for running AI models locally.
-Every model runs on your machine; the only network traffic is downloading the models once.
+Is local AI now good enough to find the names, addresses and account numbers for you?
 
-```mermaid
-flowchart LR
-  A[Your file] --> B[Page images]
-  B --> C[Local OCR finds the text]
-  C --> D[Laya decides which lines are sensitive]
-  D --> E[You accept or reject each one]
-  E --> F[New flattened copy]
-  F --> G[Local check: anything still readable?]
-```
+Could you keep the final say on every single one, so a wrong guess costs a click instead of a leak?
 
-1. You upload a PNG, JPEG or PDF.
-   The original is never changed.
-2. Each page becomes an image, and local OCR reads its text and where each line sits.
-3. Laya, a small decision model, answers one yes/no question per line and field: does this contain a name, an email, an account number?
-4. You accept or reject every suggestion, and can draw your own marks.
-5. Redact paints the marks into a new image (or image-only PDF), so there is no text left underneath.
-6. It reads that copy once more and tells you if anything private is still readable.
+And could you build it yourself, with tools you already know?
 
-At the end you have a working app, its source on [`course/redact-qvac`](https://github.com/danielAsaboro/bring-ai-home/tree/course/redact-qvac/redact), and an evaluation that measures its suggestions on labelled pages.
-
-**What it costs:** about 4 GB of disk (2.8 GB of dependencies, about 550 MB of models), an internet connection for the first run, and time: OCR takes 20–30 seconds per page on an Apple Silicon Mac, and the copy check about 25 seconds more.
-It doesn't claim legal-grade redaction or catch everything; [About what Redact does not protect](/docs/redact/concepts/threat-model) lists the limits.
-
-**Who it's for:** developers who know React and TypeScript and want to learn local AI by building something real.
-You don't need any machine-learning background.
-
-<CardGroup cols={2}>
-  <Card title="Use Redact" icon="play" href="/docs/redact/tutorials/00-use-redact">
-    Run the finished app on a sample document.
-  </Card>
-  <Card title="Build Redact" icon="hammer" href="/docs/redact/tutorials/01-starter">
-    Eleven lessons, from a manual app to local OCR, suggestions, review and a decision model.
-  </Card>
-</CardGroup>
-
-The **How-to guides**, **Reference** and **Concepts** tabs cover specific tasks, exact details, and the reasoning behind the design.
-Everything here uses `@qvac/sdk` 0.22.0; full requirements are in [Requirements](/docs/redact/reference/requirements).
+<Card title="Read on" icon="arrow-right" href="/docs/redact/tutorials/00-use-redact" horizontal>
+  Let's find out by building it.
+</Card>
