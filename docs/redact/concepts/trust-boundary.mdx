@@ -15,7 +15,9 @@ Putting a person between the suggestion and the output changes what an error cos
 
 ## How the boundary shows up in the code
 
-Suggestions and marks are different types. A suggestion is a `candidate` with a status of `proposed`, `accepted` or `rejected`. A mark is what the flattener paints, and it has a `source` of either `manual` or `accepted`. The only path from one to the other is `acceptCandidate`, which creates a new mark and writes an audit entry. There is no function that turns all proposals into marks at once.
+Suggestions and marks are different types. A suggestion is a `candidate` with a status of `proposed`, `accepted` or `rejected`. A mark is what the flattener paints, and it has a `source` of either `manual` or `accepted`.
+
+The only path from one to the other is `acceptCandidate`, which creates a new mark and writes an audit entry. There is no function that turns all proposals into marks at once.
 
 `finishReview` refuses to finish while any candidate is still `proposed`, so **Done** stays disabled until every suggestion has a human answer. Removing an accepted mark flips its candidate to `rejected` rather than back to `proposed`, so the record of what was decided stays honest.
 

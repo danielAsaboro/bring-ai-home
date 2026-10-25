@@ -42,7 +42,9 @@ A hosted vision API would usually be faster and more accurate. The trade is deli
 
 ## Lifecycle matters more locally
 
-A hosted API hides model loading. Locally it is your problem. The service loads each model on first use and keeps it in memory; loading is where the first-run download happens. On shutdown it calls `unloadModel` and `close` so the worker exits cleanly instead of leaving native memory behind. QVAC's [Lifecycle](https://docs.qvac.tether.io/sdk/runtime/lifecycle/) page describes these calls.
+A hosted API hides model loading. Locally it is your problem. The service loads each model on first use and keeps it in memory; loading is where the first-run download happens.
+
+On shutdown it calls `unloadModel` and `close` so the worker exits cleanly instead of leaving native memory behind. QVAC's [Lifecycle](https://docs.qvac.tether.io/sdk/runtime/lifecycle/) page describes these calls.
 
 The same thinking explains why the service, not the browser, holds the SDK. The native engines need a Node process with file system access, and keeping them behind one long-lived process means each model loads once instead of once per page.
 

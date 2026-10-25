@@ -13,7 +13,9 @@ A separate long-lived process loads each model once, keeps it warm between pages
 
 ## Why not `qvac serve`?
 
-QVAC's CLI has its own HTTP server, `qvac serve`, with an OpenAI-compatible mode ([HTTP server](https://docs.qvac.tether.io/cli/http-server/)). It would remove most of Redact's service code. Redact keeps its own for two reasons. The analysis is a pipeline, not one model call: OCR, a possible rotated retry, structured reasoning and evidence grounding, and those steps belong together in one request. And a purpose-built contract can be narrow: one PNG in, typed evidence and suggestions out, validated at both ends with the same Zod schemas. For an app that only needed chat completions, `qvac serve` would be the better choice.
+QVAC's CLI has its own HTTP server, `qvac serve`, with an OpenAI-compatible mode ([HTTP server](https://docs.qvac.tether.io/cli/http-server/)). It would remove most of Redact's service code. Redact keeps its own for two reasons.
+
+The analysis is a pipeline, not one model call: OCR, a possible rotated retry, structured reasoning and evidence grounding, and those steps belong together in one request. And a purpose-built contract can be narrow: one PNG in, typed evidence and suggestions out, validated at both ends with the same Zod schemas. For an app that only needed chat completions, `qvac serve` would be the better choice.
 
 ## A narrow boundary
 

@@ -3,7 +3,9 @@ title: "About grounded suggestions"
 description: "How Redact asks a small local model which text is sensitive without letting it invent anything."
 ---
 
-After OCR, Redact has a list of text blocks with positions. The next question is which of them are sensitive. Redact asks a local model, and then refuses to believe anything the model says that the page itself doesn't support. That second half is what "grounded" means here. Lessons 6 to 10 use a generative model, Qwen3 0.6B; from lesson 11 the default is the Laya decision model ([About decision models and generative models](/docs/redact/concepts/decision-models)). The grounding below applies to both.
+After OCR, Redact has a list of text blocks with positions. The next question is which of them are sensitive. Redact asks a local model, and then refuses to believe anything the model says that the page itself doesn't support. That second half is what "grounded" means here.
+
+Lessons 6 to 10 use a generative model, Qwen3 0.6B; from lesson 11 the default is the Laya decision model ([About decision models and generative models](/docs/redact/concepts/decision-models)). The grounding below applies to both.
 
 ## The model chooses blocks, not text
 
@@ -19,7 +21,9 @@ Shape isn't truth, so three more checks follow. The reply is parsed with Zod. If
 
 ## Rules get the last word on labels
 
-`validateCandidateForEvidence` re-derives the label from the block's text with plain rules: an `@` makes it an email, "account" plus digits makes it an account, a house number plus "Road" makes it an address, and so on. For most labels the model's choice is simply replaced by what the rule finds. A model `name` is kept only if the text looks like two to four capitalised words. Anything no rule supports is dropped, except the explicit `other` label. The test document's disclaimer lines are always dropped. The model's free-text explanation is replaced by a fixed sentence per label, so a reviewer never reads invented reasoning.
+`validateCandidateForEvidence` re-derives the label from the block's text with plain rules: an `@` makes it an email, "account" plus digits makes it an account, a house number plus "Road" makes it an address, and so on. For most labels the model's choice is simply replaced by what the rule finds.
+
+A model `name` is kept only if the text looks like two to four capitalised words. Anything no rule supports is dropped, except the explicit `other` label. The test document's disclaimer lines are always dropped. The model's free-text explanation is replaced by a fixed sentence per label, so a reviewer never reads invented reasoning.
 
 This is a strong position: the model mostly decides *which blocks deserve attention*, and deterministic code decides *what kind of thing they are*. It keeps a 0.6B model useful. The cost is reach: a sensitive value no rule recognises, such as a name in lowercase, is dropped even if the model was right. That is the trade Redact makes, because a wrong label shown with confidence misleads a reviewer more than a missing one.
 
