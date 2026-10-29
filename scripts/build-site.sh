@@ -14,7 +14,7 @@ mint export --output "$tmp/export.zip"
 mkdir -p "$out"
 unzip -q -o "$tmp/export.zip" -d "$out"
 rm -rf "$out/Start Docs.bat" "$out/Start Docs.command" "$out/serve.js" "$out/.gitignore" "$out/landing" "$out/scripts"
-cp landing/index.html landing/vercel.json "$out/"
+cp landing/index.html landing/vercel.json landing/og.png "$out/"
 # mint export leaves out .json downloads such as manifest.json.
 if [ -d docs/downloads ]; then
   rsync -a --include='*/' --include='*.json' --exclude='*' docs/downloads/ "$out/docs/downloads/"
