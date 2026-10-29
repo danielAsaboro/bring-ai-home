@@ -1,0 +1,77 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm install --no-save --no-package-lock mint@4.2.618",
+  "buildCommand": "bash scripts/build-site.sh dist",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/docs",
+      "destination": "/docs/index"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/docs/redact/tutorials/11-laya-decisions",
+      "destination": "/docs/redact/tutorials/11-copy-check",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/how-to/use-a-larger-model",
+      "destination": "/docs/redact/how-to/ask-laya-questions",
+      "permanent": true
+    },
+    {
+      "source": "/docs/qvac/structured-output",
+      "destination": "/docs/redact/concepts/decision-models",
+      "permanent": true
+    },
+    {
+      "source": "/docs/downloads/redact/:file*",
+      "destination": "/docs/redact/reference/checkpoints",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/:lesson(01-starter|02-first-ocr|03-local-service|04-connect-ocr|08-failure-recovery|09-evaluation)",
+      "destination": "/docs/redact/tutorials/:lesson",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/05-coordinate-mapping",
+      "destination": "/docs/redact/tutorials/05-coordinates",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/06-sensitive-suggestions",
+      "destination": "/docs/redact/tutorials/06-suggestions",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/07-human-review",
+      "destination": "/docs/redact/tutorials/07-review",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/10-offline-proof",
+      "destination": "/docs/redact/tutorials/10-offline",
+      "permanent": true
+    },
+    {
+      "source": "/docs/redact/troubleshooting",
+      "destination": "/docs/redact/how-to/troubleshooting",
+      "permanent": true
+    },
+    {
+      "source": "/:section(redact|replay|chronicle|ledger|circle|homebook|pattern|closet|lookout|deck|leash|start-here|downloads)/:path*",
+      "destination": "/docs/:section/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:page(apps|local-ai|development)",
+      "destination": "/docs/:page",
+      "permanent": true
+    }
+  ]
+}

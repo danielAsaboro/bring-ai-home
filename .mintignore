@@ -6,3 +6,4 @@ plans/
 apps/
 internal/
 private/
+node_modules/
