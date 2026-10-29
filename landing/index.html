@@ -66,19 +66,43 @@ h2 { font-size: clamp(34px, 5vw, 60px); max-width: 15ch; }
 section { padding: 120px 0; }
 
 /* Header */
-header { position: sticky; top: 0; z-index: 60; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: background .35s; }
-header .logo-d { display: none; }
-@media (prefers-color-scheme: dark) { header .logo-l { display: none; } header .logo-d { display: block; } }
-header.dark { background: color-mix(in srgb, var(--night) 86%, transparent); }
-header.dark .logo-l { display: none; }
-header.dark .logo-d { display: block; }
-header.dark nav a { color: #A8A397; }
-header.dark nav a:hover { color: var(--white); }
-header .wrap { display: flex; align-items: center; justify-content: space-between; height: 72px; }
-header img { height: 30px; width: auto; }
-header nav { display: flex; gap: 28px; font-size: 15px; font-weight: 500; }
-header nav a { color: var(--muted); transition: color .15s; }
-header nav a:hover { color: var(--text); }
+/* Top bar: a floating glass island that follows the page */
+header { position: sticky; top: 0; z-index: 60; display: flex; justify-content: center; padding: 14px 16px 10px; pointer-events: none; }
+.island { --mx: 50%; --my: 0%; position: relative; pointer-events: auto; display: flex; align-items: center; height: 54px; padding: 0 7px 0 20px; border-radius: 999px; isolation: isolate;
+  background: linear-gradient(180deg, rgba(255,255,255,.48), rgba(255,255,255,.18));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.95), inset 0 -1px 1px rgba(255,255,255,.4), inset 0 0 0 1px rgba(255,255,255,.45), 0 0 0 .5px rgba(10,10,10,.08), 0 14px 34px -14px rgba(10,10,10,.32), 0 2px 6px rgba(10,10,10,.06);
+  -webkit-backdrop-filter: blur(14px) saturate(190%); backdrop-filter: blur(14px) saturate(190%);
+  transition: background .45s, box-shadow .45s, transform .5s cubic-bezier(.3,1.5,.5,1); }
+.island.refract { backdrop-filter: url(#liquid) blur(10px) saturate(190%); }
+.island::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: radial-gradient(160px 70px at var(--mx) var(--my), rgba(255,255,255,.75), transparent 70%); opacity: .55; mix-blend-mode: soft-light; transition: opacity .3s; pointer-events: none; }
+.island::after { content: ""; position: absolute; left: 14%; right: 14%; top: 1px; height: 45%; z-index: -1; border-radius: 999px 999px 40% 40%; background: linear-gradient(rgba(255,255,255,.55), transparent); opacity: .5; pointer-events: none; }
+.island:hover::before { opacity: .9; }
+.island:active { transform: scale(.985); }
+.island .logo-d { display: none; }
+.island img { height: 28px; width: auto; display: block; }
+.fold { display: grid; grid-template-columns: 0fr; transition: grid-template-columns .55s cubic-bezier(.3,1.25,.4,1), opacity .35s; opacity: 0; }
+.fold > div { overflow: hidden; display: flex; align-items: center; min-width: 0; }
+.fold.open { grid-template-columns: 1fr; opacity: 1; }
+.now-chip { display: flex; align-items: center; gap: 8px; margin-left: 16px; padding: 7px 12px; border-radius: 999px; background: rgba(10,10,10,.06); font: 500 12px/1 var(--mono); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; color: var(--text); }
+.now-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px rgba(252,65,44,.2); animation: pulse 1.6s infinite; }
+.now-chip span { display: inline-block; animation: swap .4s cubic-bezier(.2,.7,.2,1) both; }
+.island nav { display: flex; gap: 2px; margin-left: 18px; font-size: 15px; font-weight: 500; white-space: nowrap; }
+.island nav a { padding: 9px 14px; border-radius: 999px; color: var(--muted); transition: color .15s, background .2s; }
+.island nav a:hover { color: var(--text); background: rgba(255,255,255,.6); }
+.island nav a.on { color: var(--text); background: rgba(255,255,255,.55); box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
+@media (prefers-color-scheme: dark) {
+  .island:not(.light) .logo-l { display: none; }
+  .island:not(.light) .logo-d { display: block; }
+}
+@media (prefers-color-scheme: dark) { .island { background: linear-gradient(180deg, rgba(48,47,44,.62), rgba(24,24,22,.42)); box-shadow: inset 0 1px 1px rgba(255,255,255,.22), inset 0 -1px 1px rgba(255,255,255,.06), inset 0 0 0 1px rgba(255,255,255,.1), 0 14px 34px -14px rgba(0,0,0,.7); } .island::before { opacity: .25; } .island::after { opacity: .12; } .now-chip { background: rgba(255,255,255,.08); } .island nav a:hover, .island nav a.on { background: rgba(255,255,255,.1); box-shadow: none; } }
+.island.dark { background: linear-gradient(180deg, rgba(48,47,44,.62), rgba(24,24,22,.42)); box-shadow: inset 0 1px 1px rgba(255,255,255,.22), inset 0 -1px 1px rgba(255,255,255,.06), inset 0 0 0 1px rgba(255,255,255,.1), 0 14px 34px -14px rgba(0,0,0,.7); }
+.island.dark .logo-l { display: none; }
+.island.dark .logo-d { display: block; }
+.island.dark::before { opacity: .25; }
+.island.dark::after { opacity: .12; }
+.island.dark nav a { color: #A8A397; }
+.island.dark nav a:hover, .island.dark nav a.on { color: var(--white); background: rgba(255,255,255,.1); box-shadow: none; }
+.island.dark .now-chip { background: rgba(255,255,255,.08); color: var(--white); }
 
 /* Buttons */
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
@@ -458,6 +482,9 @@ footer a:hover { color: var(--white); }
   section { padding: 88px 0; }
   .wrap { padding: 0 16px; }
   header nav .hide-sm { display: none; }
+  .island { padding-left: 16px; }
+  .island img { height: 24px; }
+  .now-chip { margin-left: 10px; font-size: 11px; }
   .actions .btn { flex: 1 1 100%; }
   .lane { padding: 20px; }
   .pit { height: 270px; }
@@ -485,17 +512,27 @@ footer a:hover { color: var(--white); }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="liquid" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.012 0.03" numOctaves="2" seed="4" result="noise"/>
+    <feGaussianBlur in="noise" stdDeviation="2" result="soft"/>
+    <feDisplacementMap in="SourceGraphic" in2="soft" scale="26" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
 <header>
-  <div class="wrap">
+  <div class="island" id="island">
     <a href="/" aria-label="Bring AI Home home">
-      <img class="logo-l" src="/logo/light.svg" alt="Bring AI Home" width="115" height="30"><img class="logo-d" src="/logo/dark.svg" alt="Bring AI Home" width="115" height="30">
+      <img class="logo-l" src="/logo/light.svg" alt="Bring AI Home" width="107" height="28"><img class="logo-d" src="/logo/dark.svg" alt="Bring AI Home" width="107" height="28">
     </a>
-    <nav>
-      <a class="hide-sm" href="#lessons">Lessons</a>
-      <a class="hide-sm" href="#house">Projects</a>
-      <a href="/docs">Docs</a>
-      <a href="https://github.com/danielAsaboro/bring-ai-home">GitHub</a>
-    </nav>
+    <div class="fold" id="nowFold"><div><span class="now-chip" aria-live="polite"><i></i><span id="nowText"></span></span></div></div>
+    <div class="fold open" id="navFold"><div>
+      <nav>
+        <a class="hide-sm" href="#lessons" data-sec="lessons">Lessons</a>
+        <a class="hide-sm" href="#house" data-sec="house">Projects</a>
+        <a href="/docs">Docs</a>
+        <a href="https://github.com/danielAsaboro/bring-ai-home">GitHub</a>
+      </nav>
+    </div></div>
   </div>
 </header>
 
@@ -938,16 +975,46 @@ footer a:hover { color: var(--white); }
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const wide = () => innerWidth > 980;
 
-// The top bar turns dark while it sits over a dark section.
+// The island: turns dark over dark sections, names the section you're in,
+// and folds its links away while you scroll down.
 (() => {
-  const bar = document.querySelector('header');
+  const isl = document.getElementById('island');
+  const nowFold = document.getElementById('nowFold');
+  const navFold = document.getElementById('navFold');
+  const nowText = document.getElementById('nowText');
+  const links = [...isl.querySelectorAll('nav a[data-sec]')];
   const darks = [...document.querySelectorAll('.rule, footer')];
-  const check = () => {
-    const y = bar.offsetHeight / 2;
-    bar.classList.toggle('dark', darks.some((el) => { const r = el.getBoundingClientRect(); return r.top <= y && r.bottom >= y; }));
+  const names = { why: 'The problem', method: 'How a lesson goes', lessons: 'Lessons', house: 'Ten projects', rule: 'One rule' };
+  const secs = Object.keys(names).map((id) => document.getElementById(id));
+  if (/Chrome\//.test(navigator.userAgent) && !/Edg\//.test(navigator.userAgent)) isl.classList.add('refract');
+
+  let lastY = scrollY, label = '';
+  const update = () => {
+    const y = isl.getBoundingClientRect().bottom - 27;
+    isl.classList.toggle('dark', darks.some((el) => { const r = el.getBoundingClientRect(); return r.top <= y && r.bottom >= y; }));
+    const mid = innerHeight * 0.4;
+    const sec = secs.find((el) => { const r = el.getBoundingClientRect(); return r.top <= mid && r.bottom > mid; });
+    let text = sec ? names[sec.id] : '';
+    if (sec && sec.id === 'lessons') { const k = document.querySelector('#now small'); if (k) text = k.textContent; }
+    if (text !== label) {
+      label = text;
+      if (text) { nowText.textContent = text; nowText.style.animation = 'none'; void nowText.offsetWidth; nowText.style.animation = ''; }
+    }
+    nowFold.classList.toggle('open', !!text);
+    links.forEach((a) => a.classList.toggle('on', !!sec && a.dataset.sec === sec.id));
+    const down = scrollY > lastY + 4, up = scrollY < lastY - 4;
+    if (down && scrollY > 300) navFold.classList.remove('open');
+    if (up || scrollY < 300) navFold.classList.add('open');
+    lastY = scrollY;
   };
-  addEventListener('scroll', check, { passive: true });
-  check();
+  addEventListener('scroll', () => requestAnimationFrame(update), { passive: true });
+  isl.addEventListener('mouseenter', () => navFold.classList.add('open'));
+  isl.addEventListener('pointermove', (e) => {
+    const r = isl.getBoundingClientRect();
+    isl.style.setProperty('--mx', `${e.clientX - r.left}px`);
+    isl.style.setProperty('--my', `${e.clientY - r.top}px`);
+  });
+  update();
 })();
 
 // Reveal on scroll, and start each scene only while it is on screen.
